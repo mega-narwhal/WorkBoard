@@ -383,7 +383,24 @@ def main():
     ap.add_argument("--profile", default="software",
                     choices=["software", "marketing", "research", "product", "operations"],
                     help="Tag taxonomy profile for bootstrap (default: software)")
+    ap.add_argument("--install-hooks", action="store_true",
+                    help="Wire UserPromptSubmit hook into Claude Code settings.json, then exit")
+    ap.add_argument("--uninstall-hooks", action="store_true",
+                    help="Remove the UserPromptSubmit hook, then exit")
+    ap.add_argument("--hooks-status", action="store_true",
+                    help="Report hook install state, then exit")
     args = ap.parse_args()
+
+    if args.install_hooks or args.uninstall_hooks or args.hooks_status:
+        import subprocess
+        installer = Path(__file__).resolve().parent / "install_hooks.py"
+        flag = (
+            "--status" if args.hooks_status
+            else "--uninstall" if args.uninstall_hooks
+            else ""
+        )
+        cmd = [sys.executable, str(installer)] + ([flag] if flag else [])
+        sys.exit(subprocess.run(cmd).returncode)
 
     if args.board:
         board_dir = args.board.resolve().parent
@@ -398,6 +415,24 @@ def main():
                 board_dir = start / "board"
                 bootstrap_board(board_dir, profile=args.profile)
                 print(f"bootstrapped new board at {board_dir} (profile={args.profile})", file=sys.stderr)
+                # Nudge first-time installers toward wiring the hook so the
+                # board doesn't silently drift during long active-coding
+                # sessions (root cause of card #84).
+                _installer = Path(__file__).resolve().parent / "install_hooks.py"
+                if _installer.exists():
+                    import subprocess
+                    rc = subprocess.run(
+                        [sys.executable, str(_installer), "--status"],
+                        capture_output=True, text=True,
+                    ).returncode
+                    if rc != 0:
+                        print(
+                            "\n💡 RECOMMENDED next step:\n"
+                            f"   {sys.executable} {_installer}\n"
+                            "   (wires a UserPromptSubmit hook so Claude updates the board automatically;\n"
+                            "    one-time, idempotent, run `--uninstall-hooks` to reverse)\n",
+                            file=sys.stderr,
+                        )
             else:
                 print(
                     f"error: no board/board.json found at or above {start}\n"

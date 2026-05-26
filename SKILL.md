@@ -225,44 +225,32 @@ All stdlib-only, project-agnostic, idempotent. `serve.py` walks up from `--proje
 
 ---
 
-## Optional hooks (true real-time feel)
+## Hook install (required, one-time, idempotent)
 
-The skill cannot self-invoke (subagents are invocation-based, not daemons). The closest you get to "always-on" is a hook in `~/.claude/settings.json`. **Opt-in** — these add 1-2s per turn.
+Without a hook, the board silently drifts during long active-coding sessions: Claude forgets to invoke the Steward mid-flow, and the user has to ask "did you update the board?" — which is the failure mode this entire skill exists to prevent (see card #84).
 
-### Recommended: UserPromptSubmit hook on trigger keywords
+The fix ships in the skill. On first install:
 
-Scans the user's prompt for the §C trigger keywords. If matched, emits a nudge to stderr — main Claude sees it as a system reminder and invokes the Steward.
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "grep -qiE 'shipped|deployed|merged|verified|^done|works now|fixed|landed' <<< \"$CLAUDE_USER_PROMPT\" && echo 'BOARD_STEWARD_TRIGGER: shipped/deploy keyword detected — invoke board-steward skill to update the card' >&2 || true"
-      }]
-    }]
-  }
-}
+```bash
+python scripts/install_hooks.py        # idempotent; safe to re-run
+python scripts/install_hooks.py --status   # verify
+python scripts/install_hooks.py --uninstall   # reverse
 ```
 
-### Alternative: Stop hook on every turn (truly continuous)
+This wires a `UserPromptSubmit` hook into `~/.claude/settings.json` (path honors `$CLAUDE_CONFIG_DIR`). On every new user message, the hook runs `scripts/hook_user_prompt.sh`, which:
 
-Fires after every Claude response. Lightest possible nudge — main Claude decides whether to act.
+1. Walks up from CWD looking for `board/board.json` — **stays silent for non-board projects** so there's no leakage into unrelated work.
+2. If found, injects a `<board-steward-protocol>` block into Claude's context with: the protocol rule (run `card.py` if prior turn shipped anything), the board path, and the rev of the live server (if reachable).
+3. Exits 0 always — non-blocking. Cost <50ms.
 
-```json
-{
-  "hooks": {
-    "Stop": [{
-      "matcher": "",
-      "hooks": [{ "type": "command", "command": "echo 'BOARD_STEWARD_TICK' >&2" }]
-    }]
-  }
-}
-```
+`serve.py --bootstrap` will print the recommended install command if the hook isn't already wired, so the prompt-to-install is visible the moment a user first creates a board.
 
-The trigger-based discipline (no hook) is the default. The hooks are upgrades for users who want continuous tracking.
+The installer is **safe**:
+- Auto-backs up `settings.json` to `.bak-<ts>` before any write
+- Refuses to touch malformed JSON
+- Resolves the hook script path via `__file__` — no hardcoded `/Users/*`, works for any install location
+- Detects existing entries by command-path match — re-running is a no-op
+- Preserves all other settings (`enabledPlugins`, `effortLevel`, etc.) unchanged
 
 ---
 

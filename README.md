@@ -14,6 +14,7 @@ Originally built as the `board-steward` Claude Code skill; this repo is the cano
   - `archive_done.py` — sweeps Done cards older than 14d into monthly archives
   - `discover.py` — mines `~/.claude/projects/*/sessions/*.jsonl` to bootstrap a board from prior chat history
   - `log_event.py` / `report.py` — Steward self-telemetry
+  - `install_hooks.py` / `hook_user_prompt.sh` — wires a Claude Code UserPromptSubmit hook that keeps Claude honest about updating the board mid-flow
 - `templates/`
   - `board.html` — the kanban UI (single-file, vanilla JS)
   - `board.json` — empty-board starter (4 default columns: Ideas / Backlog / In Progress / Done)
@@ -24,10 +25,16 @@ Originally built as the `board-steward` Claude Code skill; this repo is the cano
 ```bash
 cd <your-project>
 python ~/Desktop/WorkBoard/scripts/serve.py --bootstrap
-# opens board/ with starter board.json + serves at http://127.0.0.1:7891
+# creates board/ with a starter board.json + serves at http://127.0.0.1:7891
+
+# REQUIRED — wire the UserPromptSubmit hook so Claude updates the board
+# automatically as work ships. One-time, idempotent, safe to re-run.
+python ~/Desktop/WorkBoard/scripts/install_hooks.py
 ```
 
 Then either point Claude at the board (it'll invoke the skill) or open the URL in any browser.
+
+Without the hook, the board silently drifts during long active-coding sessions — Claude forgets to invoke the skill mid-flow, and the user has to ask "did you update the board?" That question is the failure mode this skill exists to prevent.
 
 ## Why this exists
 
