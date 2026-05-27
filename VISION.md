@@ -113,18 +113,32 @@ The user did not type a single thing into the kanban. They glanced at it once an
 
 These are durable, project-level instructions. Claude follows them on every turn while working in this repo or anything under `~/Desktop/`.
 
+### 🚨 RULE 0 — MANDATORY SESSION STARTUP (do this BEFORE anything else)
+
+**On the very first turn of every session, before responding to the user's request, before any tool call other than Read, before acknowledging anything — read BOTH files:**
+
+```
+~/Desktop/conversation_history/conversation_raw_YYMMDD.md   ← TODAY  (local date)
+~/Desktop/conversation_history/conversation_raw_YYMMDD.md   ← YESTERDAY (local date − 1)
+```
+
+Where `YYMMDD` is the local date (e.g. `260527` = 2026-05-27, `260526` = yesterday).
+
+Rules for this step:
+
+- **Not optional.** Do it even if the user's first message looks trivial ("hi", "thanks", "ok"). Skipping is the #1 cause of "we already discussed this" drift.
+- **Not announced.** Do not ask "want me to read the history first?" — just read.
+- **Not summarised away.** Read the raw files. Do not rely on MEMORY.md / digests / carry-forward bullets as a substitute — those are lossy.
+- **Both files.** If today's file doesn't exist yet (first session of the day), read yesterday's + the day before. Never read just one.
+- **Then proceed.** Acknowledge what you saw in one line ("Read. Today = X sessions, last shipped Y. Yesterday = Z."), then answer the user's actual request.
+
+If you find yourself responding to a substantive prompt without having read these two files this session — **stop, read them, then continue.**
+
+### Other rules
+
 1. **Commit on every turn.** After any meaningful change (code, docs, plan, card movement that touches files), make an atomic commit. Don't batch. Push if a remote is configured. If a turn produced no file changes, no commit — but explicitly say so. User's standing rule from `feedback_commit_each_change`: "make it reflexive."
 
-2. **Read today's + yesterday's conversation history before acting.** At session start, before responding to anything substantive:
-
-   ```
-   ~/Desktop/conversation_history/conversation_raw_YYMMDD.md   (today)
-   ~/Desktop/conversation_history/conversation_raw_YYMMDD.md   (yesterday)
-   ```
-
-   Where `YYMMDD` is the local date (e.g. `260527` for 2026-05-27). These hold the full raw transcript of recent sessions — they are the canonical context for what was shipped, what was decided, and what's still open. Skipping this is what causes "we already discussed this" drift.
-
-3. **Dump full raw conversation at session end.** Append to today's file in the same dir. Format per `~/Desktop/conversation_history/instructions.md`. Never summarize; never overwrite.
+2. **Dump full raw conversation at session end.** Append to today's file in the same dir. Format per `~/Desktop/conversation_history/instructions.md`. Never summarize; never overwrite.
 
 ## Shorthand aliases (user vocab)
 
