@@ -258,6 +258,10 @@ The fix ships in the skill. On first install:
 python scripts/install_hooks.py        # idempotent; safe to re-run
 python scripts/install_hooks.py --status   # verify
 python scripts/install_hooks.py --uninstall   # reverse
+
+# After install, verify the whole stack (launchd + server + hook installed + hook fired):
+python scripts/health_check.py            # green/red dashboard; exit 0 = all good
+python scripts/health_check.py --json     # machine-readable
 ```
 
 This wires a `UserPromptSubmit` hook into `~/.claude/settings.json` (path honors `$CLAUDE_CONFIG_DIR`). On every new user message, the hook runs `scripts/hook_user_prompt.sh`, which:

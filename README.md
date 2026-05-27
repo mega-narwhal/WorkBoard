@@ -14,7 +14,9 @@ Originally built as the `board-steward` Claude Code skill; this repo is the cano
   - `archive_done.py` — sweeps Done cards older than 14d into monthly archives
   - `discover.py` — mines `~/.claude/projects/*/sessions/*.jsonl` to bootstrap a board from prior chat history
   - `log_event.py` / `report.py` — Steward self-telemetry
-  - `install_hooks.py` / `hook_user_prompt.sh` — wires a Claude Code UserPromptSubmit hook that keeps Claude honest about updating the board mid-flow
+  - `install_hooks.py` / `hook_session_start.sh` — wires a Claude Code SessionStart hook that injects a board digest once per session
+  - `install_launchd.py` — registers the server as a launchd job so it auto-starts at login (macOS)
+  - `health_check.py` — green/red dashboard verifying launchd + server + hook installed + hook fired
 - `templates/`
   - `board.html` — the kanban UI (single-file, vanilla JS)
   - `board.json` — empty-board starter (4 default columns: Ideas / Backlog / In Progress / Done)
@@ -27,14 +29,33 @@ cd <your-project>
 python ~/Desktop/WorkBoard/scripts/serve.py --bootstrap
 # creates board/ with a starter board.json + serves at http://127.0.0.1:7891
 
-# REQUIRED — wire the UserPromptSubmit hook so Claude updates the board
-# automatically as work ships. One-time, idempotent, safe to re-run.
+# REQUIRED — wire the SessionStart hook so Claude sees the board digest
+# at the top of every new session. One-time, idempotent, safe to re-run.
 python ~/Desktop/WorkBoard/scripts/install_hooks.py
+
+# RECOMMENDED — register the server with launchd so it auto-starts at login
+# (macOS). Run once per project. Pick a unique port per project (default 7891).
+python ~/Desktop/WorkBoard/scripts/install_launchd.py --project $(pwd) --port 7891
 ```
 
 Then either point Claude at the board (it'll invoke the skill) or open the URL in any browser.
 
 Without the hook, the board silently drifts during long active-coding sessions — Claude forgets to invoke the skill mid-flow, and the user has to ask "did you update the board?" That question is the failure mode this skill exists to prevent.
+
+## Verify the install
+
+```bash
+python ~/Desktop/WorkBoard/scripts/health_check.py
+```
+
+Prints a green/red dashboard checking, for every registered port:
+
+- launchd has a live PID (server auto-starts at login)
+- `/health` responds with rev + card count
+- `SessionStart` hook is installed in `~/.claude/settings.json`
+- Hook actually fired in the most recent Claude session (greps the session jsonl for the injection marker)
+
+Exit code 0 only when all four pass. Add `--json` for machine-readable output.
 
 ## Why this exists
 
