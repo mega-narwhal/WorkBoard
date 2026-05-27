@@ -1155,6 +1155,7 @@ let _cardDragRects = null;     // cardId → DOMRect at last reflow (for FLIP)
 let _colDragSrcId = null;
 let _colDragSnapshot = null;
 let _colDragCommitted = false;
+let _colLastPreviewTargetId = null;  // #119 — idempotence guard for dragover thrash
 
 // #119 — visible drag HUD. Prints every drag/mouse event as a green-on-black
 // overlay so events are visible regardless of console filters.
@@ -1352,6 +1353,10 @@ function previewReorderColumn(srcId, targetId) {
   // always swap relative to the dragstart snapshot, so crossing intermediate
   // columns doesn't accumulate displacements.
   if (!state || srcId === targetId || !_colDragSnapshot) return;
+  // Idempotence: dragover fires ~every frame while cursor is over a column.
+  // If we already previewed this target, bail — otherwise we re-render + FLIP
+  // every frame, animations stack, and adjacent columns visibly vibrate.
+  if (_colLastPreviewTargetId === targetId) return;
   const snap = _colDragSnapshot;
   const si = snap.findIndex(c => c.id === srcId);
   const ti = snap.findIndex(c => c.id === targetId);
@@ -1361,6 +1366,7 @@ function previewReorderColumn(srcId, targetId) {
   if (next[si].stackUnder) next[si].stackUnder = null;  // free from stack on horizontal drag
   [next[si], next[ti]] = [next[ti], next[si]];
   state.columns = next;
+  _colLastPreviewTargetId = targetId;
   render();
   requestAnimationFrame(() => flipPlayColumns(old));
 }
@@ -3205,6 +3211,7 @@ function renderColumn(col, cards) {
     _colDragSrcId = col.id;
     _colDragSnapshot = JSON.parse(JSON.stringify(state.columns));
     _colDragCommitted = false;
+    _colLastPreviewTargetId = null;
     // #119 correction — hide the source column's footprint so it doesn't
     // sit "in the background" while being dragged. setTimeout(0) so the
     // browser captures the drag image synchronously before visibility flips.
@@ -3231,6 +3238,7 @@ function renderColumn(col, cards) {
     _colDragSrcId = null;
     _colDragSnapshot = null;
     _colDragCommitted = false;
+    _colLastPreviewTargetId = null;
     if (!wasCommitted && snap) {
       dbg('col dragend — revert to snapshot');
       const old = captureColumnRects();
