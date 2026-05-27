@@ -3352,27 +3352,42 @@ function renderColumn(col, cards) {
       c.classList.remove('col-drop-stack-target');
     });
     _colDragRects = null;
-    // #119 correction — clear _colDragSrcId BEFORE the revert-render so the
-    // re-render in renderColumn doesn't re-hide A. Also clear visibility on
-    // the current source element in the committed (no-render) path.
+    // #119 correction — clear _colDragSrcId BEFORE any revert-render so the
+    // re-render in renderColumn doesn't re-hide A. Capture locals first
+    // because some branches below need the snapshot / last-preview target.
     const wasCommitted = _colDragCommitted;
     const snap = _colDragSnapshot;
+    const lastPreviewId = _colLastPreviewTargetId;
     _colDragSrcId = null;
     _colDragSnapshot = null;
     _colDragCommitted = false;
     _colLastPreviewTargetId = null;
-    if (!wasCommitted && snap) {
+    if (wasCommitted) {
+      dbg('col dragend (committed via drop)');
+      el.style.opacity = '';
+      document.querySelectorAll('.column').forEach(c => { c.style.opacity = ''; });
+    } else if (lastPreviewId && snap) {
+      // Fast drag — drop never fired (user released over a gap, or in the
+      // span between dragover events). The preview already moved the column
+      // to a valid slot; treat that as the user's intent and commit.
+      dbg('col dragend — commit at last preview ' + lastPreviewId);
+      _undoStack.push(JSON.stringify({
+        title: state.title || '',
+        columns: snap,
+        cards: state.cards || [],
+      }));
+      if (_undoStack.length > _UNDO_CAP) _undoStack.shift();
+      _redoStack.length = 0;
+      scheduleSave();
+      el.style.opacity = '';
+      document.querySelectorAll('.column').forEach(c => { c.style.opacity = ''; });
+    } else if (snap) {
+      // Pure cancel — drag never crossed into another column. Revert.
       dbg('col dragend — revert to snapshot');
       const old = captureColumnRects();
       state.columns = snap;
       render();
       requestAnimationFrame(() => flipPlayColumns(old));
-    } else {
-      dbg('col dragend (committed)');
-      // Source DOM element survives a committed drop; restore opacity.
-      el.style.opacity = '';
-      // Defensive: clear any stray hidden state on other columns.
-      document.querySelectorAll('.column').forEach(c => { c.style.opacity = ''; });
     }
   });
   // Reorder on drop onto another column's edge. #117: if drop lands in the
