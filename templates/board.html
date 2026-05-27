@@ -2744,8 +2744,6 @@ function render() {
     if (card) renderModal(card);
     else { _openCardId = null; closeModal(); }
   }
-
-  refreshActiveWork();
 }
 
 // ===== Tag colour + taxonomy lookup =====
@@ -3660,21 +3658,21 @@ function refreshColumnCount(colId) {
   if (ct && state) ct.textContent = state.cards.filter(c => c.column === colId).length;
 }
 
-// #164 v3 — pulse the ONE card you're actively working on. Among all cards
-// currently in In Progress, the most-recently-touched one wins the .active-work
-// class. When that card leaves In Progress, the next-most-recent takes over;
-// when In Progress is empty, no card pulses. Called from render() + every
-// card-lifecycle hook so the pulse always tracks the active work.
-function refreshActiveWork() {
-  if (!state) return;
-  document.querySelectorAll('.card.active-work').forEach(c =>
-    c.classList.remove('active-work'));
-  const inProgress = state.cards.filter(c => c.column === 'inprogress');
-  if (!inProgress.length) return;
-  const active = inProgress.reduce((a, b) =>
-    (b.updatedAt || b.createdAt || '') > (a.updatedAt || a.createdAt || '') ? b : a);
-  const el = findCardEl(active.id);
-  if (el) el.classList.add('active-work');
+// #164 v4 — pulse follows LIVE TRANSITIONS into In Progress, not derived
+// state. Stale cards sitting in In Progress (from prior sessions, or before
+// page load) stay quiet. Only when Claude/the user moves a card INTO In
+// Progress during this session does the pulse light up. Moving it out
+// (or any other card moving in) drops the class. Page load = silent.
+function applyActiveWorkTransition(cardId, fromCol, toCol) {
+  if (toCol === 'inprogress' && fromCol !== 'inprogress') {
+    document.querySelectorAll('.card.active-work').forEach(c =>
+      c.classList.remove('active-work'));
+    const el = findCardEl(cardId);
+    if (el) el.classList.add('active-work');
+  } else if (fromCol === 'inprogress' && toCol !== 'inprogress') {
+    const el = findCardEl(cardId);
+    if (el) el.classList.remove('active-work');
+  }
 }
 
 function handleCardAdded({ card }) {
@@ -3697,7 +3695,9 @@ function handleCardAdded({ card }) {
   body.appendChild(el);
   el.addEventListener('animationend', () => el.classList.remove('popping-in'), { once: true });
   refreshColumnCount(card.column);
-  refreshActiveWork();
+  // If a brand-new card is born directly into In Progress, treat it as
+  // a transition from "nothing" → inprogress.
+  applyActiveWorkTransition(card.id, null, card.column);
 }
 
 // Replays the user-drag visual sequence for a CLI/SSE-driven cross-column
@@ -3782,7 +3782,9 @@ function simulateUserDragMove(card, fromColumn, toColumn, oldEl) {
       try { ghost.remove(); } catch (_) {}
       if (srcColEl) srcColEl.classList.remove('card-src-col');
       try { anim.cancel(); } catch (_) {}
-      refreshActiveWork();   // pulse follows the active card to its new col
+      // Pulse follows live transitions. Card moved INTO In Progress → pulse;
+      // OUT OF In Progress → pulse stops. Old stuck cards stay quiet.
+      applyActiveWorkTransition(card.id, fromColumn, toColumn);
     };
     anim.addEventListener('finish', land, { once: true });
     anim.addEventListener('cancel', land, { once: true });
