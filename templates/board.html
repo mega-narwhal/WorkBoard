@@ -3683,7 +3683,12 @@ function simulateUserDragMove(card, fromColumn, toColumn, oldEl) {
     oldEl.remove();
     const newEl = renderCardCompact(card);
     newEl.style.visibility = 'hidden';   // revealed when ghost lands
-    dstBody.appendChild(newEl);
+    // Land on TOP. For Done, the first child is the TODAY day-header — we
+    // skip it so the card lands UNDER today's header (still the visual top
+    // of the column). For other cols, no headers exist so this is just
+    // "first card" = top.
+    const firstCard = dstBody.querySelector('.card');
+    dstBody.insertBefore(newEl, firstCard || null);
 
     // FLIP siblings only — destination cards slide aside to open the slot,
     // source cards slide up to close the gap.
