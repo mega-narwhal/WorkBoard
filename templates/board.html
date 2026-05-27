@@ -121,12 +121,6 @@
            padding-top: 0; padding-bottom: 0; margin-bottom: 0; border-width: 0; }
   }
   .card.removing { animation: card-shrink-out 240ms ease-in both; pointer-events: none; overflow: hidden; }
-  /* #119 — live make-room. While a card is being dragged, hovering over
-     another card pushes that card down so the user sees where the dropped
-     card will land (iPhone home-screen rearrange feel). Overshoot easing
-     mirrors card-pop-in. Cleanup on dragend (see makeCard JS). */
-  .card.shift-down { transform: translateY(46px); transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1); }
-  .card.dragging   { opacity: 0.5; }
   /* v4: column slide-in from the right when a new column is added.
      Slower + non-overshoot so it feels "established" vs cards which "pop". */
   @keyframes column-slide-in {
@@ -1645,26 +1639,7 @@ function renderCardCompact(card) {
     e.dataTransfer.effectAllowed = 'move';
     el.classList.add('dragging');
   });
-  el.addEventListener('dragend', () => {
-    el.classList.remove('dragging');
-    // #119 — clear any live make-room shifts left on other cards.
-    document.querySelectorAll('.card.shift-down').forEach(c => c.classList.remove('shift-down'));
-  });
-  // #119 — live make-room: hovering a dragged card over another card pushes
-  // that card down so the user sees where the drop will land.
-  el.addEventListener('dragenter', e => {
-    if (el.classList.contains('dragging')) return; // self
-    const types = e.dataTransfer.types || [];
-    const isCardDrag = Array.from(types).some(t => t === 'text/card-id' || t === 'text/plain');
-    if (!isCardDrag) return;
-    el.classList.add('shift-down');
-  });
-  el.addEventListener('dragleave', e => {
-    // dragleave fires when cursor enters a child — only remove if cursor
-    // truly left this card's box.
-    if (!el.contains(e.relatedTarget)) el.classList.remove('shift-down');
-  });
-  el.addEventListener('drop', () => el.classList.remove('shift-down'));
+  el.addEventListener('dragend', () => el.classList.remove('dragging'));
   el.addEventListener('click', e => {
     if (e.target.closest('.prio-chip, .num-ref')) return;
     openModal(card.id);
