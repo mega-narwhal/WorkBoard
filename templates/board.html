@@ -99,9 +99,16 @@
     100% { box-shadow: var(--shadow); background: var(--card-bg); }
   }
   .card.flashing { animation: card-flash 1200ms ease-out; }
+  /* ═══════════════════════════════════════════════════════════════════
+   * LIFECYCLE ANIMATIONS — DO NOT BREAK
+   * These rules + the JS counterparts (simulateUserDragMove,
+   * flipPlayCards, captureCardRects) define the canonical Claude-task
+   * lifecycle: create → move-to-ip → move-to-done.
+   * Verify the contract any time with:    runLifecycle()   in the console
+   * Or run end-to-end with:                card.py sim     in the project
+   * ═══════════════════════════════════════════════════════════════════ */
   /* v4: card pop-in — used when serve.py broadcasts a card-added SSE event.
-     Overshoot easing gives the "pop" feel. 320ms is the sweet spot for a
-     200ms stream pace (cards overlap slightly without feeling chaotic). */
+     Overshoot easing gives the "pop" feel. */
   @keyframes card-pop-in {
     0%   { opacity: 0; transform: translateY(-12px) scale(0.92); box-shadow: 0 8px 24px rgba(217,119,87,.32); }
     60%  { opacity: 1; transform: translateY(0)    scale(1.04); }
@@ -4010,6 +4017,77 @@ async function init() {
 }
 
 init();
+
+// ═════════════════════════════════════════════════════════════════════
+// LIFECYCLE SELF-TEST — DO NOT BREAK
+// Console contract check for the canonical Claude-task lifecycle. Fires
+// the underlying CSS+JS primitives against expected shapes/durations.
+// If a new feature accidentally redefines a keyframe, renames a function,
+// or strips a class, this lights up red.
+//
+//   Open DevTools console and type:   runLifecycle()
+//
+// Returns {ok, checks:[{name, pass, got?}]}. Toast on screen + grouped
+// console log. Fast — does not actually move cards (use card.py sim for
+// the visual end-to-end test).
+// ═════════════════════════════════════════════════════════════════════
+window.runLifecycle = function runLifecycle() {
+  const checks = [];
+  const ck = (name, pass, got) => checks.push({ name, pass: !!pass, got });
+
+  // --- CSS contract ---------------------------------------------------
+  const t = document.createElement('div');
+  t.className = 'card popping-in';
+  t.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+  document.body.appendChild(t);
+  const cs1 = getComputedStyle(t);
+  ck('popping-in animation duration ≈ 640ms',
+     cs1.animationDuration === '0.64s', cs1.animationDuration);
+  t.remove();
+
+  const t2 = document.createElement('div');
+  t2.className = 'column card-src-col';
+  t2.style.cssText = 'position:fixed;top:-9999px;';
+  document.body.appendChild(t2);
+  const cs2 = getComputedStyle(t2);
+  ck('card-src-col opacity ≤ 0.7',
+     parseFloat(cs2.opacity) <= 0.7, cs2.opacity);
+  t2.remove();
+
+  // --- JS primitives --------------------------------------------------
+  ck('simulateUserDragMove is a fn', typeof simulateUserDragMove === 'function');
+  ck('flipPlayCards is a fn',        typeof flipPlayCards        === 'function');
+  ck('captureCardRects is a fn',     typeof captureCardRects     === 'function');
+  ck('reflowCardDragPreview is a fn',typeof reflowCardDragPreview === 'function');
+  ck('commitCardDrag is a fn',       typeof commitCardDrag       === 'function');
+  ck('handleCardAdded is a fn',      typeof handleCardAdded      === 'function');
+  ck('handleCardUpdated is a fn',    typeof handleCardUpdated    === 'function');
+  ck('flipPlayCards accepts opts arg', flipPlayCards.length >= 2);
+
+  let rectsOk = false;
+  try { rectsOk = captureCardRects() instanceof Map; } catch (_) {}
+  ck('captureCardRects() → Map', rectsOk);
+
+  // --- Report ---------------------------------------------------------
+  const failures = checks.filter(c => !c.pass);
+  const ok = failures.length === 0;
+  const label = ok ? 'OK' : 'FAIL';
+  console.group(`%clifecycle self-test: ${label}`,
+                `color:${ok ? '#0a7a0a' : '#c00'};font-weight:bold;`);
+  checks.forEach(c => {
+    const sym = c.pass ? '✓' : '✗';
+    const msg = c.got !== undefined ? `${c.name} → ${c.got}` : c.name;
+    console.log(`%c${sym} ${msg}`, `color:${c.pass ? '#0a7a0a' : '#c00'}`);
+  });
+  console.groupEnd();
+
+  if (typeof toast === 'function') {
+    toast(ok
+      ? '✓ Lifecycle self-test passed'
+      : `✗ ${failures.length} lifecycle check(s) failed — see console`);
+  }
+  return { ok, checks };
+};
 </script>
 </body>
 </html>

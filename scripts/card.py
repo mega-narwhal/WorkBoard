@@ -43,6 +43,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -345,6 +346,52 @@ def cmd_move(args, d, board):
     print(f"→ #{c['num']} {old} → {args.column}{suffix} (rev {rev})")
 
 
+# ═════════════════════════════════════════════════════════════════════
+# LIFECYCLE — DO NOT BREAK
+# Canonical Claude-task lifecycle wrapped as a single command. The
+# orchestration here pairs with the browser-side animation contract
+# (window.runLifecycle() in board.html). When adding features, run
+# `card.py sim` to verify the end-to-end visual is intact.
+# ═════════════════════════════════════════════════════════════════════
+def cmd_sim(args, d, board):
+    try:
+        gap_ip, gap_done = (float(x) for x in args.intervals.split(","))
+    except Exception:
+        sys.exit("--intervals must be 'task→ip,ip→done' seconds, e.g. '2,5'")
+
+    title = args.title or f"SIMULATION {now_iso()[11:19].replace(':', '')}"
+    writeup = args.writeup or f"Sim via card.py sim (intervals {args.intervals}s)."
+
+    # Step 1 — CREATE in Task. Reuses cmd_add so the lifecycle exercises
+    # exactly the production code path (no shortcut writes).
+    add_ns = argparse.Namespace(
+        title=title, code="", priority=args.priority, column="task",
+        tag=[], link=[], id=None,
+        origin=None, origin_stdin=False,
+        notes=None,  notes_stdin=False,
+        writeup=None, writeup_stdin=False,
+    )
+    cmd_add(add_ns, d, board)
+    num = d["nextNum"] - 1
+
+    # Step 2 — MOVE to In Progress (5s+ default to watch the pulse).
+    time.sleep(gap_ip)
+    d = load(board)  # reload in case anything else touched the board
+    cmd_move(argparse.Namespace(
+        ref=str(num), column="inprogress",
+        writeup=None, writeup_stdin=False,
+    ), d, board)
+
+    # Step 3 — MOVE to Done with auto writeup.
+    time.sleep(gap_done)
+    d = load(board)
+    cmd_move(argparse.Namespace(
+        ref=str(num), column="done",
+        writeup=writeup, writeup_stdin=False,
+    ), d, board)
+    print(f"✓ sim complete: #{num}")
+
+
 def cmd_subtask(args, d, board):
     c = find_card(d, args.ref)
     c.setdefault("subtasks", [])
@@ -556,6 +603,14 @@ def build_parser():
     psh = sub.add_parser("show", help="print one card as JSON")
     psh.add_argument("ref")
     psh.set_defaults(fn=cmd_show)
+
+    psim = sub.add_parser("sim", help="run canonical lifecycle: task → inprogress → done")
+    psim.add_argument("--title", default=None, help="card title (default: auto-named)")
+    psim.add_argument("--priority", default="mid", choices=["critical", "mid", "low"])
+    psim.add_argument("--intervals", default="2,5",
+                      help="seconds between phases: 'task→ip,ip→done' (default '2,5')")
+    psim.add_argument("--writeup", default=None, help="custom done writeup (auto if omitted)")
+    psim.set_defaults(fn=cmd_sim)
 
     pls = sub.add_parser("list", help="list cards (filtered)")
     pls.add_argument("--column", default=None)
