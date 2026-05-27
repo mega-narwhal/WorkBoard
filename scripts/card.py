@@ -389,6 +389,31 @@ def cmd_sim(args, d, board):
         ref=str(num), column="done",
         writeup=writeup, writeup_stdin=False,
     ), d, board)
+
+    # Step 4 (optional) — REOPEN AS BUG: simulate a post-ship regression.
+    # Card moves Done → In Progress + gets a 'bugged' tag (visible forever
+    # in card history). Then a follow-up move to Done with a fix writeup.
+    if args.with_bug:
+        time.sleep(gap_done)
+        d = load(board)
+        c = find_card(d, str(num))
+        c["column"] = "inprogress"
+        c["doneAt"] = None
+        c.setdefault("tags", [])
+        if "bugged" not in c["tags"]:
+            c["tags"].append("bugged")
+        c["updatedAt"] = now_iso()
+        rev = atomic_save(board, d)
+        print(f"🐞 #{num} reopened as bug (rev {rev})")
+
+        time.sleep(gap_ip)
+        d = load(board)
+        cmd_move(argparse.Namespace(
+            ref=str(num), column="done",
+            writeup=f"Bug fixed and reshipped. {writeup}",
+            writeup_stdin=False,
+        ), d, board)
+
     print(f"✓ sim complete: #{num}")
 
 
@@ -610,6 +635,8 @@ def build_parser():
     psim.add_argument("--intervals", default="2,5",
                       help="seconds between phases: 'task→ip,ip→done' (default '2,5')")
     psim.add_argument("--writeup", default=None, help="custom done writeup (auto if omitted)")
+    psim.add_argument("--with-bug", action="store_true",
+                      help="after done, reopen as bug (+'bugged' tag), then re-finish")
     psim.set_defaults(fn=cmd_sim)
 
     pls = sub.add_parser("list", help="list cards (filtered)")
