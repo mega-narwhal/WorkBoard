@@ -302,7 +302,7 @@
     display: flex;
     gap: 8px;
     padding: 12px;
-    overflow-x: auto;
+    overflow: auto;
     height: calc(100% - 48px);
     align-items: flex-start;
   }
@@ -4294,20 +4294,24 @@ async function init() {
   // or cards bubble first to their own handlers (no interference).
   (() => {
     const board = $('#board');
-    let panning = false, startX = 0, startScrollLeft = 0;
+    let panning = false, startX = 0, startY = 0;
+    let startScrollLeft = 0, startScrollTop = 0;
     board.addEventListener('mousedown', e => {
       if (e.target !== board) return;       // ignore clicks on children
       if (e.button !== 0) return;           // left button only
       panning = true;
-      startX = e.clientX;
+      startX = e.clientX; startY = e.clientY;
       startScrollLeft = board.scrollLeft;
+      startScrollTop  = board.scrollTop;
       board.style.cursor = 'grabbing';
       board.style.userSelect = 'none';
       e.preventDefault();
     });
     document.addEventListener('mousemove', e => {
       if (!panning) return;
+      // 2D pan — content follows cursor in any direction (Figma-style).
       board.scrollLeft = startScrollLeft - (e.clientX - startX);
+      board.scrollTop  = startScrollTop  - (e.clientY - startY);
     });
     const stop = () => {
       if (!panning) return;
