@@ -3643,19 +3643,61 @@ function handleCardUpdated({ card, fromColumn, toColumn }) {
   if (!oldEl) { handleCardAdded({ card }); return; }
 
   if (fromColumn && toColumn && fromColumn !== toColumn) {
-    // #121 — FLIP every card on the board, not just the one that moved.
-    // Snapshot all card rects BEFORE the DOM swap so siblings in the source
-    // column glide UP to close the gap and any pre-existing dest-column
-    // cards visibly hold their position. Single flipPlayCards call covers
-    // moved + siblings consistently.
+    // #121 — FLIP every card on the board so siblings in the source column
+    // slide up to close the gap. #139 — the MOVED card crosses columns, so
+    // dest's .column-body overflow:auto would clip it mid-transit. Lift it
+    // to position:fixed for the duration of its animation so it floats
+    // above all columns/shadows, then restore.
     const before = captureCardRects();
+    const movedOldRect = oldEl.getBoundingClientRect();
     oldEl.remove();
     const target = findColumnEl(toColumn);
     if (!target) { render(); return; }
     const body = target.querySelector('.column-body');
     const newEl = renderCardCompact(card);
     body.appendChild(newEl);
-    requestAnimationFrame(() => flipPlayCards(before));
+    requestAnimationFrame(() => {
+      // FLIP siblings (cards that didn't change column) the normal way —
+      // an in-place translate stays within their own .column-body bounds.
+      const beforeSiblings = new Map(before);
+      beforeSiblings.delete(card.id);
+      flipPlayCards(beforeSiblings);
+      // The MOVED card crosses columns, so we lift it OUT of dest's
+      // overflow:auto clip box. Capture its target rect, then reposition
+      // it position:fixed at the source's old rect, animate to the target
+      // rect, and restore on finish.
+      const newRect = newEl.getBoundingClientRect();
+      newEl.style.position = 'fixed';
+      newEl.style.left   = movedOldRect.left + 'px';
+      newEl.style.top    = movedOldRect.top  + 'px';
+      newEl.style.width  = movedOldRect.width  + 'px';
+      newEl.style.height = movedOldRect.height + 'px';
+      newEl.style.zIndex = '1000';
+      newEl.style.boxShadow = '0 12px 32px rgba(0,0,0,0.22)';
+      newEl.style.margin = '0';
+      const dx = newRect.left - movedOldRect.left;
+      const dy = newRect.top  - movedOldRect.top;
+      const anim = newEl.animate(
+        [
+          { transform: 'translate(0, 0)' },
+          { transform: `translate(${dx}px, ${dy}px)` },
+        ],
+        { duration: 1080, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'both' }
+      );
+      const cleanup = () => {
+        newEl.style.position = '';
+        newEl.style.left = '';
+        newEl.style.top  = '';
+        newEl.style.width  = '';
+        newEl.style.height = '';
+        newEl.style.zIndex = '';
+        newEl.style.boxShadow = '';
+        newEl.style.margin = '';
+        try { anim.cancel(); } catch (_) {}
+      };
+      anim.addEventListener('finish', cleanup, { once: true });
+      anim.addEventListener('cancel', cleanup, { once: true });
+    });
     refreshColumnCount(fromColumn);
     refreshColumnCount(toColumn);
   } else {
