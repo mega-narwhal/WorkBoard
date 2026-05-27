@@ -332,6 +332,9 @@
   .column[data-col="blocked"]    { background: var(--col-blocked); }
   .column[data-col="done"]       { background: var(--col-done); }
   .column.dragover { background: #F1E9DF; box-shadow: inset 0 0 0 2px var(--accent); }
+  /* #119 — while a card is mid-drag, dim its SOURCE column so it's obvious
+     the card is "leaving" and the user's attention is drawn to the cursor. */
+  .column.card-src-col { opacity: 0.55; transition: opacity 240ms ease; }
 
   /* Column drag-to-reorder + drag-to-trash (iPhone-rearrange feel).
      `col-dragging` = the column being dragged (ghosted out of place).
@@ -1920,10 +1923,15 @@ function renderCardCompact(card) {
       hoverCol: card.column,
       hoverBeforeCardId: null,
     };
+    // #119 — dim source column to signal "card is leaving here".
+    const srcColEl = document.querySelector('.column[data-col="' + card.column + '"]');
+    if (srcColEl) srcColEl.classList.add('card-src-col');
     dbg('dragstart ' + card.id + ' from ' + card.column);
   });
   el.addEventListener('dragend', () => {
     el.classList.remove('dragging');
+    document.querySelectorAll('.column.card-src-col')
+      .forEach(c => c.classList.remove('card-src-col'));
     dbg('dragend (cardDrag=' + (_cardDrag ? 'pending' : 'committed') + ')');
     // #119 — if drop already committed, _cardDrag is null and this is a no-op.
     // Otherwise (drag cancelled outside any drop target), restore via render.
