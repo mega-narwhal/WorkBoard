@@ -1284,6 +1284,7 @@ function dbg(msg) {
 // status, with a tail of SSE lifecycle events. Bottom-right by default
 // (drag HUD lives top-right). Draggable, position + visibility persisted.
 const _LOGS_HUD_POS_KEY  = 'workboard.logsHudPos';
+const _LOGS_HUD_SIZE_KEY = 'workboard.logsHudSize';
 const _LOGS_HUD_OPEN_KEY = 'workboard.logsHudOpen';
 let _logsClockTimer = null;
 let _logsCommitMeta = { sha: '', msg: '' };
@@ -1293,7 +1294,7 @@ function _logsHud() {
   if (hud) return hud;
   hud = document.createElement('div');
   hud.id = 'logs-hud';
-  hud.style.cssText = 'position:fixed;width:340px;max-height:260px;display:none;flex-direction:column;background:rgba(20,20,28,0.94);color:#cfd6df;font:11px/1.35 monospace;z-index:99998;border-radius:6px;border:1px solid rgba(207,214,223,0.25);box-shadow:0 6px 22px rgba(0,0,0,0.45);user-select:none;overflow:hidden;';
+  hud.style.cssText = 'position:fixed;width:340px;height:240px;min-width:220px;min-height:120px;max-width:90vw;max-height:80vh;display:none;flex-direction:column;background:rgba(20,20,28,0.94);color:#cfd6df;font:11px/1.35 monospace;z-index:99998;border-radius:6px;border:1px solid rgba(207,214,223,0.25);box-shadow:0 6px 22px rgba(0,0,0,0.45);user-select:none;overflow:hidden;resize:both;';
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(_LOGS_HUD_POS_KEY) || 'null'); } catch (e) {}
   if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
@@ -1303,6 +1304,23 @@ function _logsHud() {
     hud.style.right  = '12px';
     hud.style.bottom = '12px';
   }
+  // Restore last manual size (set by the resize handle in bottom-right).
+  let savedSize = null;
+  try { savedSize = JSON.parse(localStorage.getItem(_LOGS_HUD_SIZE_KEY) || 'null'); } catch (e) {}
+  if (savedSize && Number.isFinite(savedSize.w) && Number.isFinite(savedSize.h)) {
+    hud.style.width  = savedSize.w + 'px';
+    hud.style.height = savedSize.h + 'px';
+  }
+  // Persist any future resize via the native bottom-right handle.
+  try {
+    new ResizeObserver(() => {
+      try {
+        localStorage.setItem(_LOGS_HUD_SIZE_KEY, JSON.stringify({
+          w: hud.offsetWidth, h: hud.offsetHeight,
+        }));
+      } catch (e) {}
+    }).observe(hud);
+  } catch (e) {}
   const head = document.createElement('div');
   head.id = 'logs-hud-head';
   head.style.cssText = 'color:#FFD479;border-bottom:1px solid rgba(207,214,223,0.18);padding:5px 10px;cursor:grab;background:rgba(255,212,121,0.06);display:flex;align-items:center;gap:8px;';
@@ -1398,7 +1416,9 @@ async function refreshLogsCommit() {
 
 // Append a single line to the Logs HUD tail. Safe to call always — only
 // renders if the HUD is open (cheap check). Used by SSE handlers.
-function logEvent(kind, summary) {
+// Optional `card` arg appends tag chips (currently just 🐞 bug) so the
+// log line carries the same context the user sees on the card itself.
+function logEvent(kind, summary, card) {
   const body = document.getElementById('logs-hud-body');
   if (!body) return;
   const line = document.createElement('div');
@@ -1411,7 +1431,12 @@ function logEvent(kind, summary) {
     'sys':    '#a09ab8',
   };
   const color = colorByKind[kind] || '#cfd6df';
-  line.innerHTML = `<span style="color:#777;">${t}</span> <span style="color:${color};">${kind.toUpperCase().padEnd(6, ' ')}</span> ${summary.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}`;
+  const esc = s => String(s).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  let tagSuffix = '';
+  if (card && (card.tags || []).includes('bug')) {
+    tagSuffix = ' <span style="color:#ff6b6b;font-weight:600;">[🐞 bug]</span>';
+  }
+  line.innerHTML = `<span style="color:#777;">${t}</span> <span style="color:${color};">${kind.toUpperCase().padEnd(6, ' ')}</span> ${esc(summary)}${tagSuffix}`;
   body.insertBefore(line, body.firstChild);
   while (body.childNodes.length > 30) body.removeChild(body.lastChild);
 }
@@ -3885,7 +3910,7 @@ function handleCardAdded({ card }) {
   // If a brand-new card is born directly into In Progress, treat it as
   // a transition from "nothing" → inprogress.
   applyActiveWorkTransition(card.id, null, card.column);
-  logEvent('add', `#${card.num} "${card.title}" → ${card.column}`);
+  logEvent('add', `#${card.num} "${card.title}" → ${card.column}`, card);
 }
 
 // Replays the user-drag visual sequence for a CLI/SSE-driven cross-column
@@ -3995,14 +4020,14 @@ function handleCardUpdated({ card, fromColumn, toColumn }) {
     simulateUserDragMove(card, fromColumn, toColumn, oldEl);
     refreshColumnCount(fromColumn);
     refreshColumnCount(toColumn);
-    logEvent('move', `#${card.num} ${fromColumn} → ${toColumn}`);
+    logEvent('move', `#${card.num} ${fromColumn} → ${toColumn}`, card);
   } else {
     // In-place edit (title/priority/tags/subtask) — swap DOM, pulse + flash.
     const newEl = renderCardCompact(card);
     newEl.classList.add('flashing', 'pulsing');
     oldEl.replaceWith(newEl);
     setTimeout(() => newEl.classList.remove('flashing','pulsing'), 1300);
-    logEvent('move', `#${card.num} edited`);
+    logEvent('move', `#${card.num} edited`, card);
   }
 }
 
