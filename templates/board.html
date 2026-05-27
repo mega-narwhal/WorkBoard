@@ -1087,6 +1087,7 @@
     <button data-view="board" class="active">Board</button>
     <button data-view="calendar">Calendar</button>
   </span>
+  <button id="reset-cols-btn" class="header-pill" style="display:none" title="Restore default column order: Task → Backlog → In Progress → Done → Notes, then others by recency">↺ Reset columns</button>
 </header>
 
 <!-- Tag legend popover (anchored under #tags-btn) -->
@@ -2458,10 +2459,61 @@ function enterApp() {
   $('#setup').style.display = 'none';
   $('#view-toggle').style.display = '';
   $('#tags-btn').style.display = '';
+  const resetBtn = $('#reset-cols-btn');
+  if (resetBtn) {
+    resetBtn.style.display = '';
+    resetBtn.onclick = resetColumnsToDefault;
+  }
   applyBoardTitle();
   wireBoardTitle();
   refreshTagLegend();
   setView(_view);
+}
+
+// #125 — Reset columns to default order: Task → Backlog → In Progress →
+// Done → Notes (matched by id OR case-insensitive name so it works across
+// boards with migrated column ids), then remaining columns by latest card
+// activity desc (empty columns last). Clears stackUnder. One undo entry.
+async function resetColumnsToDefault() {
+  if (!state) return;
+  if (!(await miniConfirm('Reset column order?', { sub: 'Task → Backlog → In Progress → Done → Notes, then others by recency. Clears any column stacks.' }))) return;
+  pushUndo();
+  const cols = state.columns.map(c => ({ ...c, stackUnder: null }));
+  const matchers = [
+    c => c.id === 'task' || /^task$/i.test(c.name || ''),
+    c => c.id === 'backlog' || /^backlog$/i.test(c.name || ''),
+    c => c.id === 'inprogress' || /^in\s*progress$/i.test(c.name || ''),
+    c => c.id === 'done' || /^done$/i.test(c.name || ''),
+    c => /^notes$/i.test(c.name || ''),
+  ];
+  const pinned = [];
+  const remaining = cols.slice();
+  for (const m of matchers) {
+    const i = remaining.findIndex(m);
+    if (i >= 0) pinned.push(...remaining.splice(i, 1));
+  }
+  const recency = new Map();
+  for (const c of remaining) {
+    const ts = (state.cards || [])
+      .filter(card => card.column === c.id)
+      .map(card => card.updatedAt || card.createdAt || '')
+      .reduce((a, b) => (a > b ? a : b), '');
+    recency.set(c.id, ts);
+  }
+  remaining.sort((a, b) => {
+    const ra = recency.get(a.id) || '';
+    const rb = recency.get(b.id) || '';
+    if (ra === rb) return 0;
+    if (!ra) return 1;
+    if (!rb) return -1;
+    return rb.localeCompare(ra);
+  });
+  const old = captureColumnRects();
+  state.columns = pinned.concat(remaining);
+  scheduleSave();
+  render();
+  requestAnimationFrame(() => flipPlayColumns(old));
+  toast('Columns reset');
 }
 
 // Read project name from board.json `title` field. Falls back gracefully.
@@ -2561,58 +2613,6 @@ function render() {
       scheduleSave(); render();
     };
     board.appendChild(addCol);
-
-    // #125 — Reset Columns. Pins the main workflow columns leftmost
-    // (Task → Backlog → In Progress → Done → Notes), then orders any
-    // remaining columns by most-recent card activity descending (empty
-    // columns last). Also clears stackUnder so everything goes back to
-    // a flat row. Animated via FLIP. One undo entry per reset.
-    const resetCol = document.createElement('button');
-    resetCol.className = 'col-add-btn';
-    resetCol.textContent = '↺ Reset columns';
-    resetCol.title = 'Restore default column order: Task → Backlog → In Progress → Done → Notes, then others by recency';
-    resetCol.onclick = async () => {
-      if (!(await miniConfirm('Reset column order?', { sub: 'Task → Backlog → In Progress → Done → Notes, then others by recency. Clears any column stacks.' }))) return;
-      pushUndo();
-      const cols = state.columns.map(c => ({ ...c, stackUnder: null }));
-      const matchers = [
-        c => c.id === 'task' || /^task$/i.test(c.name || ''),
-        c => c.id === 'backlog' || /^backlog$/i.test(c.name || ''),
-        c => c.id === 'inprogress' || /^in\s*progress$/i.test(c.name || ''),
-        c => c.id === 'done' || /^done$/i.test(c.name || ''),
-        c => /^notes$/i.test(c.name || ''),
-      ];
-      const pinned = [];
-      const remaining = cols.slice();
-      for (const m of matchers) {
-        const i = remaining.findIndex(m);
-        if (i >= 0) pinned.push(...remaining.splice(i, 1));
-      }
-      // Recency proxy: max(card.updatedAt || card.createdAt) per column.
-      const recency = new Map();
-      for (const c of remaining) {
-        const ts = (state.cards || [])
-          .filter(card => card.column === c.id)
-          .map(card => card.updatedAt || card.createdAt || '')
-          .reduce((a, b) => (a > b ? a : b), '');
-        recency.set(c.id, ts);
-      }
-      remaining.sort((a, b) => {
-        const ra = recency.get(a.id) || '';
-        const rb = recency.get(b.id) || '';
-        if (ra === rb) return 0;
-        if (!ra) return 1;   // empty (no cards) → last
-        if (!rb) return -1;
-        return rb.localeCompare(ra);  // desc — latest first
-      });
-      const old = captureColumnRects();
-      state.columns = pinned.concat(remaining);
-      scheduleSave();
-      render();
-      requestAnimationFrame(() => flipPlayColumns(old));
-      toast('Columns reset');
-    };
-    board.appendChild(resetCol);
   } else if (_view === 'calendar') {
     renderCalendar();
   }
