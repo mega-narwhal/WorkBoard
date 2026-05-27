@@ -106,3 +106,22 @@ Within 5 seconds, three things happen with **zero user input**:
 The user did not type a single thing into the kanban. They glanced at it once and knew the full state of the work.
 
 **That is the bar.** Anything less is just another kanban.
+
+---
+
+## Operating rules (Claude reads this every session)
+
+These are durable, project-level instructions. Claude follows them on every turn while working in this repo or anything under `~/Desktop/`.
+
+1. **Commit on every turn.** After any meaningful change (code, docs, plan, card movement that touches files), make an atomic commit. Don't batch. Push if a remote is configured. If a turn produced no file changes, no commit — but explicitly say so. User's standing rule from `feedback_commit_each_change`: "make it reflexive."
+
+2. **Read today's + yesterday's conversation history before acting.** At session start, before responding to anything substantive:
+
+   ```
+   ~/Desktop/conversation_history/conversation_raw_YYMMDD.md   (today)
+   ~/Desktop/conversation_history/conversation_raw_YYMMDD.md   (yesterday)
+   ```
+
+   Where `YYMMDD` is the local date (e.g. `260527` for 2026-05-27). These hold the full raw transcript of recent sessions — they are the canonical context for what was shipped, what was decided, and what's still open. Skipping this is what causes "we already discussed this" drift.
+
+3. **Dump full raw conversation at session end.** Append to today's file in the same dir. Format per `~/Desktop/conversation_history/instructions.md`. Never summarize; never overwrite.
