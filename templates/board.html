@@ -131,7 +131,8 @@
   /* v4: accessibility — honor reduced-motion preference */
   @media (prefers-reduced-motion: reduce) {
     .card.popping-in, .card.removing, .card.pulsing, .column.sliding-in,
-    .card.flashing { animation: none !important; }
+    .card.flashing,
+    .column[data-col="inprogress"] .card { animation: none !important; }
   }
   /* v2: live "↻ updated 12s ago" indicator in the header. Tick every 1s. */
   header .last-update {
@@ -508,6 +509,20 @@
   /* #119 — visible affordance that cards are draggable. */
   .card { cursor: grab; }
   .card:active { cursor: grabbing; }
+  /* #164 — gentle coral halo on cards currently inside In Progress. Targets
+     cards (not the column shell) so an empty In Progress = no animation.
+     Pulse restarts naturally when SSE re-render moves a card in. */
+  .column[data-col="inprogress"] .card {
+    animation: card-inprogress-pulse 2400ms ease-in-out infinite;
+  }
+  @keyframes card-inprogress-pulse {
+    0%, 100% { box-shadow: var(--shadow); }
+    50%      { box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.32),
+                           0 4px 18px rgba(217, 119, 87, 0.35); }
+  }
+  /* Don't pulse cards mid-drag — drag/in-flight classes own the visual. */
+  .column[data-col="inprogress"] .card.dragging,
+  .column[data-col="inprogress"] .card.in-flight { animation: none; }
   /* Boho: columns carry the hue tint; cards stay pure white for contrast. */
 
   /* Priority left-border */
