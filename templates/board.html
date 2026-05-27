@@ -501,6 +501,9 @@
   }
   .card:active { transform: translateY(0); }
   .card.dragging { opacity: .45; transform: rotate(1.5deg); }
+  /* #119 — visible affordance that cards are draggable. */
+  .card { cursor: grab; }
+  .card:active { cursor: grabbing; }
   /* Boho: columns carry the hue tint; cards stay pure white for contrast. */
 
   /* Priority left-border */
@@ -1142,6 +1145,53 @@ let _colDragRects = null;      // id → DOMRect at dragstart (for FLIP)
 // drop commits to state.cards; dragend without drop re-renders to revert.
 let _cardDrag = null;          // { cardId, srcCol, srcEl, hoverCol, hoverBeforeCardId }
 let _cardDragRects = null;     // cardId → DOMRect at last reflow (for FLIP)
+// #119 — column live-reflow during drag (iPhone home-screen feel).
+// Snapshot of state.columns taken at dragstart so cancel (dragend w/o drop)
+// can revert all the live-preview reorders. _colDragSrcId carries the source
+// id because dragover events can't read dataTransfer.getData (security).
+let _colDragSrcId = null;
+let _colDragSnapshot = null;
+let _colDragCommitted = false;
+
+// #119 — visible drag HUD. Prints every drag/mouse event as a green-on-black
+// overlay so events are visible regardless of console filters.
+function _dbgHud() {
+  let hud = document.getElementById('drag-hud');
+  if (hud) return hud;
+  hud = document.createElement('div');
+  hud.id = 'drag-hud';
+  hud.style.cssText = 'position:fixed;top:64px;right:12px;width:360px;max-height:280px;overflow:auto;background:rgba(0,0,0,0.88);color:#0f0;font:11px/1.35 monospace;padding:8px 10px;z-index:99999;border-radius:6px;pointer-events:none;border:1px solid #0f0;box-shadow:0 2px 12px rgba(0,0,0,0.4);';
+  hud.innerHTML = '<div style="color:#ff0;border-bottom:1px solid #0f0;padding-bottom:4px;margin-bottom:4px;">#119 DRAG HUD — drag a column or card</div>';
+  document.body.appendChild(hud);
+  return hud;
+}
+function dbg(msg) {
+  try {
+    const hud = _dbgHud();
+    const line = document.createElement('div');
+    line.textContent = new Date().toTimeString().slice(0,8) + '  ' + msg;
+    hud.insertBefore(line, hud.children[1] || null);
+    while (hud.childNodes.length > 14) hud.removeChild(hud.lastChild);
+  } catch (e) {}
+  console.log('[#119]', msg);
+}
+document.addEventListener('DOMContentLoaded', () => {
+  _dbgHud();
+  dbg('HUD ready — drag a column (grip) or a card');
+  document.addEventListener('dragstart', e => {
+    const t = e.target;
+    dbg('DOC dragstart on <' + (t && t.tagName) + '>.' + (t && t.className && t.className.toString().slice(0,30)) + ' draggable=' + (t && t.draggable));
+  }, true);
+  document.addEventListener('mousedown', e => {
+    const t = e.target;
+    const cardAnc = t.closest && t.closest('.card');
+    const colAnc  = t.closest && t.closest('.column');
+    dbg('mdown <' + t.tagName + '>.' + String(t.className || '').slice(0,24)
+        + (cardAnc ? ' [in .card draggable=' + cardAnc.draggable + ']'
+                   : colAnc ? ' [in .column NO CARD]'
+                            : ' [outside]'));
+  }, true);
+});
 
 // ===== Column stacking schema (#117 — schema only; no render impact yet) =====
 // A column may sit BELOW another column in a vertical stack via the
@@ -1283,6 +1333,26 @@ function reorderColumn(srcId, targetId) {
   const [moved] = cols.splice(si, 1);
   cols.splice(ti, 0, moved);
   scheduleSave();
+  render();
+  requestAnimationFrame(() => flipPlayColumns(old));
+}
+
+// #119 — live preview reorder during column drag. Mutates state.columns +
+// renders + FLIPs without pushing undo (the whole drag is one undo unit,
+// committed on drop or rolled back via the snapshot on dragend-w/o-drop).
+// Clears src.stackUnder so dragging a stacked column across the row pops
+// it out of its stack.
+function previewReorderColumn(srcId, targetId) {
+  if (!state || srcId === targetId) return;
+  const cols = state.columns;
+  const si = cols.findIndex(c => c.id === srcId);
+  const ti = cols.findIndex(c => c.id === targetId);
+  if (si < 0 || ti < 0 || si === ti) return;
+  const old = captureColumnRects();
+  const src = cols[si];
+  if (src.stackUnder) src.stackUnder = null;   // free from stack on horizontal drag
+  const [moved] = cols.splice(si, 1);
+  cols.splice(ti, 0, moved);
   render();
   requestAnimationFrame(() => flipPlayColumns(old));
 }
@@ -1849,9 +1919,11 @@ function renderCardCompact(card) {
       hoverCol: card.column,
       hoverBeforeCardId: null,
     };
+    dbg('dragstart ' + card.id + ' from ' + card.column);
   });
   el.addEventListener('dragend', () => {
     el.classList.remove('dragging');
+    dbg('dragend (cardDrag=' + (_cardDrag ? 'pending' : 'committed') + ')');
     // #119 — if drop already committed, _cardDrag is null and this is a no-op.
     // Otherwise (drag cancelled outside any drop target), restore via render.
     if (_cardDrag) cancelCardDrag();
@@ -3003,11 +3075,11 @@ function renderColumn(col, cards) {
     // Skip if a column is being dragged (column-reorder owns the handler below)
     if (document.body.classList.contains('col-dragging-active')) return;
     e.preventDefault();
-    if (!_cardDrag) return;   // dragover from non-card source — leave it
+    if (!_cardDrag) { dbg('dragover ' + col.id + ' (no _cardDrag!)'); return; }
     // Find which sibling card the cursor is hovering above. Skip the dragged
     // card itself + non-card elements (day-headers, filtered-notes).
     const body = el.querySelector('.column-body');
-    if (!body) return;
+    if (!body) { dbg('dragover ' + col.id + ' (no .column-body)'); return; }
     const siblings = Array.from(body.querySelectorAll('.card[data-card-id]'))
       .filter(c => c !== _cardDrag.srcEl);
     let beforeId = null;  // null = append to end
@@ -3019,6 +3091,7 @@ function renderColumn(col, cards) {
       }
     }
     if (_cardDrag.hoverCol !== col.id || _cardDrag.hoverBeforeCardId !== beforeId) {
+      dbg('slot → ' + col.id + ' before=' + (beforeId || 'END') + ' sibs=' + siblings.length);
       _cardDrag.hoverCol = col.id;
       _cardDrag.hoverBeforeCardId = beforeId;
       reflowCardDragPreview();
@@ -3115,6 +3188,11 @@ function renderColumn(col, cards) {
     el.classList.add('col-dragging');
     document.body.classList.add('col-dragging-active');
     _colDragRects = captureColumnRects();
+    // #119 column — record source + snapshot for live-preview reorders.
+    _colDragSrcId = col.id;
+    _colDragSnapshot = JSON.parse(JSON.stringify(state.columns));
+    _colDragCommitted = false;
+    dbg('col dragstart ' + col.id);
   });
   el.addEventListener('dragend', () => {
     el.draggable = false;
@@ -3125,6 +3203,20 @@ function renderColumn(col, cards) {
       c.classList.remove('col-drop-stack-target');
     });
     _colDragRects = null;
+    // #119 — if drop didn't commit (cancelled outside any column), revert the
+    // live-preview reorders by restoring the snapshot taken at dragstart.
+    if (!_colDragCommitted && _colDragSnapshot) {
+      dbg('col dragend — revert to snapshot');
+      const old = captureColumnRects();
+      state.columns = _colDragSnapshot;
+      render();
+      requestAnimationFrame(() => flipPlayColumns(old));
+    } else {
+      dbg('col dragend (committed)');
+    }
+    _colDragSrcId = null;
+    _colDragSnapshot = null;
+    _colDragCommitted = false;
   });
   // Reorder on drop onto another column's edge. #117: if drop lands in the
   // BOTTOM 40% of the target column, stack the source UNDER the target
@@ -3139,16 +3231,49 @@ function renderColumn(col, cards) {
     if (!draggingColId) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (_inStackZone(e)) el.classList.add('col-drop-stack-target');
-    else el.classList.remove('col-drop-stack-target');
+    if (_inStackZone(e)) {
+      // Stack zone: keep flat order (no live reorder) and show the stack hint.
+      el.classList.add('col-drop-stack-target');
+    } else {
+      el.classList.remove('col-drop-stack-target');
+      // #119 — top/side zone: live-preview reorder so target glides aside
+      // BEFORE drop. Skip if cursor hasn't crossed onto a different column.
+      if (_colDragSrcId && _colDragSrcId !== col.id) {
+        dbg('col preview → ' + col.id);
+        previewReorderColumn(_colDragSrcId, col.id);
+      }
+    }
   });
   el.addEventListener('drop', e => {
-    const srcId = e.dataTransfer.getData('text/col-id');
+    const srcId = e.dataTransfer.getData('text/col-id') || _colDragSrcId;
     el.classList.remove('col-drop-stack-target');
-    if (!srcId || srcId === col.id) return;
+    if (!srcId) return;
     e.preventDefault();
-    if (_inStackZone(e)) stackColumnUnder(srcId, col.id);
-    else reorderColumn(srcId, col.id);
+    if (_inStackZone(e)) {
+      // Stack: revert any live-preview reorder first (so stackUnder applies
+      // to the user's INTENT, not the previewed-row position), then stack.
+      if (_colDragSnapshot) {
+        state.columns = _colDragSnapshot;
+        _colDragSnapshot = null;
+      }
+      stackColumnUnder(srcId, col.id);
+    } else {
+      // Already at the previewed position — just persist. push one undo entry
+      // representing the WHOLE drag, then save.
+      if (_colDragSnapshot) {
+        _undoStack.push(JSON.stringify({
+          title: state.title || '',
+          columns: _colDragSnapshot,
+          cards: state.cards || [],
+        }));
+        if (_undoStack.length > _UNDO_CAP) _undoStack.shift();
+        _redoStack.length = 0;
+        _colDragSnapshot = null;
+      }
+      scheduleSave();
+    }
+    _colDragCommitted = true;
+    dbg('col drop on ' + col.id);
   });
 
   el.appendChild(hdr);
