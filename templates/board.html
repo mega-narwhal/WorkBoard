@@ -4287,6 +4287,49 @@ async function init() {
     if (e.target === e.currentTarget) closeModal();
   });
 
+  // #127 — Figma-style background drag-to-pan. Grab the board background
+  // (anywhere not on a column/card/button) and drag — the board pans with
+  // the cursor (content follows the mouse: drag right → reveals left side).
+  // Only fires when mousedown target IS #board itself; clicks on columns
+  // or cards bubble first to their own handlers (no interference).
+  (() => {
+    const board = $('#board');
+    let panning = false, startX = 0, startScrollLeft = 0;
+    board.addEventListener('mousedown', e => {
+      if (e.target !== board) return;       // ignore clicks on children
+      if (e.button !== 0) return;           // left button only
+      panning = true;
+      startX = e.clientX;
+      startScrollLeft = board.scrollLeft;
+      board.style.cursor = 'grabbing';
+      board.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => {
+      if (!panning) return;
+      board.scrollLeft = startScrollLeft - (e.clientX - startX);
+    });
+    const stop = () => {
+      if (!panning) return;
+      panning = false;
+      board.style.cursor = '';
+      board.style.userSelect = '';
+    };
+    document.addEventListener('mouseup', stop);
+    document.addEventListener('mouseleave', stop);
+    // Hint on hover over empty board area — only when not currently dragging
+    // a card/column (those own the cursor style).
+    board.addEventListener('mouseenter', () => {
+      if (!document.body.classList.contains('col-dragging-active') &&
+          !document.body.classList.contains('card-dragging-active')) {
+        board.style.cursor = 'grab';
+      }
+    });
+    board.addEventListener('mouseleave', () => {
+      if (!panning) board.style.cursor = '';
+    });
+  })();
+
   // Tag legend: header pill toggles, click-outside closes, clear-filter resets
   $('#tags-btn').addEventListener('click', e => {
     e.stopPropagation();
