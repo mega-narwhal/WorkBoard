@@ -3406,6 +3406,17 @@ function renderColumn(col, cards) {
     if (_inStackZone(e)) {
       // Stack zone: keep flat order (no live reorder) and show the stack hint.
       el.classList.add('col-drop-stack-target');
+      // #129 — if a reorder preview was already in flight (cursor crossed
+      // through some column's top 60% on the way down), revert it now so the
+      // stack target stops sliding away from the cursor. Neighbors FLIP back
+      // to their original slots; source stays opacity:0 in its original slot.
+      if (_colDragSnapshot && _colLastPreviewTargetId) {
+        const old = captureColumnRects();
+        state.columns = JSON.parse(JSON.stringify(_colDragSnapshot));
+        _colLastPreviewTargetId = null;
+        render();
+        requestAnimationFrame(() => flipPlayColumns(old));
+      }
     } else {
       el.classList.remove('col-drop-stack-target');
       // #119 — top/side zone: live-preview reorder so target glides aside
