@@ -2951,7 +2951,14 @@ function renderColumn(col, cards) {
       ct.textContent = groups[day].length;
       hdr.appendChild(ct);
       body.appendChild(hdr);
-      groups[day].forEach(card => body.appendChild(renderCardCompact(card)));
+      // #89 BOARD-DONE-LIFO — within each day group, order latest-resolved
+      // first so the most recently shipped card sits at the top of its day.
+      const sorted = groups[day].slice().sort((a, b) => {
+        const ta = a.doneAt || a.updatedAt || a.createdAt || '';
+        const tb = b.doneAt || b.updatedAt || b.createdAt || '';
+        return tb.localeCompare(ta); // desc — ISO strings compare lexicographically
+      });
+      sorted.forEach(card => body.appendChild(renderCardCompact(card)));
     });
   } else {
     const sortable = col.id !== 'ideas';
