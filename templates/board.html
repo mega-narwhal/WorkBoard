@@ -1677,6 +1677,14 @@ function toast(msg, ms=2200) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
 }
+// OS-aware undo hint. Mac uses ⌘; Linux/Windows use Ctrl. Detection prefers
+// userAgentData (modern), falls back to navigator.platform (legacy reliable
+// for Mac sniff). Computed once at script load — OS doesn't change at runtime.
+const IS_MAC = (() => {
+  const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  return /mac|iphone|ipad|ipod/i.test(p);
+})();
+function undoHint() { return IS_MAC ? '⌘+Z' : 'Ctrl+Z'; }
 
 // Small async confirm dialog (boho-styled). Resolves true/false.
 // opts: { sub?: string, okText?: string, okClass?: 'danger'|'primary' }
@@ -2530,7 +2538,7 @@ function enterApp() {
 async function resetColumnsToDefault() {
   if (!state) return;
   if (!(await miniConfirm('Reset column order?', {
-    sub: 'Reorders columns to: Task → Backlog → In Progress → Done → Notes, then the rest by latest activity. Also flattens any stacked columns back into a row. No cards or columns are deleted.',
+    sub: 'Reorders columns to: Task → Backlog → In Progress → Done → Notes, then the rest by latest activity. Also flattens any stacked columns back into a row. No cards or columns are deleted — ' + undoHint() + ' to undo.',
     okText: 'Reset',
     okClass: 'primary',
   }))) return;
@@ -2570,7 +2578,7 @@ async function resetColumnsToDefault() {
   scheduleSave();
   render();
   requestAnimationFrame(() => flipPlayColumns(old));
-  toast('Columns reset');
+  toast('Columns reset — ' + undoHint() + ' to undo', 3200);
 }
 
 // Read project name from board.json `title` field. Falls back gracefully.
