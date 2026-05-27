@@ -1132,7 +1132,6 @@
     <button data-view="calendar">Calendar</button>
   </span>
   <button id="reset-cols-btn" class="header-pill" style="display:none" title="Restore default column order: Task → Backlog → In Progress → Done → Notes, then others by recency">↺ Reset columns</button>
-  <button id="logs-toggle-btn" class="header-pill" style="display:none" title="Toggle the Logs HUD (commit, time, live SSE event tail)">📜 Logs</button>
 </header>
 
 <!-- Tag legend popover (anchored under #tags-btn) -->
@@ -1285,7 +1284,7 @@ function dbg(msg) {
 // (drag HUD lives top-right). Draggable, position + visibility persisted.
 const _LOGS_HUD_POS_KEY  = 'workboard.logsHudPos';
 const _LOGS_HUD_SIZE_KEY = 'workboard.logsHudSize';
-const _LOGS_HUD_OPEN_KEY = 'workboard.logsHudOpen';
+const _LOGS_HUD_MIN_KEY  = 'workboard.logsHudMin';
 let _logsClockTimer = null;
 let _logsCommitMeta = { sha: '', msg: '' };
 
@@ -1294,7 +1293,7 @@ function _logsHud() {
   if (hud) return hud;
   hud = document.createElement('div');
   hud.id = 'logs-hud';
-  hud.style.cssText = 'position:fixed;width:340px;height:240px;min-width:220px;min-height:120px;max-width:90vw;max-height:80vh;display:none;flex-direction:column;background:rgba(20,20,28,0.94);color:#cfd6df;font:11px/1.35 monospace;z-index:99998;border-radius:6px;border:1px solid rgba(207,214,223,0.25);box-shadow:0 6px 22px rgba(0,0,0,0.45);user-select:none;overflow:hidden;resize:both;';
+  hud.style.cssText = 'position:fixed;width:340px;height:240px;min-width:220px;min-height:30px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;background:rgba(20,20,28,0.94);color:#cfd6df;font:11px/1.35 monospace;z-index:99998;border-radius:6px;border:1px solid rgba(207,214,223,0.25);box-shadow:0 6px 22px rgba(0,0,0,0.45);user-select:none;overflow:hidden;resize:both;';
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(_LOGS_HUD_POS_KEY) || 'null'); } catch (e) {}
   if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
@@ -1330,7 +1329,7 @@ function _logsHud() {
     <span style="flex:1;"></span>
     <span id="logs-clock" style="color:#cfd6df;font-variant-numeric:tabular-nums;">--:--:--</span>
     <span id="logs-conn"  style="color:#888;" title="Connection status">●</span>
-    <button id="logs-close" style="background:transparent;border:0;color:#888;cursor:pointer;font-size:14px;padding:0 2px;line-height:1;" title="Close">×</button>
+    <button id="logs-min-btn" style="background:transparent;border:0;color:#aaa;cursor:pointer;font-size:13px;padding:0 4px;line-height:1;" title="Minimize">▾</button>
   `;
   hud.appendChild(head);
   const body = document.createElement('div');
@@ -1342,7 +1341,7 @@ function _logsHud() {
   // Draggable header (mirrors drag-hud pattern).
   let drag = null;
   head.addEventListener('mousedown', e => {
-    if (e.target.id === 'logs-close') return;
+    if (e.target.id === 'logs-min-btn') return;
     e.preventDefault();
     const r = hud.getBoundingClientRect();
     drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
@@ -1369,29 +1368,59 @@ function _logsHud() {
       }));
     } catch (e) {}
   });
-  // Close button → hides + persists.
-  head.querySelector('#logs-close').addEventListener('click', () => toggleLogsHud(false));
+  // Minimize button → collapses to header-only; click again to expand.
+  head.querySelector('#logs-min-btn').addEventListener('click', () => {
+    setLogsMinimized(hud.dataset.minimized !== '1');
+  });
+  // Restore minimized state on first render.
+  let wasMin = false;
+  try { wasMin = localStorage.getItem(_LOGS_HUD_MIN_KEY) === '1'; } catch (e) {}
+  if (wasMin) {
+    // Defer one tick so the DOM is settled before we hide body etc.
+    requestAnimationFrame(() => setLogsMinimized(true));
+  }
   return hud;
 }
 
-function toggleLogsHud(forceOpen) {
-  const hud = _logsHud();
-  const btn = document.getElementById('logs-toggle-btn');
-  const open = (typeof forceOpen === 'boolean') ? forceOpen : (hud.style.display === 'none');
-  hud.style.display = open ? 'flex' : 'none';
-  if (btn) btn.classList.toggle('active', open);
-  try { localStorage.setItem(_LOGS_HUD_OPEN_KEY, open ? '1' : '0'); } catch (e) {}
-  if (open) {
-    refreshLogsCommit();
-    if (!_logsClockTimer) {
-      _logsClockTimer = setInterval(() => {
-        const el = document.getElementById('logs-clock');
-        if (el) el.textContent = new Date().toTimeString().slice(0,8);
-      }, 1000);
+// Always-on Logs HUD has two states: expanded (full body) and minimized
+// (header bar only). Saved size is restored on expand; minimize disables
+// the resize handle so dragging from header doesn't accidentally resize.
+function setLogsMinimized(min) {
+  const hud  = _logsHud();
+  const body = document.getElementById('logs-hud-body');
+  const btn  = document.getElementById('logs-min-btn');
+  if (!hud || !body || !btn) return;
+  hud.dataset.minimized = min ? '1' : '0';
+  if (min) {
+    body.style.display = 'none';
+    hud.style.height  = 'auto';
+    hud.style.resize  = 'none';
+    btn.textContent   = '▸';
+    btn.title         = 'Expand';
+  } else {
+    body.style.display = '';
+    let savedSize = null;
+    try { savedSize = JSON.parse(localStorage.getItem(_LOGS_HUD_SIZE_KEY) || 'null'); } catch (e) {}
+    if (savedSize && Number.isFinite(savedSize.w) && Number.isFinite(savedSize.h)) {
+      hud.style.width  = savedSize.w + 'px';
+      hud.style.height = savedSize.h + 'px';
+    } else {
+      hud.style.height = '240px';
     }
-  } else if (_logsClockTimer) {
-    clearInterval(_logsClockTimer); _logsClockTimer = null;
+    hud.style.resize  = 'both';
+    btn.textContent   = '▾';
+    btn.title         = 'Minimize';
   }
+  try { localStorage.setItem(_LOGS_HUD_MIN_KEY, min ? '1' : '0'); } catch (e) {}
+}
+
+// Start the clock once; always running while HUD exists (it's always on now).
+function startLogsClock() {
+  if (_logsClockTimer) return;
+  _logsClockTimer = setInterval(() => {
+    const el = document.getElementById('logs-clock');
+    if (el) el.textContent = new Date().toTimeString().slice(0,8);
+  }, 1000);
 }
 
 async function refreshLogsCommit() {
@@ -2784,15 +2813,11 @@ function enterApp() {
     resetBtn.style.display = '';
     resetBtn.onclick = resetColumnsToDefault;
   }
-  // #177 — Logs HUD toggle pill. Visibility persisted; closed by default.
-  const logsBtn = $('#logs-toggle-btn');
-  if (logsBtn) {
-    logsBtn.style.display = '';
-    logsBtn.onclick = () => toggleLogsHud();
-    let wasOpen = false;
-    try { wasOpen = localStorage.getItem(_LOGS_HUD_OPEN_KEY) === '1'; } catch (e) {}
-    if (wasOpen) toggleLogsHud(true);
-  }
+  // #177 — Logs HUD is always on. Minimizable to header-only via the
+  // ▾/▸ button inside the HUD. No top-bar pill (keeps the header clean).
+  _logsHud();
+  startLogsClock();
+  refreshLogsCommit();
   applyBoardTitle();
   wireBoardTitle();
   refreshTagLegend();
