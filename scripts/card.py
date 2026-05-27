@@ -537,6 +537,7 @@ def cmd_sim(args, d, board):
 def cmd_subtask(args, d, board):
     c = find_card(d, args.ref)
     c.setdefault("subtasks", [])
+    touched_sid = None  # the subtask id this op touched — used by #188 ship logic.
 
     if args.op == "add":
         sid = new_subtask_id(c)
@@ -548,6 +549,7 @@ def cmd_subtask(args, d, board):
             r[0].setdefault("children", []).append(st)
         else:
             c["subtasks"].append(st)
+        touched_sid = sid
         action = f"+ {sid}: {args.text[:60]}"
 
     elif args.op in ("done", "undone"):
@@ -555,6 +557,7 @@ def cmd_subtask(args, d, board):
         if not r:
             sys.exit(f"error: no subtask '{args.sid}' under #{c['num']}")
         r[0]["done"] = (args.op == "done")
+        touched_sid = args.sid
         action = f"{'✓' if args.op == 'done' else '○'} {args.sid}"
 
     elif args.op == "rm":
@@ -567,7 +570,9 @@ def cmd_subtask(args, d, board):
     else:
         sys.exit(f"unknown subtask op: {args.op}")
 
-    c["updatedAt"] = c["lastTouchedSubtask"] = now_iso()
+    c["updatedAt"] = now_iso()
+    if touched_sid:
+        c["lastTouchedSubtask"] = touched_sid
     rev = atomic_save(board, d)
     print(f"#{c['num']} subtask {action} (rev {rev})")
 
