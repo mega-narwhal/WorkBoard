@@ -8,6 +8,7 @@
   "columns": [
     { "id": "ideas",      "name": "💡 Ideas",     "kind": "intake" },
     { "id": "backlog",    "name": "Backlog",      "kind": "todo"   },
+    { "id": "task",       "name": "📥 Task",      "kind": "todo"   },
     { "id": "inprogress", "name": "In Progress",  "kind": "active" },
     { "id": "done",       "name": "Done",         "kind": "done"   }
   ],
