@@ -166,6 +166,19 @@ This makes the board feel real-time — cards move as work happens, not at sessi
 6. **Regenerate `index.json`** (always after any write).
 7. Bump `rev` + write.
 
+### E. Per-task lifecycle — the canonical sequence (do this for every task)
+
+When the user gives Claude a substantive task in a board-steward workspace, drive the card through these stages — same sequence the user-drag and SSE simulations animate end-to-end. **No "want me to add a card?" prompt — just do it.**
+
+1. **On receipt** — `card.py add --column task --title "<task>" --priority <c|m|l> --origin "<user's exact phrasing>"`. Card pops into the Task column with the animated pickup.
+2. **On start** — `card.py move <num> inprogress` the moment work actually begins. Card slides to In Progress and the active-work coral halo pulses around it (1800ms infinite).
+3. **On scope expansion / new finding mid-task** — `card.py subtask add <num> "<the new step>"`. Subtasks tree out *inside* the card; the parent never leaves In Progress while children are pending.
+4. **On a transient blocker** — `card.py move <num> blocked --notes "<reason>"`. Move back to `inprogress` when unblocked.
+5. **On ship** — `card.py move <num> done --writeup "<paragraph: commits, files, verification>"`. Card glides to the top of Done's today-group with FLIP siblings reflowing.
+6. **On reopen / user reports a regression on a done card** — `card.py move <num> inprogress` (no need to file a new card), then `card.py subtask add <num> "<the new fix>"`, do the work, `move <num> done` again with a fresh writeup. Same card, two lifetimes — preserves history.
+
+This is the headline product behaviour from `VISION.md` §"The principle" (*zero input from the user — work auto-logs*). Skip the lifecycle only for genuine non-tasks (a pure question, a debug-this-snippet, an explain-X) per the §"When to engage" decision table.
+
 ---
 
 ## Saving cleanly — prefer `card.py` (v3 default)
