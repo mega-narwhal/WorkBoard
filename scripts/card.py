@@ -33,6 +33,16 @@ walking up the tree):
     # Quick read (compact)
     card.py show 65
     card.py list --column inprogress
+
+THE 4 CANONICAL LIFECYCLE TRANSITIONS (see VISION.md §4):
+    1. CREATE          card.py add --title "..." --column task --priority mid
+    2. BEGIN           card.py move <ref> inprogress
+    3. SHIP            card.py move <ref> done --writeup "..."
+    4. REOPEN-AS-BUG   card.py bug <ref>                  (Done → IP + 'bug' tag)
+
+Plus the end-to-end wrappers:
+    card.py sim                 — task → ip → done (canonical happy path)
+    card.py sim --with-bug      — task → ip → done → reopen → ip → done
 """
 from __future__ import annotations
 
@@ -356,6 +366,28 @@ def cmd_move(args, d, board):
 # (window.runLifecycle() in board.html). When adding features, run
 # `card.py sim` to verify the end-to-end visual is intact.
 # ═════════════════════════════════════════════════════════════════════
+def cmd_bug(args, d, board):
+    """REOPEN-AS-BUG transition. Done → In Progress + 'bug' tag.
+
+    The 4th canonical lifecycle verb (see VISION.md §4). Same effect as
+    the modal's '🐞 Reopen as bug' button: card moves back to In Progress,
+    doneAt clears, 'bug' tag added (idempotent). The 'bug' tag is
+    auto-stripped again when the card next lands in done (regression fixed).
+    """
+    c = find_card(d, args.ref)
+    if c["column"] == "inprogress" and "bug" in (c.get("tags") or []):
+        sys.exit(f"error: #{c['num']} is already an open bug")
+    old = c["column"]
+    c["column"] = "inprogress"
+    c["doneAt"] = None
+    c.setdefault("tags", [])
+    if "bug" not in c["tags"]:
+        c["tags"].append("bug")
+    c["updatedAt"] = now_iso()
+    rev = atomic_save(board, d)
+    print(f"🐞 #{c['num']} {old} → inprogress (+bug tag) (rev {rev})")
+
+
 def cmd_sim(args, d, board):
     try:
         gap_ip, gap_done = (float(x) for x in args.intervals.split(","))
@@ -399,15 +431,9 @@ def cmd_sim(args, d, board):
     if args.with_bug:
         time.sleep(gap_done)
         d = load(board)
-        c = find_card(d, str(num))
-        c["column"] = "inprogress"
-        c["doneAt"] = None
-        c.setdefault("tags", [])
-        if "bug" not in c["tags"]:
-            c["tags"].append("bug")
-        c["updatedAt"] = now_iso()
-        rev = atomic_save(board, d)
-        print(f"🐞 #{num} reopened as bug (rev {rev})")
+        # Use the canonical bug verb so the sim exercises the production
+        # code path (DO NOT BREAK contract — see VISION.md §4).
+        cmd_bug(argparse.Namespace(ref=str(num)), d, board)
 
         time.sleep(gap_ip)
         d = load(board)
@@ -631,6 +657,10 @@ def build_parser():
     psh = sub.add_parser("show", help="print one card as JSON")
     psh.add_argument("ref")
     psh.set_defaults(fn=cmd_show)
+
+    pbug = sub.add_parser("bug", help="reopen a Done card as a bug (Done → In Progress + 'bug' tag)")
+    pbug.add_argument("ref", help="card num or id")
+    pbug.set_defaults(fn=cmd_bug)
 
     psim = sub.add_parser("sim", help="run canonical lifecycle: task → inprogress → done")
     psim.add_argument("--title", default=None, help="card title (default: auto-named)")
