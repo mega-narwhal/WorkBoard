@@ -3643,23 +3643,19 @@ function handleCardUpdated({ card, fromColumn, toColumn }) {
   if (!oldEl) { handleCardAdded({ card }); return; }
 
   if (fromColumn && toColumn && fromColumn !== toColumn) {
-    // FLIP — measure, move, invert, play
-    const first = oldEl.getBoundingClientRect();
+    // #121 — FLIP every card on the board, not just the one that moved.
+    // Snapshot all card rects BEFORE the DOM swap so siblings in the source
+    // column glide UP to close the gap and any pre-existing dest-column
+    // cards visibly hold their position. Single flipPlayCards call covers
+    // moved + siblings consistently.
+    const before = captureCardRects();
     oldEl.remove();
     const target = findColumnEl(toColumn);
     if (!target) { render(); return; }
     const body = target.querySelector('.column-body');
     const newEl = renderCardCompact(card);
     body.appendChild(newEl);
-    const last = newEl.getBoundingClientRect();
-    const dx = first.left - last.left;
-    const dy = first.top  - last.top;
-    if (dx || dy) {
-      newEl.animate(
-        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
-        { duration: 1080, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'both' }
-      );
-    }
+    requestAnimationFrame(() => flipPlayCards(before));
     refreshColumnCount(fromColumn);
     refreshColumnCount(toColumn);
   } else {
