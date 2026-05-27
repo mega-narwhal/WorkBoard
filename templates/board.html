@@ -131,7 +131,8 @@
   /* v4: accessibility — honor reduced-motion preference */
   @media (prefers-reduced-motion: reduce) {
     .card.popping-in, .card.removing, .card.pulsing, .column.sliding-in,
-    .card.flashing { animation: none !important; }
+    .card.flashing,
+    .column[data-col="inprogress"] { animation: none !important; }
   }
   /* v2: live "↻ updated 12s ago" indicator in the header. Tick every 1s. */
   header .last-update {
@@ -328,7 +329,18 @@
   /* Boho per-column hue tints (hue family at ~2% off-white). */
   .column[data-col="ideas"]      { background: var(--col-ideas); }
   .column[data-col="backlog"]    { background: var(--col-backlog); }
-  .column[data-col="inprogress"] { background: var(--col-inprogress); }
+  .column[data-col="inprogress"] {
+    background: var(--col-inprogress);
+    animation: inprogress-pulse 2400ms ease-in-out infinite;
+  }
+  /* #164 — "glowing pulsating In Progress": a coral halo that swells and
+     fades on a 2.4s cycle so active work is unmistakable at a glance. */
+  @keyframes inprogress-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 87, 0.00),
+                             0 0 12px 0 rgba(217, 119, 87, 0.12); }
+      50%      { box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.30),
+                             0 0 28px 4px rgba(217, 119, 87, 0.35); }
+  }
   .column[data-col="blocked"]    { background: var(--col-blocked); }
   .column[data-col="done"]       { background: var(--col-done); }
   .column.dragover { background: #F1E9DF; box-shadow: inset 0 0 0 2px var(--accent); }
