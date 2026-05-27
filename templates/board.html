@@ -1135,6 +1135,13 @@ let _openCardId = null;        // currently-open modal card
 let _prevSnapshot = new Map(); // id → "updatedAt|column" from previous render
 let _flashIds = new Set();     // ids to flash on the upcoming render
 let _colDragRects = null;      // id → DOMRect at dragstart (for FLIP)
+// #119 — live iPhone-style card reflow during drag.
+// dragstart records source; column-body dragover computes insertion slot
+// (top half of a card = insert before, bottom half = insert after) and
+// DOM-moves the dragged element with FLIP animation for displaced siblings.
+// drop commits to state.cards; dragend without drop re-renders to revert.
+let _cardDrag = null;          // { cardId, srcCol, srcEl, hoverCol, hoverBeforeCardId }
+let _cardDragRects = null;     // cardId → DOMRect at last reflow (for FLIP)
 
 // ===== Column stacking schema (#117 — schema only; no render impact yet) =====
 // A column may sit BELOW another column in a vertical stack via the
@@ -1232,6 +1239,36 @@ function flipPlayColumns(oldRects) {
   });
 }
 
+// #119 — card-level FLIP. Mirrors captureColumnRects/flipPlayColumns but
+// keyed by data-card-id so cards animate between bbox positions when their
+// slot changes during drag reflow.
+function captureCardRects() {
+  const map = new Map();
+  document.querySelectorAll('.card[data-card-id]').forEach(c => {
+    map.set(c.dataset.cardId, c.getBoundingClientRect());
+  });
+  return map;
+}
+function flipPlayCards(oldRects) {
+  if (!oldRects) return;
+  document.querySelectorAll('.card[data-card-id]').forEach(c => {
+    const id = c.dataset.cardId;
+    const oldR = oldRects.get(id);
+    if (!oldR) return;
+    const newR = c.getBoundingClientRect();
+    const dx = oldR.left - newR.left;
+    const dy = oldR.top  - newR.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    c.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px)` },
+        { transform: 'translate(0, 0)' },
+      ],
+      { duration: 260, easing: 'cubic-bezier(0.34, 1.4, 0.64, 1)' }
+    );
+  });
+}
+
 function reorderColumn(srcId, targetId) {
   if (!state) return;
   const cols = state.columns;
@@ -1268,6 +1305,67 @@ function stackColumnUnder(srcId, parentId) {
   scheduleSave();
   render();
   requestAnimationFrame(() => flipPlayColumns(old));
+}
+
+// #119 — preview the dragged card's would-be slot in the hover column by
+// physically moving the element + animating displaced siblings via FLIP.
+// No state mutation; on commitCardDrag the state catches up to the DOM.
+function reflowCardDragPreview() {
+  if (!_cardDrag || !_cardDrag.srcEl) return;
+  const targetCol = document.querySelector(
+    `.column[data-col="${_cardDrag.hoverCol}"] .column-body`
+  );
+  if (!targetCol) return;
+  // Skip if the element is already at the right slot (avoids re-FLIP spam
+  // when the cursor moves within the same insertion zone).
+  const cur = _cardDrag.srcEl.parentElement;
+  const curNext = _cardDrag.srcEl.nextElementSibling;
+  const wantNextId = _cardDrag.hoverBeforeCardId;
+  const wantNextEl = wantNextId ? targetCol.querySelector(`[data-card-id="${wantNextId}"]`) : null;
+  if (cur === targetCol && curNext === wantNextEl) return;
+  const rects = captureCardRects();
+  targetCol.insertBefore(_cardDrag.srcEl, wantNextEl);
+  _cardDragRects = rects;
+  requestAnimationFrame(() => flipPlayCards(rects));
+}
+
+// Commit the previewed position to state on drop. Computes insertion index
+// in state.cards from hoverBeforeCardId so the priority sort (stable) keeps
+// drag-order within a priority bucket.
+function commitCardDrag() {
+  if (!_cardDrag) return;
+  const card = state.cards.find(c => c.id === _cardDrag.cardId);
+  if (!card) { _cardDrag = null; return; }
+  pushUndo();
+  const srcIdx = state.cards.indexOf(card);
+  state.cards.splice(srcIdx, 1);
+  let insertIdx;
+  if (_cardDrag.hoverBeforeCardId) {
+    insertIdx = state.cards.findIndex(c => c.id === _cardDrag.hoverBeforeCardId);
+    if (insertIdx < 0) insertIdx = state.cards.length;
+  } else {
+    // append-at-end of the hover column → place after the last card already
+    // in that column to keep neighbors stable.
+    let lastIdx = -1;
+    state.cards.forEach((c, i) => { if (c.column === _cardDrag.hoverCol) lastIdx = i; });
+    insertIdx = lastIdx + 1;
+  }
+  const targetCol = _cardDrag.hoverCol;
+  card.column = targetCol;
+  card.updatedAt = now();
+  if (targetCol === 'done' && !card.doneAt) card.doneAt = card.updatedAt;
+  if (targetCol !== 'done') card.doneAt = null;
+  state.cards.splice(insertIdx, 0, card);
+  _cardDrag = null;
+  scheduleSave();
+  render();
+}
+
+function cancelCardDrag() {
+  if (!_cardDrag) return;
+  _cardDrag = null;
+  _cardDragRects = null;
+  render();   // canonical state wins → undoes any DOM-only preview moves
 }
 
 function deleteColumn(id) {
@@ -1743,8 +1841,21 @@ function renderCardCompact(card) {
     try { e.dataTransfer.setData('text/card-id', card.id); } catch (_) {}
     e.dataTransfer.effectAllowed = 'move';
     el.classList.add('dragging');
+    // #119 — seed live-reflow state. hover slot is filled on first dragover.
+    _cardDrag = {
+      cardId: card.id,
+      srcCol: card.column,
+      srcEl: el,
+      hoverCol: card.column,
+      hoverBeforeCardId: null,
+    };
   });
-  el.addEventListener('dragend', () => el.classList.remove('dragging'));
+  el.addEventListener('dragend', () => {
+    el.classList.remove('dragging');
+    // #119 — if drop already committed, _cardDrag is null and this is a no-op.
+    // Otherwise (drag cancelled outside any drop target), restore via render.
+    if (_cardDrag) cancelCardDrag();
+  });
   el.addEventListener('click', e => {
     if (e.target.closest('.prio-chip, .num-ref')) return;
     openModal(card.id);
@@ -2885,17 +2996,46 @@ function renderColumn(col, cards) {
 
   // Card drag-drop (cards moving INTO this column) — distinguish from
   // column-reorder drag by checking the dataTransfer type on dragover.
+  // #119: dragover computes the insertion slot from cursor Y vs sibling
+  // card midlines, then live-previews via reflowCardDragPreview (DOM-move
+  // + FLIP for displaced siblings). drop commits to state.
   el.addEventListener('dragover', e => {
     // Skip if a column is being dragged (column-reorder owns the handler below)
     if (document.body.classList.contains('col-dragging-active')) return;
     e.preventDefault();
-    el.classList.add('dragover');
+    if (!_cardDrag) return;   // dragover from non-card source — leave it
+    // Find which sibling card the cursor is hovering above. Skip the dragged
+    // card itself + non-card elements (day-headers, filtered-notes).
+    const body = el.querySelector('.column-body');
+    if (!body) return;
+    const siblings = Array.from(body.querySelectorAll('.card[data-card-id]'))
+      .filter(c => c !== _cardDrag.srcEl);
+    let beforeId = null;  // null = append to end
+    for (const c of siblings) {
+      const r = c.getBoundingClientRect();
+      if (e.clientY < r.top + r.height / 2) {
+        beforeId = c.dataset.cardId;
+        break;
+      }
+    }
+    if (_cardDrag.hoverCol !== col.id || _cardDrag.hoverBeforeCardId !== beforeId) {
+      _cardDrag.hoverCol = col.id;
+      _cardDrag.hoverBeforeCardId = beforeId;
+      reflowCardDragPreview();
+    }
   });
   el.addEventListener('dragleave', () => el.classList.remove('dragover'));
   el.addEventListener('drop', e => {
     if (document.body.classList.contains('col-dragging-active')) return;
     e.preventDefault();
     el.classList.remove('dragover');
+    // #119 path: commit the previewed position. Falls back to the legacy
+    // text/card-id read for safety (e.g. browser missed dragstart).
+    if (_cardDrag) {
+      _cardDrag.hoverCol = col.id;  // ensure final col matches drop target
+      commitCardDrag();
+      return;
+    }
     let cardId = e.dataTransfer.getData('text/card-id');
     if (!cardId) {
       const plain = e.dataTransfer.getData('text/plain') || '';
