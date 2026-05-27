@@ -1418,9 +1418,17 @@ function previewReorderColumn(srcId, targetId) {
   if (si < 0 || ti < 0 || si === ti) return;
   const old = captureColumnRects();
   const next = snap.map(c => ({ ...c }));
-  if (next[si].stackUnder) next[si].stackUnder = null;  // free from stack on horizontal drag
+  const wasStacked = !!next[si].stackUnder;
+  if (wasStacked) next[si].stackUnder = null;  // free from stack on horizontal drag
   const [moved] = next.splice(si, 1);
-  next.splice(ti, 0, moved);
+  // #130 — for root source, splice(ti) keeps iPhone semantic (target shifts
+  // toward src's old slot). For stacked source, src had no row slot; the
+  // removal didn't shift target visually, so we want moved to LAND at the
+  // target's current slot and push the target away. Use target's post-removal
+  // index in that case.
+  let insertAt = ti;
+  if (wasStacked) insertAt = next.findIndex(c => c.id === targetId);
+  next.splice(insertAt, 0, moved);
   state.columns = next;
   _colLastPreviewTargetId = targetId;
   render();
