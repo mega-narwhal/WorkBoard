@@ -139,7 +139,7 @@
   @media (prefers-reduced-motion: reduce) {
     .card.popping-in, .card.removing, .card.pulsing, .column.sliding-in,
     .card.flashing,
-    .column[data-col="inprogress"] .card { animation: none !important; }
+    .card.active-work { animation: none !important; }
   }
   /* v2: live "↻ updated 12s ago" indicator in the header. Tick every 1s. */
   header .last-update {
@@ -516,10 +516,11 @@
   /* #119 — visible affordance that cards are draggable. */
   .card { cursor: grab; }
   .card:active { cursor: grabbing; }
-  /* #164 — gentle coral halo on cards currently inside In Progress. Targets
-     cards (not the column shell) so an empty In Progress = no animation.
-     Pulse restarts naturally when SSE re-render moves a card in. */
-  .column[data-col="inprogress"] .card {
+  /* #164 v3 — coral halo on the ONE active-work card (= most-recently
+     touched card currently in In Progress). Set/cleared by refreshActiveWork().
+     When the card moves out, the class is dropped and the pulse vanishes;
+     the next most-recent card in In Progress (if any) takes over. */
+  .card.active-work {
     animation: card-inprogress-pulse 2400ms ease-in-out infinite;
   }
   @keyframes card-inprogress-pulse {
@@ -527,9 +528,9 @@
     50%      { box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.32),
                            0 4px 18px rgba(217, 119, 87, 0.35); }
   }
-  /* Don't pulse cards mid-drag — drag/in-flight classes own the visual. */
-  .column[data-col="inprogress"] .card.dragging,
-  .column[data-col="inprogress"] .card.in-flight { animation: none; }
+  /* Don't pulse mid-drag — drag/in-flight classes own the visual. */
+  .card.active-work.dragging,
+  .card.active-work.in-flight { animation: none; }
   /* Boho: columns carry the hue tint; cards stay pure white for contrast. */
 
   /* Priority left-border */
@@ -2743,6 +2744,8 @@ function render() {
     if (card) renderModal(card);
     else { _openCardId = null; closeModal(); }
   }
+
+  refreshActiveWork();
 }
 
 // ===== Tag colour + taxonomy lookup =====
@@ -3657,6 +3660,23 @@ function refreshColumnCount(colId) {
   if (ct && state) ct.textContent = state.cards.filter(c => c.column === colId).length;
 }
 
+// #164 v3 — pulse the ONE card you're actively working on. Among all cards
+// currently in In Progress, the most-recently-touched one wins the .active-work
+// class. When that card leaves In Progress, the next-most-recent takes over;
+// when In Progress is empty, no card pulses. Called from render() + every
+// card-lifecycle hook so the pulse always tracks the active work.
+function refreshActiveWork() {
+  if (!state) return;
+  document.querySelectorAll('.card.active-work').forEach(c =>
+    c.classList.remove('active-work'));
+  const inProgress = state.cards.filter(c => c.column === 'inprogress');
+  if (!inProgress.length) return;
+  const active = inProgress.reduce((a, b) =>
+    (b.updatedAt || b.createdAt || '') > (a.updatedAt || a.createdAt || '') ? b : a);
+  const el = findCardEl(active.id);
+  if (el) el.classList.add('active-work');
+}
+
 function handleCardAdded({ card }) {
   if (!state) return;
   const existing = state.cards.find(c => c.id === card.id);
@@ -3677,6 +3697,7 @@ function handleCardAdded({ card }) {
   body.appendChild(el);
   el.addEventListener('animationend', () => el.classList.remove('popping-in'), { once: true });
   refreshColumnCount(card.column);
+  refreshActiveWork();
 }
 
 // Replays the user-drag visual sequence for a CLI/SSE-driven cross-column
@@ -3761,6 +3782,7 @@ function simulateUserDragMove(card, fromColumn, toColumn, oldEl) {
       try { ghost.remove(); } catch (_) {}
       if (srcColEl) srcColEl.classList.remove('card-src-col');
       try { anim.cancel(); } catch (_) {}
+      refreshActiveWork();   // pulse follows the active card to its new col
     };
     anim.addEventListener('finish', land, { once: true });
     anim.addEventListener('cancel', land, { once: true });
