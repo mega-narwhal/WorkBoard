@@ -31,6 +31,7 @@ OPEN_BROWSER=1
 PROFILE="software"
 LIFECYCLE=1                         # replay task→ip→done flight at the end
 LIFECYCLE_INTERVAL=2                # seconds between phases
+LEGACY_DISCOVER=0                   # 1 = use old discover.py (session-shaped)
 
 # ---- arg parsing -------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -44,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --no-open)  OPEN_BROWSER=0; shift ;;
     --no-lifecycle) LIFECYCLE=0; shift ;;
     --lifecycle-interval) LIFECYCLE_INTERVAL="$2"; shift 2 ;;
+    --legacy-discover) LEGACY_DISCOVER=1; shift ;;
     -h|--help)
       sed -n '2,18p' "$0" | sed 's/^# //; s/^#$//'
       exit 0 ;;
@@ -141,34 +143,44 @@ fi
 
 echo "▶ discovering real cards from $PROJECT_ABS history"
 export SIM_BOARD_DIR="${SIM_DIR}/board"
-python3 - "$PROJECT_ABS" "$PORT" "$DAYS" "$MAX" "${SCRIPT_DIR}" <<'PYEOF'
+python3 - "$PROJECT_ABS" "$PORT" "$DAYS" "$MAX" "${SCRIPT_DIR}" "${LEGACY_DISCOVER}" <<'PYEOF'
 import sys, subprocess, json, time, urllib.request, urllib.parse
-project, port, days, mx, sdir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
-# Run discover.py against the REAL project — emits sessions as JSON
+project, port, days, mx, sdir, legacy = (
+    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
+)
+# Run discover2.py (or legacy discover.py) against the REAL project.
+script = f"{sdir}/discover.py" if legacy == "1" else f"{sdir}/discover2.py"
+cap_flag = "--max-sessions" if legacy == "1" else "--max-tasks"
 proc = subprocess.run(
-    ["python3", f"{sdir}/discover.py", "--project", project,
-     "--days", days, "--max-sessions", mx],
+    ["python3", script, "--project", project,
+     "--days", days, cap_flag, mx],
     capture_output=True, text=True
 )
 if proc.returncode != 0:
-    print(f"discover.py failed: {proc.stderr[:400]}", file=sys.stderr)
+    print(f"{script} failed: {proc.stderr[:400]}", file=sys.stderr)
     sys.exit(0)  # don't break the script
 try:
-    sessions = json.loads(proc.stdout).get("sessions", [])
+    payload = json.loads(proc.stdout)
 except json.JSONDecodeError:
-    print(f"discover.py returned non-JSON: {proc.stdout[:200]}", file=sys.stderr)
+    print(f"{script} returned non-JSON: {proc.stdout[:200]}", file=sys.stderr)
     sys.exit(0)
-# Sort oldest first so the live UI fills chronologically.
-sessions.sort(key=lambda s: s.get("startedAt", ""))
-print(f"  → {len(sessions)} sessions to stream into sim board")
+if legacy == "1":
+    items = payload.get("sessions", [])
+    items.sort(key=lambda s: s.get("startedAt", ""))
+    label = "session"
+else:
+    items = payload.get("tasks", [])
+    items.sort(key=lambda t: t.get("ts_start", ""))
+    label = "task"
+print(f"  → {len(items)} {label}(s) to stream into sim board")
 import os
 env = os.environ.copy()
 env["BOARD_SERVER"] = f"http://127.0.0.1:{port}"
-# Use serve.py's own session→card mapper for column heuristics — import it.
 sys.path.insert(0, sdir)
-from serve import _session_to_card_args
-for sess in sessions:
-    args = _session_to_card_args(sess)
+from serve import _session_to_card_args, _task_to_card_args
+mapper = _session_to_card_args if legacy == "1" else _task_to_card_args
+for sess in items:
+    args = mapper(sess)
     if not args:
         continue
     sim_board_json = os.path.join(os.environ.get("SIM_BOARD_DIR", ""), "board.json")
@@ -214,7 +226,8 @@ for sess in sessions:
         hops = [("inprogress", {}), ("done", {"writeup": "shipped (discovered)"})]
         # Bug bounces — sessions with bug signals re-open + re-ship to mirror
         # real life. Cap at 2 so wall-time stays sane.
-        bugs = (sess.get("bugHints") or [])[:2]
+        # discover.py used 'bugHints'; discover2.py uses 'bug_hits'.
+        bugs = (sess.get("bug_hits") or sess.get("bugHints") or [])[:2]
         for bh in bugs:
             reason = (bh.splitlines()[0] if isinstance(bh, str) else "")[:80]
             hops.append(("inprogress", {"bug": reason or "regression"}))

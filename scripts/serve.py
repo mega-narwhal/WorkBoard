@@ -132,6 +132,96 @@ def bootstrap_board(board_dir: Path, profile: str = "software",
         target_html.write_text(TEMPLATE_HTML.read_text())
 
 
+def _task_to_card_args(task: dict) -> list[str] | None:
+    """Map a discover2.py task record to `card.py add` CLI args. Uses both
+    files_touched_all (work intensity) and files_touched_in_proj (relevance),
+    so sessions that edit sibling-repo notes still get credit (Bug 1 fix)."""
+    title_seed = (task.get("user_prompt") or "").strip()
+    files_all = task.get("files_touched_all") or []
+    files_proj = task.get("files_touched_in_proj") or []
+    ship = task.get("ship_hits_clean") or []
+    defer = task.get("defer_hits") or []
+    bugs = task.get("bug_hits") or []
+    commits = task.get("git_commits") or []
+
+    if not title_seed and not files_all and not commits:
+        return None
+    if len(title_seed) < 15 and not files_all and not ship and not commits:
+        return None
+
+    title = (title_seed[:80]
+             or (f"Worked on {Path(files_all[0]).name}" if files_all else "Task"))
+    if "\n" in title:
+        title = title.split("\n", 1)[0]
+    title = title.rstrip()
+
+    # Column heuristic — ship needs BOTH a clean ship hit AND file activity OR
+    # a git commit landed inside the task window.
+    try:
+        ended_dt = datetime.fromisoformat(
+            (task.get("ts_end") or "").replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - ended_dt).days
+    except Exception:
+        age_days = 999
+
+    real_ship = (bool(ship) and bool(files_all)) or bool(commits)
+    if real_ship:
+        column = "done"
+    elif defer:
+        column = "backlog"
+    elif age_days <= 2 and files_all:
+        column = "inprogress"
+    elif age_days <= 3 and not files_all:
+        column = "task"
+    elif bugs and not real_ship:
+        column = "backlog"
+    elif age_days > 7 and files_all:
+        column = "done"
+    elif age_days > 7:
+        column = "backlog"
+    else:
+        column = "backlog"
+
+    tags = []
+    if bugs: tags.append("bug")
+    if defer: tags.append("deferred")
+    if real_ship: tags.append("shipped")
+
+    ended = (task.get("ts_end") or "")[:10]
+    sid = (task.get("sessionId") or "")[:8]
+    origin = (f"Discovered by discover2 (bucket {task.get('bucket_id')}, "
+              f"session {sid}, {ended}). User said: \"{title_seed[:300]}\"")
+
+    notes_parts: list[str] = []
+    dur = task.get("duration_min", 0)
+    n_user = task.get("n_user_total", 0)
+    src = ", ".join(task.get("source_set") or [])
+    notes_parts.append(f"Task: {n_user} user turn(s) over {dur}min. Sources: {src}.")
+    if files_proj:
+        notes_parts.append("In-proj files: " + ", ".join(files_proj[:8])
+                           + ("..." if len(files_proj) > 8 else ""))
+    elif files_all:
+        notes_parts.append("Files touched: " + ", ".join(
+            Path(f).name for f in files_all[:8]))
+    if commits:
+        notes_parts.append("Commits: " + " / ".join(
+            f"{c.get('shaShort') or c.get('sha','')[:7]} {c.get('subj','')[:60]}"
+            for c in commits[:3]))
+    if ship:
+        notes_parts.append("Ship signals: " + " / ".join(s[:120] for s in ship[:3]))
+    if defer:
+        notes_parts.append("Defer signals: " + " / ".join(s[:120] for s in defer[:3]))
+    if bugs:
+        notes_parts.append("Bug signals: " + " / ".join(s[:120] for s in bugs[:3]))
+    notes = "\n".join(notes_parts)
+
+    args = ["--column", column, "--priority", "mid", "--title", title,
+            "--origin", origin, "--notes", notes, "--tag", "discovered"]
+    for t in tags:
+        args += ["--tag", t]
+    return args
+
+
 def _session_to_card_args(session: dict) -> list[str] | None:
     """Map a discover.py session summary to `card.py add` CLI args. Returns
     None if the session is too thin to be worth carding."""
@@ -214,17 +304,18 @@ def _session_to_card_args(session: dict) -> list[str] | None:
 
 
 def _stream_discovered_cards(project_root: Path, board_dir: Path,
-                              port: int, days: int, max_sessions: int,
-                              delay_s: float = 0.25) -> None:
-    """Background-thread worker: run discover.py, then issue `card.py add`
-    for each non-thin session at `delay_s` pacing. Cards land via the live
-    HTTP server, which fires SSE events — the browser animates them in."""
-    discover_py = Path(__file__).resolve().parent / "discover.py"
-    card_py = Path(__file__).resolve().parent / "card.py"
+                              port: int, days: int, max_items: int,
+                              delay_s: float = 0.25,
+                              legacy: bool = False) -> None:
+    """Background-thread worker: run discover2.py (or discover.py if --legacy),
+    then issue `card.py add` for each task at `delay_s` pacing. Cards land via
+    the live HTTP server, which fires SSE events — the browser animates them in."""
+    script_dir = Path(__file__).resolve().parent
+    discover_py = script_dir / ("discover.py" if legacy else "discover2.py")
+    card_py = script_dir / "card.py"
     if not discover_py.exists() or not card_py.exists():
         return
 
-    # Wait for the HTTP server to bind before posting.
     for _ in range(20):
         try:
             import urllib.request
@@ -233,35 +324,36 @@ def _stream_discovered_cards(project_root: Path, board_dir: Path,
         except Exception:
             time.sleep(0.2)
 
+    cmd = [sys.executable, str(discover_py),
+           "--project", str(project_root),
+           "--days", str(days)]
+    cmd += ["--max-sessions" if legacy else "--max-tasks", str(max_items)]
     try:
-        out = subprocess.run(
-            [sys.executable, str(discover_py),
-             "--project", str(project_root),
-             "--days", str(days),
-             "--max-sessions", str(max_sessions)],
-            capture_output=True, text=True, timeout=30,
-        )
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if out.returncode != 0:
             return
         data = json.loads(out.stdout)
     except Exception:
         return
 
-    sessions = data.get("sessions", [])
-    if not sessions:
+    if legacy:
+        items = data.get("sessions", [])
+        mapper = _session_to_card_args
+    else:
+        items = data.get("tasks", [])
+        mapper = _task_to_card_args
+    if not items:
         return
 
-    # Oldest first → user watches history fill in chronologically.
-    sessions.reverse()
     n_added = 0
-    for sess in sessions[:max_sessions]:
-        args = _session_to_card_args(sess)
+    for item in items[:max_items]:
+        args = mapper(item)
         if not args:
             continue
         try:
             subprocess.run(
-                [sys.executable, str(card_py), "--board", str(board_dir / "board.json"),
-                 "add"] + args,
+                [sys.executable, str(card_py), "--board",
+                 str(board_dir / "board.json"), "add"] + args,
                 capture_output=True, text=True, timeout=10,
             )
             n_added += 1
@@ -269,7 +361,8 @@ def _stream_discovered_cards(project_root: Path, board_dir: Path,
             pass
         time.sleep(delay_s)
 
-    print(f"discover: streamed {n_added} card(s) from {len(sessions)} session(s)",
+    print(f"discover{'(legacy)' if legacy else '2'}: streamed {n_added} card(s) "
+          f"from {len(items)} {'session' if legacy else 'task'}(s)",
           file=sys.stderr)
 
 
@@ -590,7 +683,9 @@ def main():
     ap.add_argument("--discover-days", type=int, default=7,
                     help="Discover sessions touched in the last N days (default 7)")
     ap.add_argument("--discover-max", type=int, default=20,
-                    help="Cap how many sessions become cards on bootstrap (default 20)")
+                    help="Cap how many tasks become cards on bootstrap (default 20)")
+    ap.add_argument("--legacy-discover", action="store_true",
+                    help="Use the older discover.py (session-shaped) instead of discover2.py (task-shaped)")
     ap.add_argument("--install-hooks", action="store_true",
                     help="Wire UserPromptSubmit hook into Claude Code settings.json, then exit")
     ap.add_argument("--uninstall-hooks", action="store_true",
@@ -631,7 +726,8 @@ def main():
                     threading.Thread(
                         target=_stream_discovered_cards,
                         args=(start, board_dir, args.port,
-                              args.discover_days, args.discover_max),
+                              args.discover_days, args.discover_max,
+                              0.25, args.legacy_discover),
                         daemon=True,
                     ).start()
                 # Nudge first-time installers toward wiring the hook so the
