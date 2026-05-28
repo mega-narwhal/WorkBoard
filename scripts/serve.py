@@ -151,18 +151,42 @@ def _session_to_card_args(session: dict) -> list[str] | None:
     if "\n" in title:
         title = title.split("\n", 1)[0]
 
-    # Column: shipped → done; deferred/bug-only → backlog; else → done (past work).
-    if ship:
-        column = "done"
-    elif defer or (bugs and not ship):
-        column = "backlog"
+    # Column heuristic — spread cards across Task / In Progress / Backlog / Done
+    # by recency + signal density. The board should reflect last-week-of-work
+    # mix, not be a graveyard of "Done".
+    try:
+        ended_dt = datetime.fromisoformat(
+            (session.get("endedAt") or "").replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - ended_dt).days
+    except Exception:
+        age_days = 999
+
+    # SHIP_RE matches "done|fixed|works|live" — Claude says those casually in
+    # nearly every reply, so a ship-hint alone is noisy. Trust it only when
+    # there's actual file activity to back it up.
+    real_ship = bool(ship) and bool(files)
+
+    if real_ship:
+        column = "done"                          # actually shipped work
+    elif defer:
+        column = "backlog"                       # explicit defer wins
+    elif age_days <= 2 and files:
+        column = "inprogress"                    # recent + editing → in flight
+    elif age_days <= 3 and not files:
+        column = "task"                          # recent talk, no work yet
+    elif bugs and not real_ship:
+        column = "backlog"                       # open bug
+    elif age_days > 7 and files:
+        column = "done"                          # old work with edits → done
+    elif age_days > 7:
+        column = "backlog"                       # old chatter, no work
     else:
-        column = "done"
+        column = "backlog"                       # default: mentioned, unactioned
 
     tags = []
     if bugs: tags.append("bug")
     if defer: tags.append("deferred")
-    if ship: tags.append("shipped")
+    if real_ship: tags.append("shipped")
 
     ended = (session.get("endedAt") or "")[:10]
     sid = (session.get("sessionId") or "")[:8]
