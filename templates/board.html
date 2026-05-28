@@ -928,7 +928,7 @@
     display: grid; grid-template-columns: repeat(7, 1fr);
     position: relative;
     border-bottom: 1px solid var(--card-border);
-    min-height: 124px;
+    min-height: 96px;
   }
   .cal-week:last-child { border-bottom: 0; }
   .cal-day {
@@ -1008,44 +1008,9 @@
   }
   .cal-event-chip.done .ev-num { color: var(--green); }
   .cal-more {
-    font-size: 10px; color: var(--muted);
-    padding: 3px 8px; margin-top: 2px;
-    font-weight: 600; border-radius: 4px;
-    border: 1px dashed var(--card-border);
-    background: transparent;
-    transition: all .15s;
+    font-size: 9px; color: var(--muted);
+    padding: 1px 6px; font-weight: 600;
   }
-  .cal-more:hover {
-    color: var(--ink); border-color: var(--muted);
-    background: rgba(217,119,87,.05);
-  }
-
-  /* #110 Phase 1.5g — popover for "+N more" click. Anchors to day cell,
-     lists every card with its full chip; click outside closes. */
-  .cal-day-popover {
-    position: absolute;
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(44,38,32,.18);
-    padding: 10px 10px 8px;
-    min-width: 220px; max-width: 320px;
-    max-height: 360px; overflow-y: auto;
-    z-index: 80;
-  }
-  .cal-day-popover .pop-head {
-    font-size: 10px; font-weight: 700;
-    color: var(--muted); text-transform: uppercase;
-    letter-spacing: .08em; margin-bottom: 6px;
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  .cal-day-popover .pop-close {
-    cursor: pointer; color: var(--muted);
-    font-size: 14px; line-height: 1; padding: 2px 4px;
-    border-radius: 3px;
-  }
-  .cal-day-popover .pop-close:hover { color: var(--ink); background: var(--card-border); }
-  .cal-day-popover .cal-events { gap: 4px; }
 
   textarea.origin-modal {
     width: 100%; resize: vertical; min-height: 64px;
@@ -3566,11 +3531,13 @@ function renderCalendar() {
           const more = document.createElement('div');
           more.className = 'cal-more';
           more.textContent = '+ ' + (dayCards.length - MAX_VISIBLE) + ' more';
+          more.title = 'Click to filter';
           more.style.cursor = 'pointer';
-          more.setAttribute('data-tip', 'Click to see all ' + dayCards.length + ' cards for this day');
-          more.onclick = (e) => {
-            e.stopPropagation();
-            showCalDayPopover(dayEl, dayCards, ds);
+          more.onclick = () => {
+            // Quick affordance: open the first hidden card's modal — gives users
+            // a way to drill in without overcrowding the cell.
+            const first = dayCards[MAX_VISIBLE];
+            if (first) openModal(first.id);
           };
           eventList.appendChild(more);
         }
@@ -3620,62 +3587,6 @@ function makeCalendarChip(card) {
   // modal (Esc / × / overlay) leaves the user on Calendar.
   chip.onclick = () => { openModal(card.id); };
   return chip;
-}
-
-// #110 Phase 1.5g — popover for "+N more" click on dense days.
-// Anchors below the day cell, lists every card with a click-to-open chip,
-// click outside / Esc / close-button dismisses.
-let _calDayPopover = null;
-function _closeCalDayPopover() {
-  if (_calDayPopover) { _calDayPopover.remove(); _calDayPopover = null; }
-  document.removeEventListener('click', _onCalDayPopoverDocClick, true);
-  document.removeEventListener('keydown', _onCalDayPopoverEsc, true);
-}
-function _onCalDayPopoverDocClick(e) {
-  if (_calDayPopover && !_calDayPopover.contains(e.target)) _closeCalDayPopover();
-}
-function _onCalDayPopoverEsc(e) {
-  if (e.key === 'Escape') _closeCalDayPopover();
-}
-function showCalDayPopover(anchor, cards, ds) {
-  _closeCalDayPopover();
-  const pop = document.createElement('div');
-  pop.className = 'cal-day-popover';
-  const head = document.createElement('div');
-  head.className = 'pop-head';
-  // ISO YYYY-MM-DD → human "Mon, May 28"
-  const dt = new Date(ds + 'T00:00:00');
-  const headTxt = isNaN(dt.getTime()) ? ds :
-    dt.toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'});
-  const lbl = document.createElement('span');
-  lbl.textContent = headTxt + ' · ' + cards.length + ' card' + (cards.length === 1 ? '' : 's');
-  head.appendChild(lbl);
-  const closeBtn = document.createElement('span');
-  closeBtn.className = 'pop-close';
-  closeBtn.textContent = '×';
-  closeBtn.onclick = _closeCalDayPopover;
-  head.appendChild(closeBtn);
-  pop.appendChild(head);
-  const list = document.createElement('div');
-  list.className = 'cal-events';
-  cards.forEach(c => list.appendChild(makeCalendarChip(c)));
-  pop.appendChild(list);
-  // Position: anchor below the cell, clamped to viewport
-  document.body.appendChild(pop);
-  const r = anchor.getBoundingClientRect();
-  const popW = pop.offsetWidth, popH = pop.offsetHeight;
-  let left = r.left;
-  let top  = r.bottom + 4;
-  if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
-  if (top + popH > window.innerHeight - 8) top = Math.max(8, r.top - popH - 4);
-  pop.style.left = left + 'px';
-  pop.style.top  = top  + 'px';
-  _calDayPopover = pop;
-  // Defer doc-click binding so the originating click doesn't immediately close it
-  setTimeout(() => {
-    document.addEventListener('click', _onCalDayPopoverDocClick, true);
-    document.addEventListener('keydown', _onCalDayPopoverEsc, true);
-  }, 0);
 }
 
 function renderColumn(col, cards) {
