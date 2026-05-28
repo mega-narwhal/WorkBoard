@@ -302,10 +302,66 @@ def _extract_first_json_array(text: str) -> str | None:
     return None
 
 
+def _emit_recon_pending(board: Path, candidates: list[dict],
+                         events: list[dict], card_py: Path,
+                         banner_num: int | None) -> int:
+    """Write recon_pending.json for main Claude to action. Returns 0
+    (recon hasn't happened yet — the file is the deliverable). Main Claude
+    reads the file next turn, decides moves, calls card.py move/fly, and
+    deletes the file when done."""
+    pending_path = board.parent / "recon_pending.json"
+    activity = _build_activity_digest(events, max_chars=12000)
+    payload = {
+        "written_at": datetime.now(timezone.utc).isoformat(),
+        "board": str(board),
+        "card_py": str(card_py),
+        "instructions": (
+            "You (main Claude) have the full session context. Read this "
+            "file, decide which of the listed cards should move based on "
+            "the activity log AND your conversation memory, then apply "
+            "moves via `card.py move <num> <col> [--writeup TEXT]` or "
+            "`card.py fly <num> <col> --note TEXT`. Delete this file "
+            "when done. Stay-by-default — only move when a clear signal "
+            "(user said skip/nvm/abandoned/we shipped it / matching commit)."
+        ),
+        "candidates": [
+            {
+                "num": c["num"],
+                "column": c["column"],
+                "title": c["title"],
+                "notes": c.get("notes") or "",
+                "createdAt": c.get("createdAt"),
+                "tags": c.get("tags") or [],
+            }
+            for c in candidates
+        ],
+        "activity_digest": activity,
+    }
+    try:
+        pending_path.write_text(json.dumps(payload, indent=2,
+                                            ensure_ascii=False))
+        print(f"📋 wrote {len(candidates)} recon candidates → {pending_path}\n"
+              f"   (CLAUDECODE=1 detected — main Claude will reconcile "
+              f"next turn, no Haiku call)", file=sys.stderr)
+        if banner_num:
+            _banner_update_text(card_py, board, banner_num,
+                                f"📋 {len(candidates)} cards waiting for "
+                                f"main-Claude recon")
+    except OSError as e:
+        print(f"  ! recon_pending write failed: {e}", file=sys.stderr)
+    return 0
+
+
 def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
                      banner_num: int | None = None) -> int:
     """Post-extraction LLM sweep on non-done cards. Asks LLM if any should
-    move based on the activity log. Applies moves. Returns count moved."""
+    move based on the activity log. Applies moves. Returns count moved.
+
+    When CLAUDECODE=1 (we're running inside an active Claude Code session),
+    skip the Haiku subprocess entirely. Main Claude already has the full
+    conversation in context — write a recon_pending.json that main Claude
+    actions next turn. Saves a 60-90s LLM call + tokens, and lets recon
+    use the richer session context the script doesn't have."""
     try:
         with board.open("r") as f:
             state = json.load(f)
@@ -322,6 +378,12 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
     if not candidates:
         return 0
 
+    # Inline-recon path: write TODO and let main Claude action it.
+    if os.environ.get("CLAUDECODE") == "1":
+        return _emit_recon_pending(board, candidates, events,
+                                    card_py, banner_num)
+
+    # Autonomous path: subprocess Haiku.
     print(f"▶ reconciliation sweep: {len(candidates)} non-done card(s)…",
           file=sys.stderr)
     if banner_num:
