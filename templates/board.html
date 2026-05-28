@@ -932,9 +932,10 @@
   .cal-dow .dow.weekend { color: #b3b9c4; }
   .cal-weeks {
     display: grid;
-    /* #110v2: fixed row height (was 1fr auto-stretch). Bounded cells = no
-       bleed when one day is heavy; days scroll internally instead. */
-    grid-auto-rows: 132px;
+    /* #238: row height tuned so 4 chips + sticky +N pill + day-number
+       row fit cleanly with no clipping (14px cell padding + 28px daynum +
+       4 chips × 22px + 3 gaps × 3px + 22px sticky pill ≈ 159px). */
+    grid-auto-rows: 168px;
     overflow-y: auto;
   }
   .cal-week {
@@ -1041,6 +1042,34 @@
   .cal-more {
     font-size: 9px; color: var(--muted);
     padding: 1px 6px; font-weight: 600;
+  }
+
+  /* #238 — sticky '+N more' pill at bottom of the day's scroll area.
+     position:sticky bottom:0 pins it to the viewport bottom of .cal-events
+     while you scroll; it's still in the flow after the last chip so it
+     drops back into place at the end. Hidden by JS when N=0. */
+  .cal-events .cal-day-more {
+    position: sticky; bottom: 0;
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 3px 8px;
+    font-size: 10px; font-weight: 700;
+    color: var(--muted); letter-spacing: .02em;
+    background: linear-gradient(to bottom,
+      rgba(255,255,255,0) 0%,
+      var(--card-bg) 35%,
+      var(--card-bg) 100%);
+    border-radius: 4px;
+    pointer-events: none;
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .cal-day.today .cal-events .cal-day-more {
+    background: linear-gradient(to bottom,
+      rgba(255,250,247,0) 0%,
+      rgba(255,250,247,1) 35%,
+      rgba(255,250,247,1) 100%);
   }
 
   /* #235 + #236 — bigger expand icon. Always faintly visible on populated
@@ -3671,9 +3700,32 @@ function renderCalendar() {
         const eventList = document.createElement('div');
         eventList.className = 'cal-events';
         // #110v2: render every card; the .cal-events box scrolls internally.
-        // No truncation + no "+N more" affordance — kills the bleed into the
-        // next day's cell and gives the user direct access to every card.
         dayCards.forEach(card => eventList.appendChild(makeCalendarChip(card)));
+
+        // #238 — sticky "+N more" pill at the bottom of the scroll. N
+        // counts chips whose bottom is below the visible region. Decreases
+        // as the user scrolls down; hides at 0.
+        if (dayCards.length > 4) {
+          const more = document.createElement('div');
+          more.className = 'cal-day-more';
+          eventList.appendChild(more);
+          const recompute = () => {
+            const listBottom = eventList.scrollTop + eventList.clientHeight;
+            // Each chip's offsetTop+offsetHeight is its bottom relative to the
+            // scroll container; the sticky pill is excluded by className.
+            let hidden = 0;
+            for (const chip of eventList.querySelectorAll('.cal-event-chip')) {
+              const bot = chip.offsetTop + chip.offsetHeight;
+              if (bot > listBottom + 1) hidden++;
+            }
+            if (hidden === 0) more.style.display = 'none';
+            else { more.style.display = ''; more.textContent = '+ ' + hidden + ' more'; }
+          };
+          eventList.addEventListener('scroll', recompute, { passive: true });
+          // initial paint runs after layout: defer one frame
+          requestAnimationFrame(recompute);
+        }
+
         dayEl.appendChild(eventList);
 
         // #235 — expand icon (visible on cell hover) opens a detail modal
