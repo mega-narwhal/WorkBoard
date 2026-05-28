@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import difflib
 import json
 import os
 import subprocess
@@ -216,6 +217,39 @@ def slugify(s: str) -> str:
     return "".join(c if c.isalnum() else "-" for c in s.lower()).strip("-")[:32]
 
 
+def _taxonomy_names(d: dict) -> list[str]:
+    """All canonical tag names from board.json tagTaxonomy.main + sub."""
+    tt = d.get("tagTaxonomy") or {}
+    names = [t.get("name", "") for t in (tt.get("main") or []) if t.get("name")]
+    names += [t.get("name", "") for t in (tt.get("sub") or []) if t.get("name")]
+    return names
+
+
+def _check_tags(tags: list[str], d: dict, force: bool) -> list[str]:
+    """Filter tags against board.json taxonomy. Unknown tags are blocked unless
+    --force, with a close-match suggestion printed to stderr. Returns the
+    accepted tag list. Empty taxonomy = pass-through (back-compat)."""
+    taxonomy = _taxonomy_names(d)
+    if not taxonomy:
+        return tags
+    accepted = []
+    for t in tags or []:
+        if t in taxonomy:
+            accepted.append(t)
+            continue
+        if force:
+            accepted.append(t)
+            continue
+        # blocked: surface a close match if any
+        match = difflib.get_close_matches(t, taxonomy, n=1, cutoff=0.6)
+        hint = f" did you mean '{match[0]}'?" if match else ""
+        print(f"warning: tag '{t}' not in taxonomy.{hint} "
+              f"Pass --force to add as-is, or use a canonical tag "
+              f"(see board.json tagTaxonomy or http://<server>/tags).",
+              file=sys.stderr)
+    return accepted
+
+
 # ===== subtask tree helpers =====
 
 def find_subtask(nodes: list, sid: str):
@@ -273,6 +307,7 @@ def cmd_add(args, d, board):
     # for cards landing directly in done). updatedAt stays = now since the
     # card row was actually written now.
     created = getattr(args, "created_at", None) or now
+    tags = _check_tags(args.tag or [], d, getattr(args, "force", False))
     card = {
         "num": d["nextNum"],
         "id": cid,
@@ -280,7 +315,7 @@ def cmd_add(args, d, board):
         "priority": args.priority,
         "title": args.title,
         "column": args.column,
-        "tags": args.tag or [],
+        "tags": tags,
         "origin": origin,
         "notes": notes,
         "writeup": writeup,
@@ -327,7 +362,7 @@ def cmd_update(args, d, board):
             c[field] = v
             changed.append(field)
 
-    for t in (args.add_tag or []):
+    for t in _check_tags(args.add_tag or [], d, getattr(args, "force", False)):
         c.setdefault("tags", [])
         if t not in c["tags"]:
             c["tags"].append(t)
@@ -784,6 +819,8 @@ def build_parser():
     pa.add_argument("--created-at", default=None,
                     help="ISO timestamp to override createdAt (default: now). "
                          "Use when importing historic work so board sorts chronologically.")
+    pa.add_argument("--force", action="store_true",
+                    help="Accept tags that aren't in board.json tagTaxonomy (otherwise blocked w/ close-match suggestion)")
     pa.set_defaults(fn=cmd_add)
 
     # update
@@ -802,6 +839,8 @@ def build_parser():
     pu.add_argument("--writeup-stdin", action="store_true")
     pu.add_argument("--add-tag", action="append", default=None)
     pu.add_argument("--rm-tag", action="append", default=None)
+    pu.add_argument("--force", action="store_true",
+                    help="Accept tags that aren't in board.json tagTaxonomy")
     pu.set_defaults(fn=cmd_update)
 
     # move

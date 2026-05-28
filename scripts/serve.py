@@ -528,6 +528,72 @@ class BoardHandler(BaseHTTPRequestHandler):
             return
         self._send(200, data, ctype)
 
+    def _send_tags_page(self):
+        """Static-render the tag legend: canonical taxonomy (main + sub) +
+        per-tag usage count + off-taxonomy 'wild' tags surfaced for cleanup.
+        Plain HTML, no JS — read-only governance reference."""
+        try:
+            state = json.loads((self.board_dir / "board.json").read_text())
+        except Exception:
+            self._send(500, b'{"error":"board.json unreadable"}')
+            return
+        tt = state.get("tagTaxonomy") or {}
+        main = tt.get("main") or []
+        sub = tt.get("sub") or []
+        canonical = {t.get("name"): t.get("color", "#888") for t in (main + sub) if t.get("name")}
+        counts: dict[str, int] = {}
+        for c in state.get("cards", []):
+            for t in (c.get("tags") or []):
+                counts[t] = counts.get(t, 0) + 1
+        wild = sorted([t for t in counts if t not in canonical],
+                      key=lambda x: -counts[x])
+
+        def _row(name: str, color: str, count: int, kind: str) -> str:
+            return (f'<tr><td><span class="sw" style="background:{color}"></span></td>'
+                    f'<td><code>{name}</code></td>'
+                    f'<td>{count}</td><td>{kind}</td></tr>')
+
+        rows_main = "\n".join(
+            _row(t["name"], t.get("color", "#888"), counts.get(t["name"], 0), "main")
+            for t in main if t.get("name"))
+        rows_sub = "\n".join(
+            _row(t["name"], t.get("color", "#888"), counts.get(t["name"], 0), "sub")
+            for t in sub if t.get("name"))
+        rows_wild = "\n".join(
+            _row(t, "#444", counts[t], "wild") for t in wild)
+        wild_block = (
+            f'<h2>Off-taxonomy tags ({len(wild)})</h2>'
+            f'<p class="note">Added with <code>--force</code> or before the '
+            f'taxonomy was tightened. Candidates for pruning.</p>'
+            f'<table>{rows_wild}</table>') if wild else ""
+
+        title = state.get("title", "WorkBoard")
+        profile = tt.get("profile", "(unset)")
+        html = (
+            "<!doctype html><meta charset=utf-8>"
+            f"<title>Tags — {title}</title>"
+            "<style>"
+            "body{font:14px/1.5 -apple-system,system-ui,sans-serif;"
+            "background:#1a1a1a;color:#ddd;max-width:760px;margin:32px auto;padding:0 24px}"
+            "h1{color:#eee;margin:0 0 4px}h2{color:#eee;margin-top:32px}"
+            "p.note{color:#888;margin:4px 0 16px}"
+            "table{border-collapse:collapse;width:100%;margin-bottom:8px}"
+            "td{padding:6px 8px;border-bottom:1px solid #2a2a2a}"
+            "code{color:#eee;background:#222;padding:1px 6px;border-radius:3px}"
+            ".sw{display:inline-block;width:14px;height:14px;border-radius:3px;"
+            "vertical-align:middle;border:1px solid #333}"
+            "a{color:#7aa5d9}"
+            "</style>"
+            f"<h1>{title} — tag legend</h1>"
+            f'<p class="note">Profile: <code>{profile}</code> · '
+            f'{len(canonical)} canonical · {len(counts)} in use · '
+            f'<a href="/">back to board</a></p>'
+            f"<h2>Main ({len(main)})</h2><table>{rows_main}</table>"
+            f"<h2>Sub ({len(sub)})</h2><table>{rows_sub}</table>"
+            f"{wild_block}"
+        )
+        self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
     # ----- SSE -----
     def _handle_sse(self):
         try:
@@ -632,6 +698,10 @@ class BoardHandler(BaseHTTPRequestHandler):
                 "ts": datetime.now(timezone.utc).isoformat(),
             }).encode()
             self._send(200, body)
+            return
+
+        if path == "/tags":
+            self._send_tags_page()
             return
 
         if path.startswith("/archive/"):
