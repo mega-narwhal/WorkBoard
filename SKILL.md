@@ -170,6 +170,10 @@ This makes the board feel real-time — cards move as work happens, not at sessi
 ### E. Per-task lifecycle — the canonical sequence (do this for every task)
 
 > **The per-turn rule.** Every substantive Claude turn that ships, edits, decides, or plans MUST file at least 1 card before the turn ends. **Each turn = 1 card minimum.** A turn may produce N cards when the user names N distinct units of work — e.g., "build phases 1–9" files 9 mandatory cards; a numbered list of N asks files N task cards. `#` is the unit of findability, so no work goes uncarded. Only genuine non-asks (pure question, debug-this-snippet, explain-X) are exempt; see §"When to engage."
+>
+> **Title quality is not negotiable.** The rule is *"every turn has a thoughtfully-titled card before the turn ends"* — NOT *"auto-card every prompt verbatim"*. Titles are work-summary phrases (verb + noun, e.g. `BOARD-FLY: atomic-hop primitive`, `Fix card-drag freeze on iPhone`, `Investigate convo dedup`), not first-80-chars of the user's wording. Strip conversational openers (`btw`, `can u`, `oh wait`, `okays`). Pull a short `code` (kebab or CAPS) from the noun cluster when it's a build/feature card. Match the existing board's voice — re-read 2-3 nearby cards before titling. If the prompt is genuinely ambiguous, ask the user for a one-line title before filing.
+>
+> **`scripts/discover2.py` + `scripts/lifecycle_replay.py` produce verbatim-prompt cards by design** — that's acceptable for retrospective sim theatre (`simulate_install.sh`) but those cards are NOT authoritative. Don't promote sim cards to the live board, and don't model live-board work after their titling style.
 
 When the user gives Claude a substantive task in a board-steward workspace, drive the card through these stages — same sequence the user-drag and SSE simulations animate end-to-end. **No "want me to add a card?" prompt — just do it.**
 
