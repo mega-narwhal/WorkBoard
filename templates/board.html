@@ -2123,17 +2123,32 @@ function showTooltip(target, text) {
   tip.style.left = '-9999px';
   tip.style.top  = '0px';
   tip.classList.add('show');
-  // Force layout then measure
   const r  = target.getBoundingClientRect();
   const tr = tip.getBoundingClientRect();
   const M = 8;
-  // Prefer below the target; flip above if not enough room
-  let top = r.bottom + M;
-  if (top + tr.height > window.innerHeight - M) {
-    top = Math.max(M, r.top - tr.height - M);
+  // #243 — per-target placement override via data-tip-placement="right".
+  // Right-of-target, vertically centered, flip-to-left at right edge is the
+  // industry standard for dense list/calendar rows (Google Cal, Linear,
+  // Asana). Default stays 'below' for the rest of the board.
+  const place = target.getAttribute('data-tip-placement') || 'below';
+  let top, left;
+  if (place === 'right') {
+    left = r.right + M;
+    if (left + tr.width > window.innerWidth - M) {
+      // No room on the right → place to the left of the target instead
+      left = Math.max(M, r.left - tr.width - M);
+    }
+    top = r.top + r.height / 2 - tr.height / 2;
+    top = Math.max(M, Math.min(top, window.innerHeight - tr.height - M));
+  } else {
+    // Default: below the target; flip above if not enough room
+    top = r.bottom + M;
+    if (top + tr.height > window.innerHeight - M) {
+      top = Math.max(M, r.top - tr.height - M);
+    }
+    left = r.left + r.width / 2 - tr.width / 2;
+    left = Math.max(M, Math.min(left, window.innerWidth - tr.width - M));
   }
-  let left = r.left + r.width / 2 - tr.width / 2;
-  left = Math.max(M, Math.min(left, window.innerWidth - tr.width - M));
   tip.style.left = left + 'px';
   tip.style.top  = top  + 'px';
 }
@@ -3792,7 +3807,6 @@ function renderCalendar() {
         const expand = document.createElement('div');
         expand.className = 'cal-day-expand';
         expand.textContent = '⤢';
-        expand.setAttribute('data-tip', 'Expand — see this day + neighbors in detail');
         expand.onmousedown = (e) => e.stopPropagation();
         expand.onclick = (e) => { e.stopPropagation(); openCalDayModal(ds); };
         dayEl.appendChild(expand);
@@ -3839,6 +3853,8 @@ function makeCalendarChip(card) {
   chip.setAttribute('data-tip',
     `#${card.num} ${card.code || ''}\n${card.title}\n\n${verb} ${fmtTime(refTs)} (${relativeTime(refTs)})`
   );
+  // #243 — right-side placement so the tip doesn't cover the row below.
+  chip.setAttribute('data-tip-placement', 'right');
   // Open the modal in-place — don't switch to Board view, so closing the
   // modal (Esc / × / overlay) leaves the user on Calendar.
   chip.onclick = () => { openModal(card.id); };
