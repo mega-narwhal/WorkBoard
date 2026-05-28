@@ -113,12 +113,45 @@ def _detect_project_name(project_root: Path) -> str:
     return project_root.name or "WorkBoard"
 
 
+_GITIGNORE_BLOCK = "# Added by board-steward — local board data may contain secrets"
+_GITIGNORE_ENTRIES = (
+    "board/",
+    "board/board.json",
+    "board/index.json",
+    "board/extraction_snapshot.json",
+    "board/recon_pending.json",
+)
+
+
+def _ensure_gitignore(project_root: Path) -> str | None:
+    """Idempotently append board artifacts to project's .gitignore if the
+    project is a git repo. Returns a one-line status for the caller to print,
+    or None if nothing to do (not a repo). Safe to call repeatedly."""
+    if not (project_root / ".git").exists():
+        return None
+    gi = project_root / ".gitignore"
+    existing = gi.read_text() if gi.exists() else ""
+    existing_lines = {ln.strip() for ln in existing.splitlines()}
+    missing = [e for e in _GITIGNORE_ENTRIES if e not in existing_lines]
+    if not missing:
+        return f"{gi} already covers board artifacts"
+    block = "\n" + _GITIGNORE_BLOCK + "\n" + "\n".join(missing) + "\n"
+    if existing and not existing.endswith("\n"):
+        block = "\n" + block
+    with gi.open("a", encoding="utf-8") as fh:
+        fh.write(block)
+    return f"{gi} updated (+{len(missing)} entries)"
+
+
 def bootstrap_board(board_dir: Path, profile: str = "software",
-                    title_override: str | None = None) -> None:
+                    title_override: str | None = None,
+                    share: bool = False) -> None:
     """First-run init: create board/ with starter board.json + board.html.
     Title resolves via `_detect_project_name` (package.json / pyproject.toml /
     CONTEXT.md / basename) unless `title_override` is given. Tag taxonomy
-    seeded from the chosen industry profile."""
+    seeded from the chosen industry profile. When `share` is False (default)
+    and the project is a git repo, board artifacts are added to .gitignore so
+    user-private content (titles, origins, secrets) doesn't get committed."""
     board_dir.mkdir(parents=True, exist_ok=True)
     target_json = board_dir / "board.json"
     if not target_json.exists() and TEMPLATE_JSON.exists():
@@ -130,6 +163,10 @@ def bootstrap_board(board_dir: Path, profile: str = "software",
     target_html = board_dir / "board.html"
     if not target_html.exists() and TEMPLATE_HTML.exists():
         target_html.write_text(TEMPLATE_HTML.read_text())
+    if not share:
+        status = _ensure_gitignore(board_dir.parent)
+        if status:
+            print(f"gitignore: {status}", file=sys.stderr)
 
 
 def _task_to_card_args(task: dict) -> list[str] | None:
@@ -717,6 +754,8 @@ def main():
                     help="Explicit board.json path (overrides --project)")
     ap.add_argument("--bootstrap", action="store_true",
                     help="If no board/ found, create one from the skill template")
+    ap.add_argument("--share", action="store_true",
+                    help="Opt out of auto-gitignoring board/. Use when you intentionally want to commit a shared board.")
     ap.add_argument("--profile", default="software",
                     choices=["software", "marketing", "research", "product", "operations"],
                     help="Tag taxonomy profile for bootstrap (default: software)")
@@ -761,7 +800,8 @@ def main():
             if args.bootstrap:
                 board_dir = start / "board"
                 bootstrap_board(board_dir, profile=args.profile,
-                                title_override=args.title)
+                                title_override=args.title,
+                                share=args.share)
                 print(f"bootstrapped new board at {board_dir} (profile={args.profile})", file=sys.stderr)
                 # Stream cards from prior Claude sessions in a background
                 # thread so the user watches their history fill in. Opt out
