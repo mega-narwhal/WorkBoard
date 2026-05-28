@@ -252,13 +252,54 @@ def _llm_reconcile(cards: list[dict], events: list[dict],
     out = (proc.stdout or "").strip()
     out = re.sub(r"^```(?:json)?\s*", "", out)
     out = re.sub(r"\s*```\s*$", "", out)
+    # The LLM often appends commentary after the JSON array even though the
+    # prompt says not to. Extract the first balanced JSON array (greedy from
+    # first '[' to matching ']') and discard anything after.
+    json_blob = _extract_first_json_array(out)
+    if not json_blob:
+        print(f"  recon LLM returned no parseable JSON array: {out[:200]!r}",
+              file=sys.stderr)
+        return []
     try:
-        moves = json.loads(out)
+        moves = json.loads(json_blob)
         if not isinstance(moves, list):
             return []
         return moves
     except json.JSONDecodeError:
+        print(f"  recon LLM JSON parse failed: {json_blob[:200]!r}",
+              file=sys.stderr)
         return []
+
+
+def _extract_first_json_array(text: str) -> str | None:
+    """Find the first balanced JSON array `[...]` in text and return it.
+    Counts bracket depth so embedded objects/arrays inside the top-level
+    array are preserved."""
+    start = text.find("[")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
 
 
 def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
