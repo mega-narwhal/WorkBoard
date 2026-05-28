@@ -172,14 +172,71 @@ for sess in sessions:
     if not args:
         continue
     sim_board_json = os.path.join(os.environ.get("SIM_BOARD_DIR", ""), "board.json")
+    # Pull out --column FINAL so we can override to task and walk the path.
+    final_col = "backlog"
+    try:
+        ci = args.index("--column")
+        final_col = args[ci + 1]
+        args = args[:ci] + args[ci + 2:]
+    except ValueError:
+        pass
+    # Born in task — every card pops here, then flies to its real home so
+    # the user watches the chronological history reconstruct itself.
     try:
         subprocess.run(
-            ["python3", f"{sdir}/card.py", "--board", sim_board_json, "add"] + args,
+            ["python3", f"{sdir}/card.py", "--board", sim_board_json, "add",
+             "--column", "task"] + args,
             env=env, capture_output=True, text=True, timeout=8
         )
     except Exception as e:
         print(f"  ! card add failed: {e}", file=sys.stderr)
-    time.sleep(0.25)  # 250ms pacing — same as serve.py default
+        continue
+    # Resolve the num we just added so subsequent flies target the right card.
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/board.json", timeout=4) as r:
+            board = json.loads(r.read())
+        num = max((c.get("num", 0) for c in board["cards"]), default=0)
+    except Exception:
+        num = 0
+    if num == 0:
+        continue
+
+    # Path table — every hop = one card.py fly call with its own pause.
+    # final 'task' = 0 hops (just the pop-in).
+    hops = []                                        # list of (col, flags_dict)
+    if final_col == "backlog":
+        hops = [("backlog", {})]
+    elif final_col == "inprogress":
+        hops = [("inprogress", {})]
+    elif final_col == "blocked":
+        hops = [("blocked", {})]
+    elif final_col == "done":
+        hops = [("inprogress", {}), ("done", {"writeup": "shipped (discovered)"})]
+        # Bug bounces — sessions with bug signals re-open + re-ship to mirror
+        # real life. Cap at 2 so wall-time stays sane.
+        bugs = (sess.get("bugHints") or [])[:2]
+        for bh in bugs:
+            reason = (bh.splitlines()[0] if isinstance(bh, str) else "")[:80]
+            hops.append(("inprogress", {"bug": reason or "regression"}))
+            hops.append(("done", {"writeup": "patched"}))
+    elif final_col == "task":
+        hops = []
+    else:
+        hops = [(final_col, {})]                     # unknown col — just hop once
+
+    for col, flags in hops:
+        fly_args = ["python3", f"{sdir}/card.py", "--board", sim_board_json,
+                    "fly", str(num), col]
+        for k, v in flags.items():
+            fly_args.extend([f"--{k}", v])
+        try:
+            subprocess.run(fly_args, env=env, capture_output=True, text=True, timeout=8)
+        except Exception as e:
+            print(f"  ! fly {num} → {col} failed: {e}", file=sys.stderr)
+            break
+    # fly --pause-ms (default 400) already paced each hop; small pause
+    # between cards so the next pop-in doesn't overlap the last landing.
+    time.sleep(0.15)
 PYEOF
 
 # ---- lifecycle flight replay -------------------------------------------------

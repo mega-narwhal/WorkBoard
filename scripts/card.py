@@ -404,6 +404,100 @@ def cmd_move(args, d, board):
     print(f"→ #{c['num']} {old} → {args.column}{suffix} (rev {rev})")
 
 
+def cmd_fly(args, d, board):
+    """FLY transition — atomic single-hop column change with side-effect
+    shortcuts and a built-in animation pause so chained flies don't race
+    the browser's simulateUserDragMove (~320ms).
+
+    `move` mutates data. `fly` mutates data + asserts the animation contract.
+
+    Side-effect flags (apply BEFORE the hop):
+      --bug REASON     → add 'bug' tag + 🐞 fix-bug subtask
+      --improve TEXT   → add improvement subtask
+      --subtask TEXT   → add plain subtask
+      --note TEXT      → append to notes
+      --writeup TEXT   → set writeup (typical for hops into 'done')
+
+    Pause:
+      --pause-ms N     → sleep N ms AFTER the save (default 400)
+    """
+    c = find_card(d, args.ref)
+    old = c["column"]
+    ts = now_iso()
+
+    # Side-effects in order: note, plain subtask, bug, improve.
+    if args.note:
+        existing = (c.get("notes") or "").rstrip()
+        c["notes"] = (existing + "\n" + args.note) if existing else args.note
+    if args.subtask:
+        c.setdefault("subtasks", [])
+        sid = new_subtask_id(c)
+        c["subtasks"].append({
+            "id": sid, "text": args.subtask, "done": False,
+            "createdAt": ts, "children": [],
+        })
+        c["lastTouchedSubtask"] = sid
+    if args.bug:
+        c.setdefault("tags", [])
+        if "bug" not in c["tags"]:
+            c["tags"].append("bug")
+        c.setdefault("subtasks", [])
+        sid = new_subtask_id(c)
+        reason = (args.bug or "").strip()
+        text = f"🐞 fix bug: {reason}" if reason else "🐞 fix bug"
+        c["subtasks"].append({
+            "id": sid, "text": text, "done": False,
+            "createdAt": ts, "children": [],
+        })
+        c["lastTouchedSubtask"] = sid
+    if args.improve:
+        c.setdefault("subtasks", [])
+        sid = new_subtask_id(c)
+        c["subtasks"].append({
+            "id": sid, "text": args.improve, "done": False,
+            "createdAt": ts, "children": [],
+        })
+        c["lastTouchedSubtask"] = sid
+
+    # The hop. Mirrors cmd_move's done-semantics so cycle-history (#188) and
+    # bug-tag auto-strip stay consistent across both verbs.
+    c["column"] = args.column
+    if args.column == "done":
+        c["doneAt"] = c.get("doneAt") or ts
+        if "bug" in (c.get("tags") or []):
+            c["tags"] = [t for t in c["tags"] if t != "bug"]
+        c.setdefault("subtasks", [])
+        if not c["subtasks"]:
+            sid = new_subtask_id(c)
+            c["subtasks"].append({
+                "id": sid, "text": "☑ initial ship",
+                "done": True, "doneAt": ts,
+                "createdAt": ts, "children": [],
+            })
+            c["lastTouchedSubtask"] = sid
+        else:
+            sid = c.get("lastTouchedSubtask")
+            st = _find_subtask_anywhere(c["subtasks"], sid) if sid else None
+            if st and not st.get("done"):
+                st["done"] = True
+                st["doneAt"] = ts
+    elif old == "done":
+        c["doneAt"] = None
+
+    if args.writeup:
+        c["writeup"] = args.writeup
+
+    c["updatedAt"] = now_iso()
+    rev = atomic_save(board, d)
+
+    badge = " 🐞" if args.bug else (" ✨" if args.improve else "")
+    suffix = " + writeup" if args.writeup else ""
+    print(f"✈ #{c['num']} {old} → {args.column}{badge}{suffix} (rev {rev})")
+
+    if args.pause_ms > 0:
+        time.sleep(args.pause_ms / 1000.0)
+
+
 # ═════════════════════════════════════════════════════════════════════
 # LIFECYCLE — DO NOT BREAK
 # Canonical Claude-task lifecycle wrapped as a single command. The
@@ -710,6 +804,23 @@ def build_parser():
     pm.add_argument("--writeup", default=None)
     pm.add_argument("--writeup-stdin", action="store_true")
     pm.set_defaults(fn=cmd_move)
+
+    # fly — atomic single-hop with side-effect shortcuts + animation pause
+    pfy = sub.add_parser("fly", help="single-hop column change with --bug/--improve/--note shortcuts + animation pause")
+    pfy.add_argument("ref")
+    pfy.add_argument("column", help="destination column id")
+    pfy.add_argument("--bug", metavar="REASON", default=None,
+                     help="add 'bug' tag + 🐞 fix-bug subtask")
+    pfy.add_argument("--improve", metavar="TEXT", default=None,
+                     help="add improvement subtask")
+    pfy.add_argument("--subtask", metavar="TEXT", default=None,
+                     help="add plain subtask")
+    pfy.add_argument("--note", metavar="TEXT", default=None,
+                     help="append to notes")
+    pfy.add_argument("--writeup", default=None, help="set writeup (typical for done)")
+    pfy.add_argument("--pause-ms", type=int, default=400,
+                     help="sleep N ms after save (default 400, matches simulateUserDragMove)")
+    pfy.set_defaults(fn=cmd_fly)
 
     # subtask
     ps = sub.add_parser("subtask", help="subtask ops")
