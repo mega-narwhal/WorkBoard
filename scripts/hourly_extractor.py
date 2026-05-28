@@ -171,6 +171,168 @@ def extract_cards_for_chunk(chunk: list[tuple[str, list[dict]]],
 
 # ---------- card emission -------------------------------------------------
 
+# ---------- post-extraction reconciliation sweep ----------
+
+_RECON_PROMPT = """\
+You are reconciling a kanban board against the user's recent activity.
+
+Below: cards currently in NON-DONE columns of the board, with their titles, bucket timestamps, and notes.
+After that: the chronological activity log from the same time window.
+
+For each card, decide its TRUE STATUS based on whether the user (in the activity log) later:
+- Said "skip", "nvm", "don't do that", "we won't ship this", "defer", "later" → MOVE to backlog
+- Said "done", "we shipped it", or there is a commit/ship hit matching the card's noun cluster → MOVE to done
+- Said "urgent", "must", "this is impt", "critical", "asap", "p0", "p1", "blocker" → MOVE to mandatory
+- No clear later signal AND card matches active work → STAY
+- Sat untouched > 24h with no follow-up → MOVE to backlog (stale)
+
+Return ONLY a JSON array (no markdown). One object per card you have a confident judgment on (omit cards you'd keep as STAY):
+[
+  {"num": 42, "target": "backlog", "reason": "user said 'lets skip this for now'"},
+  {"num": 73, "target": "done", "reason": "commit cd9f9a1 lands the work"}
+]
+
+Skip cards whose right column is unclear. Be conservative — only move when the signal is clear.
+"""
+
+
+def _build_recon_card_block(cards: list[dict]) -> str:
+    lines: list[str] = []
+    for c in cards:
+        bucket_ts = c.get("createdAt", "")
+        title = c.get("title", "")[:80]
+        notes = (c.get("notes") or "").replace("\n", " ")[:240]
+        lines.append(f"  #{c['num']} [{c['column']}] @{bucket_ts[:16]} — {title}")
+        if notes:
+            lines.append(f"      notes: {notes}")
+    return "\n".join(lines)
+
+
+def _build_activity_digest(events: list[dict], max_chars: int = 8000) -> str:
+    """Compact chronological digest of user prompts + commits for the recon LLM call."""
+    lines: list[str] = []
+    for ev in sorted(events, key=lambda e: e["ts"]):
+        kind = ev["kind"]
+        ts = ev["ts"].strftime("%m-%d %H:%M")
+        if kind in ("user_prompt", "convo_user"):
+            text = (ev.get("text") or "").strip().replace("\n", " ")[:200]
+            if text:
+                lines.append(f"  [{ts}] USER: {text}")
+        elif kind == "git_commit":
+            sha = (ev.get("meta") or {}).get("shaShort", "")
+            lines.append(f"  [{ts}] COMMIT {sha}: {ev['text'][:100]}")
+    out = "\n".join(lines)
+    if len(out) > max_chars:
+        # Keep the END (most recent) so user's later "nvm" calls survive.
+        out = "…[earlier truncated]…\n" + out[-max_chars:]
+    return out
+
+
+def _llm_reconcile(cards: list[dict], events: list[dict],
+                   timeout_s: int = 90) -> list[dict]:
+    """Run one LLM call. Returns list of {num, target, reason}."""
+    card_block = _build_recon_card_block(cards)
+    activity = _build_activity_digest(events)
+    full = (
+        f"{_RECON_PROMPT}\n\n"
+        f"--- CARDS ({len(cards)}) ---\n{card_block}\n\n"
+        f"--- ACTIVITY LOG ---\n{activity}\n"
+    )
+    try:
+        proc = subprocess.run(
+            [_CLAUDE_BIN, "-p", "--output-format", "text",
+             "--model", _LLM_MODEL],
+            input=full, capture_output=True, text=True, timeout=timeout_s,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError) as e:
+        print(f"  ! recon LLM call failed: {e}", file=sys.stderr)
+        return []
+    if proc.returncode != 0:
+        return []
+    out = (proc.stdout or "").strip()
+    out = re.sub(r"^```(?:json)?\s*", "", out)
+    out = re.sub(r"\s*```\s*$", "", out)
+    try:
+        moves = json.loads(out)
+        if not isinstance(moves, list):
+            return []
+        return moves
+    except json.JSONDecodeError:
+        return []
+
+
+def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
+                     banner_num: int | None = None) -> int:
+    """Post-extraction LLM sweep on non-done cards. Asks LLM if any should
+    move based on the activity log. Applies moves. Returns count moved."""
+    try:
+        with board.open("r") as f:
+            state = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return 0
+
+    # Non-done, non-banner cards from columns we want to reconcile.
+    candidates = [
+        c for c in state.get("cards", [])
+        if c.get("column") in ("task", "backlog", "inprogress", "notes")
+        and "banner" not in (c.get("tags") or [])
+        and "discovered" in (c.get("tags") or [])
+    ]
+    if not candidates:
+        return 0
+
+    print(f"▶ reconciliation sweep: {len(candidates)} non-done card(s)…",
+          file=sys.stderr)
+    if banner_num:
+        _banner_update_text(card_py, board, banner_num,
+                            f"🔍 reconciling {len(candidates)} cards…")
+
+    moves = _llm_reconcile(candidates, events)
+    if not moves:
+        print("  recon: 0 moves", file=sys.stderr)
+        return 0
+
+    n_moved = 0
+    for m in moves:
+        num = m.get("num")
+        target = m.get("target")
+        reason = (m.get("reason") or "")[:160]
+        if not isinstance(num, int) or target not in (
+                "task", "backlog", "inprogress", "done", "mandatory"):
+            continue
+        # Find current column
+        cur = next((c for c in candidates if c["num"] == num), None)
+        if not cur:
+            continue
+        if cur["column"] == target:
+            continue
+        args = [sys.executable, str(card_py), "--board", str(board),
+                "fly", str(num), target, "--pause-ms", "150"]
+        if target == "done":
+            args += ["--writeup", f"Recon: {reason}"]
+        else:
+            args += ["--note", f"Recon → {target}: {reason}"]
+        try:
+            out = subprocess.run(args, capture_output=True, text=True, timeout=8)
+        except subprocess.SubprocessError:
+            continue
+        if out.returncode == 0:
+            n_moved += 1
+            print(f"  recon: #{num} → {target}  ({reason[:60]})",
+                  file=sys.stderr)
+    print(f"  recon: {n_moved} card(s) moved", file=sys.stderr)
+    return n_moved
+
+
+def _banner_update_text(card_py: Path, board: Path, num: int, title: str) -> None:
+    args = [sys.executable, str(card_py), "--board", str(board), "update",
+            str(num), "--title", title]
+    try:
+        subprocess.run(args, capture_output=True, text=True, timeout=4)
+    except subprocess.SubprocessError:
+        pass
+
+
 # ---------- progress banner ----------
 
 def _banner_create(card_py: Path, board: Path, total_chunks: int) -> int | None:
@@ -205,12 +367,14 @@ def _banner_update(card_py: Path, board: Path, num: int,
 
 
 def _banner_finish(card_py: Path, board: Path, num: int,
-                   n_cards: int, n_buckets: int, n_chunks: int) -> None:
+                   n_cards: int, n_buckets: int, n_chunks: int,
+                   n_moved: int = 0) -> None:
+    recon_tag = f", reconciled {n_moved}" if n_moved else ""
     args = [sys.executable, str(card_py), "--board", str(board), "update",
             str(num),
-            "--title", f"✓ extraction done — {n_cards} cards from {n_buckets} buckets",
+            "--title", f"✓ extraction done — {n_cards} cards{recon_tag}",
             "--notes", f"emitted {n_cards} card(s) across {n_buckets} bucket(s) "
-                       f"in {n_chunks} chunk(s)"]
+                       f"in {n_chunks} chunk(s). recon moved {n_moved} card(s)."]
     try:
         subprocess.run(args, capture_output=True, text=True, timeout=4)
     except subprocess.SubprocessError:
@@ -339,11 +503,91 @@ def _cwd_in_project(event: dict, project: Path) -> bool:
         return False
 
 
+def _snapshot_path(board: Path) -> Path:
+    return board.parent / "extraction_snapshot.json"
+
+
+def _save_snapshot(board: Path, events: list[dict], params: dict) -> None:
+    """Save current board state + harvested events for offline recon testing."""
+    snap_path = _snapshot_path(board)
+    try:
+        with board.open("r") as f:
+            board_state = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        board_state = {}
+    # Serialize events with ts as ISO string so reload survives JSON.
+    serializable_events = []
+    for ev in events:
+        ev_out = {k: v for k, v in ev.items() if k != "ts"}
+        ev_out["ts"] = ev["ts"].isoformat() if hasattr(ev["ts"], "isoformat") else ev["ts"]
+        serializable_events.append(ev_out)
+    snapshot = {
+        "savedAt": datetime.now(timezone.utc).isoformat(),
+        "params": params,
+        "board": board_state,
+        "events": serializable_events,
+    }
+    try:
+        snap_path.write_text(json.dumps(snapshot, indent=2,
+                                         ensure_ascii=False, default=str))
+        print(f"  💾 snapshot saved → {snap_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"  ! snapshot save failed: {e}", file=sys.stderr)
+
+
+def _load_snapshot(path: Path) -> tuple[dict, list[dict]] | None:
+    """Load board + events from snapshot. Returns (board_state, events)."""
+    try:
+        snap = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"  ! snapshot load failed: {e}", file=sys.stderr)
+        return None
+    events = []
+    for ev in snap.get("events", []):
+        ts = ev.get("ts")
+        if isinstance(ts, str):
+            try:
+                ev["ts"] = datetime.fromisoformat(ts.rstrip("Z") + "+00:00"
+                                                   if ts.endswith("Z") else ts)
+            except ValueError:
+                continue
+        events.append(ev)
+    return snap.get("board", {}), events
+
+
 def run(project: Path, board: Path, port: int, days: int,
         show_lifecycle: bool, pace_s: float,
         max_buckets: int, workers: int = 4,
         bucket_min: int = 60, chunk_size: int = 1,
-        date_filter: str | None = None) -> None:
+        date_filter: str | None = None,
+        reconcile: bool = True,
+        snapshot_load: Path | None = None) -> None:
+    card_py = Path(__file__).resolve().parent / "card.py"
+    if not card_py.exists():
+        print(f"card.py not found at {card_py}", file=sys.stderr)
+        return
+
+    # --snapshot-load: skip extraction, just rehydrate board + run recon.
+    if snapshot_load:
+        loaded = _load_snapshot(snapshot_load)
+        if loaded is None:
+            return
+        board_state, events = loaded
+        try:
+            board.write_text(json.dumps(board_state, indent=2,
+                                         ensure_ascii=False))
+            print(f"  📂 snapshot loaded ← {snapshot_load} "
+                  f"({len(board_state.get('cards', []))} cards, "
+                  f"{len(events)} events)",
+                  file=sys.stderr)
+        except OSError as e:
+            print(f"  ! board rewrite failed: {e}", file=sys.stderr)
+            return
+        if reconcile:
+            n_moved = reconcile_sweep(card_py, board, events)
+            print(f"✓ recon-only run: moved {n_moved} card(s)",
+                  file=sys.stderr)
+        return
     events = _flatten_events(project, days)
     if not events:
         print("no events to extract", file=sys.stderr)
@@ -366,10 +610,7 @@ def run(project: Path, board: Path, port: int, days: int,
         print(f"  date filter: {date_filter} → {len(events)} events",
               file=sys.stderr)
 
-    card_py = Path(__file__).resolve().parent / "card.py"
-    if not card_py.exists():
-        print(f"card.py not found at {card_py}", file=sys.stderr)
-        return
+    # (card_py already resolved at top of run() for snapshot-load path.)
 
     # Bucket by hour
     buckets: dict[int, list[dict]] = {}
@@ -451,13 +692,28 @@ def run(project: Path, board: Path, port: int, days: int,
                 _banner_update(card_py, board, banner_num,
                                completed, len(chunks), n_cards)
 
+    # Save snapshot of post-extraction state BEFORE reconciliation, so
+    # offline recon testing can iterate against a stable baseline.
+    _save_snapshot(board, events, {
+        "project": str(project), "days": days, "bucket_min": bucket_min,
+        "chunk_size": chunk_size, "date_filter": date_filter,
+        "n_buckets": len(sorted_buckets), "n_chunks": len(chunks),
+        "n_cards": n_cards,
+    })
+
+    # Reconciliation sweep — catches "user said nvm" / "matching commit"
+    # signals that the per-bucket extraction missed.
+    n_moved = 0
+    if reconcile:
+        n_moved = reconcile_sweep(card_py, board, events, banner_num)
+
     # Banner → done at the end.
     if banner_num:
         _banner_finish(card_py, board, banner_num, n_cards,
-                       len(sorted_buckets), len(chunks))
+                       len(sorted_buckets), len(chunks), n_moved)
 
     print(f"✓ emitted {n_cards} card(s) across {len(sorted_buckets)} bucket(s) "
-          f"in {len(chunks)} chunk(s)",
+          f"in {len(chunks)} chunk(s); recon moved {n_moved} card(s)",
           file=sys.stderr)
 
 
@@ -482,12 +738,21 @@ def main():
                          "set 2-4 to amortize claude -p cold-start)")
     ap.add_argument("--date", type=str, default=None,
                     help="YYYY-MM-DD UTC — restrict to events on this day only")
+    ap.add_argument("--no-reconcile", action="store_true",
+                    help="skip the post-extraction reconciliation sweep")
+    ap.add_argument("--snapshot-load", type=Path, default=None,
+                    help="path to extraction_snapshot.json — skips extraction "
+                         "and runs only the reconciliation sweep against the "
+                         "saved state. Lets us iterate on recon LLM prompts "
+                         "without paying ~10min per test.")
     args = ap.parse_args()
     os.environ["BOARD_SERVER"] = f"http://127.0.0.1:{args.port}"
     run(args.project.resolve(), args.board.resolve(), args.port,
         args.days, args.show_lifecycle, args.pace, args.max_buckets,
         workers=args.workers, bucket_min=args.bucket_min,
-        chunk_size=args.chunk_size, date_filter=args.date)
+        chunk_size=args.chunk_size, date_filter=args.date,
+        reconcile=not args.no_reconcile,
+        snapshot_load=args.snapshot_load)
 
 
 if __name__ == "__main__":
