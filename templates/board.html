@@ -1053,80 +1053,90 @@
     animation: cal-modal-fade .14s ease-out;
   }
   @keyframes cal-modal-fade { from { opacity: 0 } to { opacity: 1 } }
+  /* #235v2: wider + airier — easier to read than the dense grid */
   .cal-day-modal {
     background: var(--bg);
     border: 1px solid var(--card-border);
-    border-radius: 12px;
-    width: min(760px, 92vw); max-height: 82vh;
+    border-radius: 14px;
+    width: min(900px, 92vw); max-height: 86vh;
     display: flex; flex-direction: column;
     box-shadow: 0 20px 60px rgba(0,0,0,.35);
   }
   .cal-day-modal-head {
-    padding: 14px 18px;
+    padding: 18px 28px;
     border-bottom: 1px solid var(--card-border);
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; gap: 14px;
   }
   .cal-day-modal-head h2 {
-    flex: 1; margin: 0; font-size: 16px; color: var(--ink); font-weight: 700;
+    flex: 1; margin: 0; font-size: 17px; color: var(--ink); font-weight: 700;
   }
-  .cal-day-modal-nav { display: flex; gap: 4px; }
-  .cal-day-modal-nav button, .cal-day-modal-close {
+  .cal-day-modal-head .hint {
+    font-size: 11px; color: var(--muted); font-weight: 500;
+    letter-spacing: .02em;
+  }
+  .cal-day-modal-close {
     background: var(--card-bg); border: 1px solid var(--card-border);
-    color: var(--ink); border-radius: 5px;
-    padding: 4px 10px; font-size: 12px; cursor: pointer;
+    color: var(--ink); border-radius: 6px;
+    padding: 6px 12px; font-size: 15px; line-height: 1; cursor: pointer;
     transition: all .12s;
   }
-  .cal-day-modal-nav button:hover, .cal-day-modal-close:hover {
+  .cal-day-modal-close:hover {
     background: var(--card-border); border-color: var(--muted);
   }
-  .cal-day-modal-close { font-size: 14px; line-height: 1; padding: 4px 8px; }
   .cal-day-modal-body {
-    padding: 12px 18px 18px;
+    padding: 18px 28px 24px;
     overflow-y: auto; flex: 1;
+    scroll-behavior: smooth;
   }
-  .cal-day-modal-section { margin-top: 14px; }
+  .cal-day-modal-section { margin-top: 26px; }
   .cal-day-modal-section:first-child { margin-top: 0; }
   .cal-day-modal-section > .sec-head {
-    font-size: 10px; color: var(--muted); font-weight: 700;
-    text-transform: uppercase; letter-spacing: .1em;
-    margin: 0 0 8px; padding-bottom: 4px;
+    font-size: 11px; color: var(--muted); font-weight: 700;
+    text-transform: uppercase; letter-spacing: .12em;
+    margin: 0 0 12px; padding-bottom: 6px;
     border-bottom: 1px solid var(--card-border);
     display: flex; justify-content: space-between; align-items: baseline;
   }
   .cal-day-modal-section > .sec-head .center-flag {
-    color: var(--accent); font-size: 9px; letter-spacing: .14em;
+    color: var(--accent); font-size: 10px; letter-spacing: .14em;
+  }
+  .cal-day-modal-section.is-focus > .sec-head {
+    color: var(--ink); border-bottom-color: var(--accent);
   }
   .cal-day-modal-card {
-    padding: 9px 11px;
+    padding: 14px 18px;
     border: 1px solid var(--card-border);
-    border-left-width: 3px;
-    border-radius: 6px;
-    margin-bottom: 6px;
+    border-left-width: 4px;
+    border-radius: 8px;
+    margin-bottom: 10px;
     cursor: pointer;
     background: var(--card-bg);
-    transition: background .12s, border-color .12s;
+    transition: background .12s, border-color .12s, transform .12s;
   }
-  .cal-day-modal-card:hover { background: rgba(217,119,87,.06); border-color: var(--muted); }
+  .cal-day-modal-card:hover {
+    background: rgba(217,119,87,.06); border-color: var(--muted);
+    transform: translateX(2px);
+  }
   .cal-day-modal-card.done       { border-left-color: var(--green); }
   .cal-day-modal-card.prio-critical { border-left-color: var(--red); }
   .cal-day-modal-card.prio-mid      { border-left-color: var(--amber); }
   .cal-day-modal-card.prio-low      { border-left-color: #b3b9c4; }
   .cal-day-modal-card .cm-row1 {
-    display: flex; align-items: baseline; gap: 8px;
-    font-size: 13px; color: var(--ink); font-weight: 600;
-    margin-bottom: 3px;
+    display: flex; align-items: baseline; gap: 10px;
+    font-size: 14px; color: var(--ink); font-weight: 600;
+    margin-bottom: 6px;
   }
   .cal-day-modal-card .cm-num { color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
   .cal-day-modal-card.done .cm-num { color: var(--green); }
-  .cal-day-modal-card .cm-code { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .03em; flex-shrink: 0; }
+  .cal-day-modal-card .cm-code { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; flex-shrink: 0; }
   .cal-day-modal-card .cm-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cal-day-modal-card .cm-row2 {
-    font-size: 11px; color: var(--muted); line-height: 1.45;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    font-size: 12.5px; color: var(--muted); line-height: 1.55;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
     overflow: hidden;
   }
   .cal-day-modal-section .empty {
-    font-size: 11px; color: var(--muted); font-style: italic; padding: 4px 0;
+    font-size: 12px; color: var(--muted); font-style: italic; padding: 4px 0;
   }
 
   textarea.origin-modal {
@@ -3703,9 +3713,9 @@ function makeCalendarChip(card) {
   return chip;
 }
 
-// #235 — Day-detail modal: full-width readable view of one day + its
-// immediate neighbors. Solves the "cells are too squished to read" pain.
-// State: just the center YYYY-MM-DD; ← / → and ArrowLeft/ArrowRight shift it.
+// #235 — Day-detail modal: full-width readable view of a multi-day window
+// (center ± 7 days). Solves the "cells are too squished to read" pain.
+// Scroll IS the navigation; no prev/next buttons.
 let _calDayModal = null;
 let _calDayModalCenter = null;
 
@@ -3782,27 +3792,37 @@ function _makeCalDayModalCard(card) {
   return row;
 }
 
+// #235v2: render a 15-day window (center ± 7); scroll IS the navigation.
+// No prev/next buttons — just scroll up for past, down for future. The
+// focused day auto-scrolls into view on open via .is-focus's
+// scrollIntoView, so context lands instantly without searching.
+const CAL_MODAL_WINDOW = 7;  // days on each side of the focused day
+
 function _buildCalDayModalBody() {
   const body = document.createElement('div');
   body.className = 'cal-day-modal-body';
   const center = _calDayModalCenter;
-  const days = [_shiftYmd(center, -1), center, _shiftYmd(center, 1)];
-  days.forEach((ds, idx) => {
+  for (let delta = -CAL_MODAL_WINDOW; delta <= CAL_MODAL_WINDOW; delta++) {
+    const ds = _shiftYmd(center, delta);
     const sec = document.createElement('div');
     sec.className = 'cal-day-modal-section';
+    if (delta === 0) sec.classList.add('is-focus');
+    sec.dataset.ds = ds;
+
     const head = document.createElement('div');
     head.className = 'sec-head';
     const label = document.createElement('span');
     const cards = _cardsForDay(ds);
     label.textContent = _humanDay(ds) + ' · ' + cards.length + ' card' + (cards.length === 1 ? '' : 's');
     head.appendChild(label);
-    if (idx === 1) {
+    if (delta === 0) {
       const flag = document.createElement('span');
       flag.className = 'center-flag';
       flag.textContent = 'FOCUSED';
       head.appendChild(flag);
     }
     sec.appendChild(head);
+
     if (cards.length) {
       cards.forEach(c => sec.appendChild(_makeCalDayModalCard(c)));
     } else {
@@ -3812,17 +3832,8 @@ function _buildCalDayModalBody() {
       sec.appendChild(empty);
     }
     body.appendChild(sec);
-  });
+  }
   return body;
-}
-
-function _refreshCalDayModalBody() {
-  if (!_calDayModal) return;
-  const old = _calDayModal.querySelector('.cal-day-modal-body');
-  const fresh = _buildCalDayModalBody();
-  if (old && old.parentNode) old.parentNode.replaceChild(fresh, old);
-  const titleEl = _calDayModal.querySelector('.cal-day-modal-head h2');
-  if (titleEl) titleEl.textContent = _humanDay(_calDayModalCenter);
 }
 
 function openCalDayModal(ds) {
@@ -3840,34 +3851,31 @@ function openCalDayModal(ds) {
   const h = document.createElement('h2');
   h.textContent = _humanDay(ds);
   head.appendChild(h);
-  const nav = document.createElement('div');
-  nav.className = 'cal-day-modal-nav';
-  const prev = document.createElement('button');
-  prev.textContent = '← prev day';
-  prev.onclick = () => shiftCalDayModal(-1);
-  nav.appendChild(prev);
-  const next = document.createElement('button');
-  next.textContent = 'next day →';
-  next.onclick = () => shiftCalDayModal(+1);
-  nav.appendChild(next);
-  head.appendChild(nav);
+  const hint = document.createElement('span');
+  hint.className = 'hint';
+  hint.textContent = 'scroll up = past · scroll down = future';
+  head.appendChild(hint);
   const close = document.createElement('button');
   close.className = 'cal-day-modal-close';
   close.textContent = '×';
   close.onclick = closeCalDayModal;
   head.appendChild(close);
   modal.appendChild(head);
-  modal.appendChild(_buildCalDayModalBody());
+
+  const body = _buildCalDayModalBody();
+  modal.appendChild(body);
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
   _calDayModal = modal;
   document.addEventListener('keydown', _onCalDayModalKey);
-}
 
-function shiftCalDayModal(delta) {
-  if (!_calDayModalCenter) return;
-  _calDayModalCenter = _shiftYmd(_calDayModalCenter, delta);
-  _refreshCalDayModalBody();
+  // Land on the focused day — scroll the focus section into view at the
+  // top of the visible region. Slight offset so the section header isn't
+  // glued to the very top edge. requestAnimationFrame so layout has settled.
+  requestAnimationFrame(() => {
+    const focus = body.querySelector('.cal-day-modal-section.is-focus');
+    if (focus) body.scrollTop = Math.max(0, focus.offsetTop - body.offsetTop - 4);
+  });
 }
 
 function closeCalDayModal() {
@@ -3882,8 +3890,6 @@ function closeCalDayModal() {
 function _onCalDayModalKey(e) {
   if (!_calDayModal) return;
   if (e.key === 'Escape') { e.preventDefault(); closeCalDayModal(); }
-  else if (e.key === 'ArrowLeft') { e.preventDefault(); shiftCalDayModal(-1); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); shiftCalDayModal(+1); }
 }
 
 function renderColumn(col, cards) {
