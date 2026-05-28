@@ -73,16 +73,16 @@ The SessionStart hook already injects a digest at session boot — you know the 
 
 | User said / situation | Action |
 |---|---|
-| "shipped X" / "deployed Y" / "fixed Z" / "verified" / "done with N" / "landed" | **Must use** — `card.py move <num> done` with a real writeup |
+| "shipped X" / "deployed Y" / "fixed Z" / "verified" / "done with N" / "landed" | **Must use** — `card.py fly <num> done --writeup "<paragraph>"` |
 | "what's left?" / "status?" / "where are we?" / "what shipped today?" | **Must use** — read the SessionStart digest first; `card.py list` for slices |
 | "add a card for X" / "log this" / "track X" / "save this for later" | **Must use** — `card.py add` |
-| "move X to backlog/blocked/in-progress" / "this is deferred" / "pause X" | **Must use** — `card.py move` |
+| "move X to backlog/blocked/in-progress" / "this is deferred" / "pause X" | **Must use** — `card.py fly <num> <col>` (chained-safe + animated) |
 | User opens session with no specific ask (just "what's next?") | **Drift check** — surface stale in-progress cards from the digest (Tier 1 only) |
 | Conversation just shipped something but no card moved | **Must use — backfill NOW.** Don't batch to session end. This is the drift class card #84 was built to kill. |
 | "debug this function" / "why is X failing?" / "explain this code" | **Skip** — board not relevant |
-| "rename foo to bar" / "refactor this file" / pure code edits | **Skip — unless** that work ends in a ship/fix; then move-card right after |
+| "rename foo to bar" / "refactor this file" / pure code edits | **Skip — unless** that work ends in a ship/fix; then fly-card right after |
 | "what did we do yesterday?" / convo recap | **Use lightly** — the digest's "Last shipped" line covers most asks; only Tier 2 if the user wants more |
-| Main Claude just ran `git commit` / `git push` / `systemctl restart` for prod | **Must use** — a real ship; `card.py move done` with the commit SHA |
+| Main Claude just ran `git commit` / `git push` / `systemctl restart` for prod | **Must use** — a real ship; `card.py fly <num> done --writeup "<commit SHA + what shipped>"` |
 
 **Default bias:** under-engage when uncertain. A missed card is recoverable. An over-eager skill that interjects on every code question is noise. But once you DO act, act fully — move + writeup + index regen + bidirectional link if there's a parent.
 
@@ -171,13 +171,19 @@ This makes the board feel real-time — cards move as work happens, not at sessi
 
 When the user gives Claude a substantive task in a board-steward workspace, drive the card through these stages — same sequence the user-drag and SSE simulations animate end-to-end. **No "want me to add a card?" prompt — just do it.**
 
+**Use `fly` for every cross-column hop.** `card.py fly <num> <col>` is the canonical verb — it mutates data AND asserts the animation contract (~320ms `simulateUserDragMove` + 400ms default pause so chained flies don't race the browser). It accepts the same side-effect flags as the legacy verbs: `--bug REASON`, `--improve TEXT`, `--subtask TEXT`, `--note TEXT`, `--writeup STR`. `card.py move` still exists as a data-only fallback when you explicitly *don't* want the chained pause.
+
 1. **On receipt** — `card.py add --column task --title "<task>" --priority <c|m|l> --origin "<user's exact phrasing>"`. Card pops into the Task column with the animated pickup.
-2. **On start** — `card.py move <num> inprogress` the moment work actually begins. Card slides to In Progress and the active-work coral halo pulses around it (1800ms infinite).
+2. **On start** — `card.py fly <num> inprogress` the moment work actually begins. Card flies from Task to In Progress; the active-work coral halo pulses around it (1800ms infinite).
 3. **On scope expansion / new finding mid-task** — `card.py subtask add <num> "<the new step>"`. Subtasks tree out *inside* the card; the parent never leaves In Progress while children are pending.
-4. **On a transient blocker** — `card.py move <num> blocked --notes "<reason>"`. Move back to `inprogress` when unblocked.
-5. **On ship** — `card.py move <num> done --writeup "<paragraph: commits, files, verification>"`. Card glides to the top of Done's today-group with FLIP siblings reflowing.
-6. **On regression after ship** — `card.py bug <num> --reason "<what broke>"` (the 4th lifecycle verb). Card goes back to In Progress with the `bug` tag AND a new open `🐞 fix bug: <reason>` subtask; the next `move done` closes that subtask, leaving permanent evidence of the cycle.
-7. **On enhancement after ship** — `card.py improve <num> "<what's being added>"` (the 5th verb). Same flow as bug but without the bug tag; the improvement subtask is appended open, closed on next ship.
+4. **On a transient blocker** — `card.py fly <num> blocked --note "<reason>"`. Fly back to `inprogress` when unblocked.
+5. **On ship** — `card.py fly <num> done --writeup "<paragraph: commits, files, verification>"`. Card glides to the top of Done's today-group with FLIP siblings reflowing.
+6. **On regression after ship** — `card.py fly <num> inprogress --bug "<what broke>"` (the 4th lifecycle verb). Card flies back to In Progress with the `bug` tag AND a new open `🐞 fix bug: <reason>` subtask; the next `fly <num> done --writeup` closes that subtask, leaving permanent evidence of the cycle. (`card.py bug` still works as a single-purpose alias.)
+7. **On enhancement after ship** — `card.py fly <num> inprogress --improve "<what's being added>"` (the 5th verb). Same flow as bug but without the bug tag; the improvement subtask is appended open, closed on next ship.
+
+#### Why `fly` and not `move`
+
+`move` mutates data; the SSE event fires; the browser animates whenever it sees the card next. But chained moves race each other — three `move` calls in 50ms collapse into one visual hop because the second/third arrive before the first animation finishes. `fly` adds a `--pause-ms 400` default so each hop is fully visible. The user explicitly asked for the "task → ip → done → ip(bug) → done → blocked → backlog" flight to be watchable in real time — that's what `fly` is for.
 
 #### Subtask semantic (post-#188)
 
