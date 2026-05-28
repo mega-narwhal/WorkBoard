@@ -52,6 +52,7 @@ import datetime
 import difflib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -268,6 +269,96 @@ def _check_tags(tags: list[str], d: dict, force: bool) -> list[str]:
     return accepted
 
 
+# ===== auto-urgent detection (#85) =====
+# Card-level urgency detection. When `card.py add` finds an urgency signal in
+# the title or origin, the card lands in the 🚨 SUPER URGENT column (auto-created
+# if missing) with priority bumped to critical. Telemetry event logged so noise
+# can be reviewed via report.py. Opt out per-call via --no-auto-urgent.
+
+# Strong markers always trigger (case-insensitive, word-boundary).
+_AUTO_URGENT_STRONG = re.compile(
+    r"\b(super\s+urgent|asap|p0|emergency|blocker|production\s+down|prod\s+down)\b",
+    re.IGNORECASE,
+)
+# Weak markers need additional framing (ALL-CAPS occurrence OR a `!` nearby OR
+# explicit "this is X" phrasing) to fire — protects against casual mentions.
+_AUTO_URGENT_WEAK = re.compile(
+    r"\b(urgent|critical\s+bug|broken|on\s+fire|fire)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_urgency(*texts: str) -> str | None:
+    """Return the matched keyword if any source text expresses urgency, else None.
+
+    Strong markers fire unconditionally. Weak markers require either an
+    ALL-CAPS occurrence of the same word OR an exclamation mark within ~40
+    chars OR an explicit framing phrase ("this is urgent", "it's urgent")."""
+    for t in texts:
+        if not t:
+            continue
+        m = _AUTO_URGENT_STRONG.search(t)
+        if m:
+            return m.group(0).lower()
+    for t in texts:
+        if not t:
+            continue
+        m = _AUTO_URGENT_WEAK.search(t)
+        if not m:
+            continue
+        word = m.group(0)
+        # Strong framing: ALL-CAPS form of the word anywhere in this text
+        if re.search(rf"\b{re.escape(word)}\b", t) and word.upper() in t:
+            return word.lower()
+        # Or `!` within 40 chars of the match
+        start, end = m.span()
+        window = t[max(0, start - 40): end + 40]
+        if "!" in window:
+            return word.lower()
+        # Or explicit "this/it is X" framing
+        if re.search(rf"\b(this|it|that)('?s|\s+is)\s+(an?\s+|so\s+|really\s+)?{re.escape(word)}\b", t, re.IGNORECASE):
+            return word.lower()
+    return None
+
+
+def _ensure_super_urgent_col(d: dict) -> bool:
+    """Insert the super-urgent column at position 0 if missing. Returns True iff
+    a new column was created. Idempotent: re-runs are no-ops."""
+    cols = d.setdefault("columns", [])
+    if any(c.get("id") == "super-urgent" for c in cols):
+        return False
+    cols.insert(0, {
+        "id": "super-urgent",
+        "name": "🚨 SUPER URGENT",
+        "kind": "todo",
+        "stackUnder": None,
+    })
+    return True
+
+
+def _log_auto_urgent(board: Path, card_num: int, keyword: str, created_col: bool) -> None:
+    """Best-effort telemetry: append one event to events.jsonl. Silent on failure
+    so card.py adds never break on telemetry hiccups."""
+    try:
+        ev = {
+            "ts": now_iso(),
+            "trigger": f"trigger-keyword:{keyword}",
+            "project": str(board.parent.resolve()),
+            "card_num": card_num,
+            "writes": {"cards_added": 1, "auto_urgent_col_created": created_col},
+            "notes": f"auto-urgent fired on keyword '{keyword}'",
+        }
+        log_script = SKILL_DIR / "scripts" / "log_event.py"
+        if log_script.is_file():
+            subprocess.run(
+                ["python3", str(log_script), "--event", json.dumps(ev)],
+                timeout=2, check=False,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+    except Exception:
+        pass
+
+
 # ===== subtask tree helpers =====
 
 def find_subtask(nodes: list, sid: str):
@@ -326,20 +417,37 @@ def cmd_add(args, d, board):
     # card row was actually written now.
     created = getattr(args, "created_at", None) or now
     tags = _check_tags(args.tag or [], d, getattr(args, "force", False))
+
+    # Auto-urgent (#85): detect urgency keywords in title+origin and route to
+    # the SUPER URGENT column with critical priority. --urgent forces; --no-auto-urgent skips.
+    auto_urgent_kw = None
+    auto_urgent_col_created = False
+    if getattr(args, "urgent", False):
+        auto_urgent_kw = "--urgent"
+    elif not getattr(args, "no_auto_urgent", False):
+        auto_urgent_kw = _detect_urgency(args.title, origin)
+    target_col = args.column
+    target_prio = args.priority
+    if auto_urgent_kw:
+        auto_urgent_col_created = _ensure_super_urgent_col(d)
+        target_col = "super-urgent"
+        if target_prio not in ("critical",):
+            target_prio = "critical"
+
     card = {
         "num": d["nextNum"],
         "id": cid,
         "code": args.code or "",
-        "priority": args.priority,
+        "priority": target_prio,
         "title": args.title,
-        "column": args.column,
+        "column": target_col,
         "tags": tags,
         "origin": origin,
         "notes": notes,
         "writeup": writeup,
         "createdAt": created,
         "updatedAt": now,
-        "doneAt": created if args.column == "done" else None,
+        "doneAt": created if target_col == "done" else None,
         "lastTouchedSubtask": None,
         "linkedCards": [],
         "subtasks": [],
@@ -357,7 +465,13 @@ def cmd_add(args, d, board):
             other["updatedAt"] = now
 
     rev = atomic_save(board, d)
-    print(f"+ #{card['num']} {card['code'] or card['id']} → {args.column} (rev {rev})")
+    if auto_urgent_kw:
+        _log_auto_urgent(board, card["num"], auto_urgent_kw, auto_urgent_col_created)
+        col_note = " (🚨 col created)" if auto_urgent_col_created else ""
+        print(f"+ #{card['num']} {card['code'] or card['id']} → {target_col}{col_note} "
+              f"[auto-urgent: '{auto_urgent_kw}'] (rev {rev})")
+    else:
+        print(f"+ #{card['num']} {card['code'] or card['id']} → {target_col} (rev {rev})")
 
 
 def cmd_update(args, d, board):
@@ -839,6 +953,13 @@ def build_parser():
                          "Use when importing historic work so board sorts chronologically.")
     pa.add_argument("--force", action="store_true",
                     help="Accept tags that aren't in board.json tagTaxonomy (otherwise blocked w/ close-match suggestion)")
+    pa.add_argument("--urgent", action="store_true",
+                    help="Force-route this card to 🚨 SUPER URGENT col with critical priority "
+                         "(creates the column if missing).")
+    pa.add_argument("--no-auto-urgent", action="store_true",
+                    help="Skip urgency-keyword detection in title/origin (#85). Use when "
+                         "the words 'urgent/asap/blocker/...' are part of the card content, "
+                         "not a real urgency signal.")
     pa.set_defaults(fn=cmd_add)
 
     # update
