@@ -909,6 +909,66 @@ def cmd_show(args, d, board):
     print(json.dumps(c, indent=2, ensure_ascii=False))
 
 
+# ===== prelaunch gate (#91) =====
+# Cards in launch-blocking columns/priorities that aren't shipped or blocked.
+# Surface these before any public-facing ship: github-repo flip private→public,
+# `gh release create`, `npm publish`, marketing send, DNS go-live. Claude calls
+# this before launch-shaped actions; SessionStart hook also injects a count.
+
+_LAUNCH_BLOCKING_COLS = ("super-urgent", "mandatory")
+_LAUNCH_BLOCKING_PRIOS = ("critical", "mid")
+
+
+def _prelaunch_open_cards(d: dict) -> list[dict]:
+    """Return list of cards that block launch.
+
+    Rule (from card #91): in super-urgent or mandatory column, priority
+    critical or mid, not in done/blocked. Sorted: super-urgent first, then
+    by priority (critical → mid), then by card num."""
+    open_cards = []
+    for c in d.get("cards", []):
+        col = c.get("column")
+        if col not in _LAUNCH_BLOCKING_COLS:
+            continue
+        if (c.get("priority") or "low") not in _LAUNCH_BLOCKING_PRIOS:
+            continue
+        open_cards.append(c)
+    open_cards.sort(key=lambda c: (
+        0 if c.get("column") == "super-urgent" else 1,
+        0 if c.get("priority") == "critical" else 1,
+        c.get("num", 0),
+    ))
+    return open_cards
+
+
+def cmd_prelaunch_check(args, d, board):
+    open_cards = _prelaunch_open_cards(d)
+    if args.json:
+        out = [{
+            "num": c["num"],
+            "code": c.get("code") or c.get("id"),
+            "column": c.get("column"),
+            "priority": c.get("priority"),
+            "title": c.get("title", ""),
+        } for c in open_cards]
+        print(json.dumps({"open_count": len(open_cards), "items": out}, indent=2))
+    elif args.count:
+        print(len(open_cards))
+    else:
+        if not open_cards:
+            print("✅ prelaunch-check: 0 blocking items — clear to launch")
+        else:
+            print(f"⚠️  prelaunch-check: {len(open_cards)} item(s) still open")
+            for c in open_cards:
+                col = "SUPER URGENT" if c["column"] == "super-urgent" else "MANDATORY  "
+                p = (c.get("priority") or "-")[:1].upper()
+                code = c.get("code") or c.get("id")
+                print(f"  [{col}] #{c['num']:>3} [{p}] {code:<18} {c.get('title','')[:60]}")
+            print()
+            print(f"Run `card.py show <num>` for detail, or `card.py fly <num> done` to ship.")
+    sys.exit(0 if not open_cards else 9)
+
+
 def cmd_list(args, d, board):
     cards = d["cards"]
     if args.column:
@@ -1072,6 +1132,15 @@ def build_parser():
     pls.add_argument("--priority", default=None)
     pls.add_argument("--tag", default=None)
     pls.set_defaults(fn=cmd_list)
+
+    # prelaunch-check (#91) — exit 9 if any super-urgent/mandatory items open
+    ppl = sub.add_parser("prelaunch-check",
+                         help="exit 9 if any super-urgent/mandatory cards still open. "
+                              "Run BEFORE any public-facing ship (gh release, npm publish, "
+                              "DNS go-live, repo flip private→public).")
+    ppl.add_argument("--json", action="store_true", help="emit JSON instead of human text")
+    ppl.add_argument("--count", action="store_true", help="emit just the open count (for shell scripts)")
+    ppl.set_defaults(fn=cmd_prelaunch_check)
 
     return ap
 

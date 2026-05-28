@@ -83,6 +83,8 @@ The SessionStart hook already injects a digest at session boot — you know the 
 | "rename foo to bar" / "refactor this file" / pure code edits | **Skip — unless** that work ends in a ship/fix; then fly-card right after |
 | "what did we do yesterday?" / convo recap | **Use lightly** — the digest's "Last shipped" line covers most asks; only Tier 2 if the user wants more |
 | Main Claude just ran `git commit` / `git push` / `systemctl restart` for prod | **Must use** — a real ship; `card.py fly <num> done --writeup "<commit SHA + what shipped>"` |
+| User signals public launch: `publish`, `launch`, `go live`, `release`, `make public`, `push to public`, `gh release create`, `npm publish`, `pypi upload`, DNS go-live, repo flip private→public | **Must use — gate before action.** Run `card.py prelaunch-check`. Exit 9 = open items; surface the list to the user verbatim and ask "OK to launch with these open?" before any irreversible step. SessionStart digest also shows "🚨 LAUNCH-BLOCKING: N" when relevant. |
+| User says urgent: `URGENT`, `ASAP`, `P0`, `EMERGENCY`, `BLOCKER`, `production down`, `critical bug!`, `it's broken` | **Must use** — `card.py add` (auto-detects urgency from title/origin, routes to 🚨 SUPER URGENT col with critical priority). Pass `--urgent` to force, `--no-auto-urgent` to opt out. |
 
 **Default bias:** under-engage when uncertain. A missed card is recoverable. An over-eager skill that interjects on every code question is noise. But once you DO act, act fully — move + writeup + index regen + bidirectional link if there's a parent.
 

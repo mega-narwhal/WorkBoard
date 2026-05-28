@@ -119,6 +119,15 @@ for k, n in counts.items():
 
 print(" · ".join(parts))
 print(f"Last shipped: {last}")
+
+# Launch-gate count (#91): items in super-urgent/mandatory with critical/mid prio.
+# Surfaces blockers without loading the full board into context.
+blocking = 0
+for c in cards:
+    if c.get("column") in ("super-urgent", "mandatory") and (c.get("priority") or "low") in ("critical", "mid"):
+        blocking += 1
+if blocking:
+    print(f"🚨 LAUNCH-BLOCKING: {blocking} open · run `card.py prelaunch-check` before any launch/publish action")
 PY
 )"
 
