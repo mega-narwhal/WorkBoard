@@ -21,6 +21,9 @@ Event schema (see telemetry/README.md for full doc):
     drift_flagged  int — items surfaced as drift
     drift_applied  int — drift items the user told you to apply this turn
     bookends       {greeted: bool, signed_off: bool}
+    est_tokens     int — estimated tokens consumed this invocation
+                   (sum of bytes read from board files + card.py output) / 4.
+                   Lets report.py flag bloat trends. See docs/TOKEN_BUDGET.md.
     issues         [str] — known issue tags (see below)
     notes          str — free-form pain / observation
 

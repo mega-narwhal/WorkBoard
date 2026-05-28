@@ -131,21 +131,11 @@ card_py="$(dirname "$0")/card.py"
 
 cat <<MSG
 <board-steward-session-start>
-A live work board is tracking this project.
+Board: ${board_path}
+${live_line:-(server down — start: python3 $(dirname "$0")/serve.py --project ${project_dir})}
+${digest}
 
-  board:   ${board_path}
-  ${live_line:-(server not running — start with: python3 $(dirname "$0")/serve.py --project ${project_dir})}
-
-  ${digest}
-
-PROTOCOL for this session:
-  - Each time you ship, deploy, fix, complete, or defer something, run
-    \`python3 ${card_py} add\` or \`${card_py} move\` immediately.
-    Don't batch. The board is source of truth — your memory will drift.
-  - For status queries ("what's left?", "what shipped today?"), use the
-    board (\`card.py list\` or read the digest above) — not the conversation.
-  - Don't load the full board.json unless you need to. The digest covers most
-    questions. Use \`card.py show <num|code>\` for one-card detail.
+Protocol: every ship/fix/defer → \`${card_py} add\` or \`${card_py} move\` immediately (no batching). Status queries → \`card.py list\` or digest above, not memory. Detail → \`card.py show <num>\`. Never auto-Read board.json.
 </board-steward-session-start>
 MSG
 

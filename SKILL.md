@@ -42,7 +42,7 @@ Fill in the numbers from your run. If nothing changed, say `0 updates applied`.
 
 **After signoff, append one JSON event to `~/.agents/skills/board-steward/telemetry/events.jsonl`** by calling `scripts/log_event.py`. This is what lets the skill grade itself honestly later (see `telemetry/README.md` for the full schema + issue tag list).
 
-The event captures: trigger, board state (rev/cards), what you read (`index` / `board` / `archive:YYYY-MM`), what you wrote, drift detected, bookend compliance, **and any pain notes**. The `notes` and `issues` fields are the gold — they answer "where is the Steward struggling?" 2-3 days from now.
+The event captures: trigger, board state (rev/cards), what you read (`index` / `board` / `archive:YYYY-MM`), what you wrote, drift detected, bookend compliance, **estimated token cost** (`est_tokens` = bytes read + CLI stdout, /4), **and any pain notes**. The `notes` and `issues` fields are the gold — they answer "where is the Steward struggling?" 2-3 days from now. `est_tokens` lets `report.py` flag bloat trends (see `docs/TOKEN_BUDGET.md`).
 
 ```bash
 cat <<EOF | python3 ~/.agents/skills/board-steward/scripts/log_event.py
@@ -54,6 +54,7 @@ cat <<EOF | python3 ~/.agents/skills/board-steward/scripts/log_event.py
   "writes": {"cards_moved":0,"cards_added":0,"subtasks_changed":0,"writeups_filled":0},
   "drift_flagged": 3, "drift_applied": 0,
   "bookends": {"greeted": true, "signed_off": true},
+  "est_tokens": 850,
   "issues": [],
   "notes": ""
 }

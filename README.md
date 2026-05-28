@@ -4,6 +4,8 @@ A live kanban work-board for Claude Code agents and the humans they work with. T
 
 Originally built as the `board-steward` Claude Code skill; this repo is the canonical source.
 
+**Token cost.** ~80 tokens of skill-list description (always-on). ~130 tokens once per session for the board digest. The full `SKILL.md` (~7.7K tokens) loads only when Claude actively engages with the board. `board.json` itself (can be 130 KB+) lives on disk and is never auto-loaded — Claude queries it via `card.py` CLI primitives that return tens to a few thousand tokens per call. See [`docs/TOKEN_BUDGET.md`](docs/TOKEN_BUDGET.md) for measurements + peer benchmarks (claude-mem, mem0, letta, graphify, CLAUDE.md baseline).
+
 ## What's in the box
 
 - `SKILL.md` — the playbook Claude follows (greet → traverse → act → log → sign off)
