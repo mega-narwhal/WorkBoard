@@ -3535,8 +3535,23 @@ function toggleTagLegend(open) {
 // Filter applies to chips shown on the grid. null = show all.
 let _calFilter = new Set(); // multi-select: any of 'done' | 'open' | 'critical' | 'mid' | 'low'
 
+// #242 — preserve user's calendar scroll across re-renders + view switches.
+// render() rebuilds the calendar grid every paint (e.g. when opening a card
+// modal); without this, the user lands back at top each time they Esc out.
+let _calScrollY = 0;
+function _captureCalScroll() {
+  const w = document.querySelector('#calendar .cal-weeks');
+  if (w) _calScrollY = w.scrollTop;
+}
+function _restoreCalScroll() {
+  const w = document.querySelector('#calendar .cal-weeks');
+  if (w && _calScrollY) w.scrollTop = _calScrollY;
+}
+
 function renderCalendar() {
   const cal = $('#calendar');
+  // Save scroll from the about-to-be-clobbered DOM before innerHTML wipe.
+  _captureCalScroll();
   cal.innerHTML = '';
 
   // Anchor month: default = current month
@@ -3567,15 +3582,18 @@ function renderCalendar() {
   };
   nav.appendChild(mkNav('‹', '', () => {
     _calCursor = new Date(monthStart.getFullYear(), monthStart.getMonth() - 1, 1);
+    _calScrollY = 0;        // intentional jump — start the new month at top
     renderCalendar();
   }));
   nav.appendChild(mkNav('Today', 'cal-today-btn', () => {
     const t = new Date();
     _calCursor = new Date(t.getFullYear(), t.getMonth(), 1);
+    _calScrollY = 0;
     renderCalendar();
   }));
   nav.appendChild(mkNav('›', '', () => {
     _calCursor = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+    _calScrollY = 0;
     renderCalendar();
   }));
   topbar.appendChild(nav);
@@ -3788,6 +3806,8 @@ function renderCalendar() {
 
   grid.appendChild(weeksEl);
   cal.appendChild(grid);
+  // #242 — restore scroll after the new .cal-weeks is in the DOM.
+  _restoreCalScroll();
 }
 
 // One chip per card on its event-day. Done = green, otherwise priority color.
@@ -3981,7 +4001,8 @@ function openCalDayModal(ds) {
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
   _calDayModal = modal;
-  document.addEventListener('keydown', _onCalDayModalKey);
+  // #242 — capture-phase so we see _openCardId before init's bubble handler.
+  document.addEventListener('keydown', _onCalDayModalKey, true);
 
   // Land on the focused day — scroll the focus section into view at the
   // top of the visible region. Slight offset so the section header isn't
@@ -3998,14 +4019,20 @@ function closeCalDayModal() {
   }
   _calDayModal = null;
   _calDayModalCenter = null;
-  document.removeEventListener('keydown', _onCalDayModalKey);
+  // #242 — capture-phase listener must be removed with the same `true` arg
+  document.removeEventListener('keydown', _onCalDayModalKey, true);
 }
 
 function _onCalDayModalKey(e) {
   if (!_calDayModal) return;
-  // #236 — if a card modal is also open, let its Esc handler close the
-  // card first; the day modal stays so the user lands back on it.
-  if (e.key === 'Escape' && !_openCardId) { e.preventDefault(); closeCalDayModal(); }
+  if (e.key !== 'Escape') return;
+  // #242 — must run in CAPTURE phase so we see _openCardId BEFORE the
+  // bubble-phase init handler (which closes the card modal and nulls
+  // _openCardId). If a card modal is open, bail — let bubble close it.
+  // Day modal stays. Next Esc with no card modal closes the day modal.
+  if (_openCardId) return;
+  e.preventDefault();
+  closeCalDayModal();
 }
 
 function renderColumn(col, cards) {
