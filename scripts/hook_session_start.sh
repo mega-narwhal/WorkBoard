@@ -25,6 +25,19 @@ for _ in 1 2 3 4 5 6 7 8; do
   dir="${parent}"
 done
 
+# Fallback: if CWD-walk failed, search recent Claude session jsonls for a
+# board project DESCENDED FROM the current PWD. Catches "claude opened in
+# $HOME but my project is under it" without surfacing unrelated boards.
+if [ -z "${board_path}" ]; then
+  finder="$(dirname "$0")/_hook_find_board.py"
+  if [ -f "${finder}" ]; then
+    candidate="$(python3 "${finder}" "${PWD}" 2>/dev/null)"
+    if [ -n "${candidate}" ] && [ -f "${candidate}" ]; then
+      board_path="${candidate}"
+    fi
+  fi
+fi
+
 # Stay silent for non-board projects.
 [ -z "${board_path}" ] && exit 0
 

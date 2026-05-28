@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -79,22 +80,173 @@ def _load_tag_profile(profile: str) -> dict:
     }
 
 
-def bootstrap_board(board_dir: Path, profile: str = "software") -> None:
+def _detect_project_name(project_root: Path) -> str:
+    """Pick the friendliest project name we can find. Order of preference:
+    package.json `name`, pyproject.toml `project.name`, CONTEXT.md first H1,
+    cwd basename. Falls back to 'WorkBoard' if everything is empty."""
+    pkg = project_root / "package.json"
+    if pkg.is_file():
+        try:
+            name = json.loads(pkg.read_text()).get("name", "").strip()
+            if name:
+                return name
+        except Exception:
+            pass
+    pyproj = project_root / "pyproject.toml"
+    if pyproj.is_file():
+        try:
+            m = re.search(r'^\s*name\s*=\s*["\']([^"\']+)["\']',
+                          pyproj.read_text(), re.MULTILINE)
+            if m:
+                return m.group(1).strip()
+        except Exception:
+            pass
+    ctx = project_root / "CONTEXT.md"
+    if ctx.is_file():
+        try:
+            for line in ctx.read_text().splitlines():
+                m = re.match(r'^#\s+(.+?)\s*$', line)
+                if m:
+                    return m.group(1).strip()
+        except Exception:
+            pass
+    return project_root.name or "WorkBoard"
+
+
+def bootstrap_board(board_dir: Path, profile: str = "software",
+                    title_override: str | None = None) -> None:
     """First-run init: create board/ with starter board.json + board.html.
-    Auto-fills `title` from the project directory basename and seeds a tag
-    taxonomy from the chosen industry profile so cards have semantic, color-
-    coded tags from day one."""
+    Title resolves via `_detect_project_name` (package.json / pyproject.toml /
+    CONTEXT.md / basename) unless `title_override` is given. Tag taxonomy
+    seeded from the chosen industry profile."""
     board_dir.mkdir(parents=True, exist_ok=True)
     target_json = board_dir / "board.json"
     if not target_json.exists() and TEMPLATE_JSON.exists():
         data = json.loads(TEMPLATE_JSON.read_text())
-        project_name = board_dir.parent.name or "WorkBoard"
+        project_name = title_override or _detect_project_name(board_dir.parent)
         data["title"] = f"WorkBoard — {project_name}"
         data["tagTaxonomy"] = _load_tag_profile(profile)
         target_json.write_text(json.dumps(data, indent=2))
     target_html = board_dir / "board.html"
     if not target_html.exists() and TEMPLATE_HTML.exists():
         target_html.write_text(TEMPLATE_HTML.read_text())
+
+
+def _session_to_card_args(session: dict) -> list[str] | None:
+    """Map a discover.py session summary to `card.py add` CLI args. Returns
+    None if the session is too thin to be worth carding."""
+    first = (session.get("firstUserPrompt") or "").strip()
+    files = session.get("filesEdited") or []
+    ship = session.get("shipHints") or []
+    defer = session.get("deferHints") or []
+    bugs = session.get("bugHints") or []
+
+    # Confidence filter — skip sessions with no real signal.
+    if not first and not files:
+        return None
+    if len(first) < 15 and not files and not ship:
+        return None
+
+    title = (first[:80] or (f"Worked on {Path(files[0]).name}" if files else "Session")).rstrip()
+    if "\n" in title:
+        title = title.split("\n", 1)[0]
+
+    # Column: shipped → done; deferred/bug-only → backlog; else → done (past work).
+    if ship:
+        column = "done"
+    elif defer or (bugs and not ship):
+        column = "backlog"
+    else:
+        column = "done"
+
+    tags = []
+    if bugs: tags.append("bug")
+    if defer: tags.append("deferred")
+    if ship: tags.append("shipped")
+
+    ended = (session.get("endedAt") or "")[:10]
+    sid = (session.get("sessionId") or "")[:8]
+    origin = f"Discovered from session {sid} ({ended}). User said: \"{first[:300]}\""
+
+    notes_parts = []
+    dur = session.get("durationMin", 0)
+    turns = session.get("turns", {})
+    notes_parts.append(f"Session: {turns.get('user',0)} user / {turns.get('assistant',0)} asst turns over {dur}min.")
+    if files:
+        notes_parts.append("Files: " + ", ".join(files[:10]) + ("..." if len(files) > 10 else ""))
+    if ship:
+        notes_parts.append("Ship signals: " + " / ".join(s[:120] for s in ship[:3]))
+    if defer:
+        notes_parts.append("Defer signals: " + " / ".join(s[:120] for s in defer[:3]))
+    if bugs:
+        notes_parts.append("Bug signals: " + " / ".join(s[:120] for s in bugs[:3]))
+    notes = "\n".join(notes_parts)
+
+    args = ["--column", column, "--priority", "mid", "--title", title,
+            "--origin", origin, "--notes", notes, "--tag", "discovered"]
+    for t in tags:
+        args += ["--tag", t]
+    return args
+
+
+def _stream_discovered_cards(project_root: Path, board_dir: Path,
+                              port: int, days: int, max_sessions: int,
+                              delay_s: float = 0.25) -> None:
+    """Background-thread worker: run discover.py, then issue `card.py add`
+    for each non-thin session at `delay_s` pacing. Cards land via the live
+    HTTP server, which fires SSE events — the browser animates them in."""
+    discover_py = Path(__file__).resolve().parent / "discover.py"
+    card_py = Path(__file__).resolve().parent / "card.py"
+    if not discover_py.exists() or not card_py.exists():
+        return
+
+    # Wait for the HTTP server to bind before posting.
+    for _ in range(20):
+        try:
+            import urllib.request
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=0.3).read()
+            break
+        except Exception:
+            time.sleep(0.2)
+
+    try:
+        out = subprocess.run(
+            [sys.executable, str(discover_py),
+             "--project", str(project_root),
+             "--days", str(days),
+             "--max-sessions", str(max_sessions)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if out.returncode != 0:
+            return
+        data = json.loads(out.stdout)
+    except Exception:
+        return
+
+    sessions = data.get("sessions", [])
+    if not sessions:
+        return
+
+    # Oldest first → user watches history fill in chronologically.
+    sessions.reverse()
+    n_added = 0
+    for sess in sessions[:max_sessions]:
+        args = _session_to_card_args(sess)
+        if not args:
+            continue
+        try:
+            subprocess.run(
+                [sys.executable, str(card_py), "--board", str(board_dir / "board.json"),
+                 "add"] + args,
+                capture_output=True, text=True, timeout=10,
+            )
+            n_added += 1
+        except Exception:
+            pass
+        time.sleep(delay_s)
+
+    print(f"discover: streamed {n_added} card(s) from {len(sessions)} session(s)",
+          file=sys.stderr)
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -407,6 +559,14 @@ def main():
     ap.add_argument("--profile", default="software",
                     choices=["software", "marketing", "research", "product", "operations"],
                     help="Tag taxonomy profile for bootstrap (default: software)")
+    ap.add_argument("--title", default=None,
+                    help="Override auto-detected project name in the board title")
+    ap.add_argument("--no-discover", action="store_true",
+                    help="On bootstrap, do NOT mine prior Claude sessions into cards (default: do)")
+    ap.add_argument("--discover-days", type=int, default=7,
+                    help="Discover sessions touched in the last N days (default 7)")
+    ap.add_argument("--discover-max", type=int, default=20,
+                    help="Cap how many sessions become cards on bootstrap (default 20)")
     ap.add_argument("--install-hooks", action="store_true",
                     help="Wire UserPromptSubmit hook into Claude Code settings.json, then exit")
     ap.add_argument("--uninstall-hooks", action="store_true",
@@ -437,8 +597,19 @@ def main():
         if board_dir is None:
             if args.bootstrap:
                 board_dir = start / "board"
-                bootstrap_board(board_dir, profile=args.profile)
+                bootstrap_board(board_dir, profile=args.profile,
+                                title_override=args.title)
                 print(f"bootstrapped new board at {board_dir} (profile={args.profile})", file=sys.stderr)
+                # Stream cards from prior Claude sessions in a background
+                # thread so the user watches their history fill in. Opt out
+                # with --no-discover for a genuine empty start.
+                if not args.no_discover:
+                    threading.Thread(
+                        target=_stream_discovered_cards,
+                        args=(start, board_dir, args.port,
+                              args.discover_days, args.discover_max),
+                        daemon=True,
+                    ).start()
                 # Nudge first-time installers toward wiring the hook so the
                 # board doesn't silently drift during long active-coding
                 # sessions (root cause of card #84).
