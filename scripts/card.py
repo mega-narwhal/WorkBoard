@@ -107,13 +107,21 @@ def load(p: Path) -> dict:
         return json.load(f)
 
 
+def _auth_headers() -> dict:
+    """#116 — if the server requires a bearer token, card.py reads it from
+    $BOARD_AUTH_TOKEN so local writes still funnel through the server (and
+    animate). Empty dict when no token is set (the common localhost case)."""
+    tok = os.environ.get("BOARD_AUTH_TOKEN")
+    return {"Authorization": f"Bearer {tok}"} if tok else {}
+
+
 def _verify_port_owns_board(port: int, want_dir: str) -> bool:
     """Health-ping a single port and confirm its `board` field matches `want_dir`.
     Returns False on any failure (timeout, wrong board, dead port)."""
     try:
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/health", timeout=0.4
-        ) as r:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/health", headers=_auth_headers())
+        with urllib.request.urlopen(req, timeout=0.4) as r:
             if r.status != 200:
                 return False
             info = json.loads(r.read())
@@ -177,7 +185,7 @@ def _try_post_to_server(d: dict, board_path: Path) -> bool:
             url.rstrip("/") + "/board.json",
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **_auth_headers()},
         )
         with urllib.request.urlopen(req, timeout=3) as r:
             return r.status == 200

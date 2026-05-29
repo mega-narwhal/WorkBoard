@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 import queue
@@ -513,7 +514,51 @@ def broadcast(name: str, data: dict) -> None:
 
 class BoardHandler(BaseHTTPRequestHandler):
     board_dir: Path = None  # set by main()
+    auth_token: str | None = None  # set by main() — #116 LAN-AUTH; None = open
     protocol_version = "HTTP/1.1"
+
+    def _check_auth(self) -> tuple[bool, str | None]:
+        """#116 BOARD-LAN-AUTH gate. Returns (ok, cookie_token).
+
+        No token configured → always open (the localhost default; card.py and
+        the local browser keep working untouched). When a token IS set, a
+        request authenticates via any of:
+          - Authorization: Bearer <token>   (card.py with BOARD_AUTH_TOKEN)
+          - ?t=<token>                       (the URL you scan on your phone)
+          - Cookie bs_auth=<token>           (set after the first ?t= hit)
+        cookie_token is the token to Set-Cookie (non-None only when it arrived
+        via ?t=, so the phone gets a cookie and later fetches/SSE just work).
+        Constant-time compares so the gate isn't a timing oracle."""
+        token = type(self).auth_token
+        if not token:
+            return True, None
+        qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        qt = (qs.get("t") or [""])[0]
+        if qt and hmac.compare_digest(qt, token):
+            return True, qt
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and hmac.compare_digest(auth[7:].strip(), token):
+            return True, None
+        for part in (self.headers.get("Cookie", "") or "").split(";"):
+            if "=" in part:
+                k, v = part.strip().split("=", 1)
+                if k == "bs_auth" and hmac.compare_digest(v, token):
+                    return True, None
+        return False, None
+
+    def _gate(self) -> bool:
+        """Auth gate for a request. Sends 401 + returns False if unauthorized.
+        Stashes a Set-Cookie header on self._cookie_extra when authed via ?t=."""
+        ok, cookie_tok = self._check_auth()
+        if not ok:
+            self._send(401, b'{"error":"unauthorized"}',
+                       extra={"WWW-Authenticate": "Bearer"})
+            return False
+        self._cookie_extra = (
+            {"Set-Cookie": f"bs_auth={cookie_tok}; Path=/; SameSite=Strict; Max-Age=2592000"}
+            if cookie_tok else {}
+        )
+        return True
 
     def log_message(self, fmt, *args):
         if args and len(args) >= 2:
@@ -535,13 +580,13 @@ class BoardHandler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
-    def _send_file(self, path: Path, ctype: str):
+    def _send_file(self, path: Path, ctype: str, extra: dict | None = None):
         try:
             data = path.read_bytes()
         except FileNotFoundError:
             self._send(404, b'{"error":"not found"}')
             return
-        self._send(200, data, ctype)
+        self._send(200, data, ctype, extra=extra)
 
     def _send_tags_page(self):
         """Static-render the tag legend: canonical taxonomy (main + sub) +
@@ -647,6 +692,8 @@ class BoardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if not self._gate():
+            return
 
         if path == "/events":
             self._handle_sse()
@@ -656,7 +703,11 @@ class BoardHandler(BaseHTTPRequestHandler):
             html_path = self.board_dir / "board.html"
             if not html_path.exists():
                 html_path = TEMPLATE_HTML
-            self._send_file(html_path, "text/html; charset=utf-8")
+            # On a ?t= hit, hand back a cookie so subsequent board.json / SSE /
+            # POST requests from this browser authenticate automatically — no
+            # board.html changes needed.
+            self._send_file(html_path, "text/html; charset=utf-8",
+                            extra=getattr(self, "_cookie_extra", None))
             return
 
         if path == "/board.json":
@@ -804,6 +855,8 @@ class BoardHandler(BaseHTTPRequestHandler):
         self._send(404, b'{"error":"not found"}')
 
     def do_POST(self):
+        if not self._gate():
+            return
         if self.path.split("?", 1)[0].rstrip("/") != "/board.json":
             self._send(404, b'{"error":"not found"}')
             return
@@ -910,6 +963,11 @@ def main():
                     help="If no board/ found, create one from the skill template")
     ap.add_argument("--share", action="store_true",
                     help="Opt out of auto-gitignoring board/. Use when you intentionally want to commit a shared board.")
+    ap.add_argument("--auth-token", default=os.environ.get("BOARD_AUTH_TOKEN"),
+                    help="#116 — require this bearer token on every request "
+                         "(Authorization: Bearer / ?t= / cookie). Pair with "
+                         "--host 0.0.0.0 to glance at the board on your phone. "
+                         "Defaults to $BOARD_AUTH_TOKEN.")
     ap.add_argument("--profile", default="software",
                     choices=["software", "marketing", "research", "product", "operations"],
                     help="Tag taxonomy profile for bootstrap (default: software)")
@@ -995,6 +1053,7 @@ def main():
                 sys.exit(2)
 
     BoardHandler.board_dir = board_dir
+    BoardHandler.auth_token = args.auth_token or None
     _load_initial_cache(board_dir)
     httpd = ThreadingHTTPServer((args.host, args.port), BoardHandler)
     url = f"http://{args.host}:{args.port}"
@@ -1008,6 +1067,22 @@ def main():
         _registry_remove = None
         print(f"warn: port-registry write failed: {e}", file=sys.stderr)
     print(f"📋 board-steward v4 serving {board_dir} at {url} (SSE on /events)", flush=True)
+    if BoardHandler.auth_token:
+        # #116 — print the scan-me URL with the token baked in. Detect the
+        # primary LAN IP without sending a packet (UDP connect just picks the
+        # route's source address).
+        lan_ip = args.host
+        if args.host in ("0.0.0.0", "::"):
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("10.255.255.255", 1))
+                lan_ip = s.getsockname()[0]
+                s.close()
+            except Exception:
+                lan_ip = "<lan-ip>"
+        print(f"🔒 auth ON — open on another device:\n"
+              f"   http://{lan_ip}:{args.port}/?t={BoardHandler.auth_token}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
