@@ -137,13 +137,27 @@ def cmd_status() -> int:
     return 0 if any_installed else 1
 
 
-def apply_selection(settings: dict, selected: set[str]) -> tuple[dict, list[str]]:
+def apply_selection(settings: dict, selected: set[str],
+                    dry_run: bool = False) -> tuple[dict, list[str]]:
     log = []
     for name, (event, script) in HOOK_VARIANTS.items():
         cmd = hook_command(script)
         if name in selected:
             if not Path(cmd).exists():
                 sys.exit(f"hook script missing at {cmd} — re-install the skill, then retry")
+            # Claude Code runs the hook by bare path, so it MUST be executable.
+            # git/rsync/zip can strip the +x bit — enforce it here so a fresh
+            # install never wires a hook that silently fails to fire.
+            if not os.access(cmd, os.X_OK):
+                if dry_run:
+                    log.append(f"  {name:22s} → would chmod +x (not executable)")
+                else:
+                    try:
+                        mode = os.stat(cmd).st_mode
+                        os.chmod(cmd, mode | 0o111)  # +x for u,g,o
+                        log.append(f"  {name:22s} → chmod +x (was not executable)")
+                    except OSError as e:
+                        sys.exit(f"hook script not executable and chmod failed at {cmd}: {e}")
             action = add_hook(settings, event, cmd)
         else:
             action = remove_hook(settings, event, cmd)
@@ -184,7 +198,7 @@ def main() -> int:
     else:
         selected = {args.hook}
 
-    new_settings, log = apply_selection(settings, selected)
+    new_settings, log = apply_selection(settings, selected, dry_run=args.dry_run)
     any_change = any(("installed" in line and "already" not in line) or "uninstalled" in line
                      for line in log)
 
