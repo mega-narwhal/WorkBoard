@@ -1166,6 +1166,60 @@ def cmd_show(args, d, board):
     print(json.dumps(c, indent=2, ensure_ascii=False))
 
 
+def cmd_recover(args, d, board):
+    """3.5c — list the rolling backups (3.5b) or restore one.
+
+    Restoring writes the chosen backup as the new current board (rev bumped so
+    SSE clients animate it). The pre-restore state is itself already a backup,
+    so a restore is reversible. Dry-run by default; --apply to commit.
+    """
+    backups = _boardio.list_backups(board)   # [(rev, Path)] newest-first
+    cur_rev = d.get("rev", 0)
+
+    if getattr(args, "rev", None) is None:
+        # LIST mode
+        if not backups:
+            print("no backups yet — they're written to <board>/.backups/ on every save")
+            return
+        print(f"{'rev':>7}  {'cards':>5}  {'savedAt':<21} savedBy")
+        for rev, p in backups:
+            try:
+                b = json.loads(p.read_text())
+                ncards, savedAt, savedBy = len(b.get("cards", [])), b.get("savedAt", "?"), b.get("savedBy", "?")
+            except Exception:
+                ncards, savedAt, savedBy = "?", "(unreadable)", "?"
+            mark = "  ← current" if rev == cur_rev else ""
+            print(f"{rev:>7}  {ncards:>5}  {savedAt:<21} {savedBy}{mark}")
+        print("\nrestore with:  card.py recover <rev> --apply")
+        return
+
+    # RESTORE mode — locate + validate before touching anything.
+    target = next((p for rev, p in backups if rev == args.rev), None)
+    if target is None:
+        avail = ", ".join(str(r) for r, _ in backups) or "none"
+        sys.exit(f"error: no backup for rev {args.rev} (available: {avail})")
+    try:
+        restored = json.loads(target.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        sys.exit(f"error: backup rev {args.rev} is unreadable/corrupt: {e}")
+    if not isinstance(restored, dict) or not isinstance(restored.get("cards"), list):
+        sys.exit(f"error: backup rev {args.rev} is not a valid board (missing cards[])")
+
+    ncards, cur_cards = len(restored["cards"]), len(d.get("cards", []))
+    if not getattr(args, "apply", False):
+        print(f"DRY-RUN: would restore rev {args.rev} ({ncards} cards) over "
+              f"current rev {cur_rev} ({cur_cards} cards).")
+        print("Re-run with --apply to write it. Current state stays in .backups, so it's reversible.")
+        return
+
+    # Seed rev from current so atomic_save bumps to cur_rev+1 (a forward rev
+    # SSE clients accept) rather than replaying the backup's old, lower rev.
+    restored["rev"] = cur_rev
+    rev = atomic_save(board, restored)
+    print(f"♻ restored backup rev {args.rev} → live as rev {rev} ({ncards} cards). "
+          f"Pre-restore state (rev {cur_rev}) remains in .backups.")
+
+
 # ===== prelaunch gate (#91) =====
 # Cards in launch-blocking columns/priorities that aren't shipped or blocked.
 # Surface these before any public-facing ship: github-repo flip private→public,
@@ -1376,6 +1430,13 @@ def build_parser():
     psh = sub.add_parser("show", help="print one card as JSON")
     psh.add_argument("ref")
     psh.set_defaults(fn=cmd_show)
+
+    # recover (3.5c) — list rolling backups or restore one
+    prc = sub.add_parser("recover", help="list rolling backups, or restore one (3.5c)")
+    prc.add_argument("rev", nargs="?", type=int, help="backup rev to restore (omit to list)")
+    prc.add_argument("--apply", action="store_true",
+                     help="actually write the restore (default: dry-run)")
+    prc.set_defaults(fn=cmd_recover)
 
     pbug = sub.add_parser("bug", help="reopen a Done card as a bug (Done → In Progress + 'bug' tag + 🐞 fix-bug subtask)")
     pbug.add_argument("ref", help="card num or id")
