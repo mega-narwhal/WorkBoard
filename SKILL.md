@@ -198,7 +198,7 @@ This makes the board feel real-time — cards move as work happens, not at sessi
 >
 > **Title quality is not negotiable.** Titles are work-summary phrases (verb + noun, e.g. `BOARD-FLY: atomic-hop primitive`, `Fix card-drag freeze on iPhone`, `Investigate convo dedup`), not first-80-chars of the user's wording. Strip conversational openers (`btw`, `can u`, `oh wait`, `okays`). Pull a short `code` (kebab or CAPS) from the noun cluster when it's a build/feature card. Match the existing board's voice — re-read 2-3 nearby cards before titling. If the prompt is genuinely ambiguous, ask the user for a one-line title before filing.
 >
-> **`scripts/discover2.py` + `scripts/lifecycle_replay.py` produce verbatim-prompt cards by design** — acceptable for retrospective sim theatre (`simulate_install.sh`) but those cards are NOT authoritative. Don't promote sim cards to the live board, and don't model live-board work after their titling style.
+> **`scripts/simulate_install.sh` (default: `hourly_extractor.py` LLM-per-bucket fly, chunk=2) produces retrospective sim cards** — acceptable for sim theatre (the new-user install demo, card #264) but those cards are NOT authoritative. Don't promote sim cards to the live board, and don't model live-board work after their titling style. (`--replay-mode bulk` = no-API-key `discover2.py` heuristic fallback.)
 
 When the user gives Claude a substantive task in a board-steward workspace, drive the card through these stages — same sequence the user-drag and SSE simulations animate end-to-end. **No "want me to add a card?" prompt — just do it.**
 

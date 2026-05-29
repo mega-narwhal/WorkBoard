@@ -1,23 +1,31 @@
 #!/usr/bin/env bash
 # simulate_install.sh — replay the first-user install moment for board-steward.
 #
-# Spawns an isolated board server on a chosen port, pointed at a chosen
-# project's session history. serve.py --bootstrap auto-discovers cards from
-# ~/.claude/projects/*/sessions/*.jsonl and streams them in via SSE — the
-# user opens the browser and watches the board fill itself from their real
-# work history.
+# Spawns an isolated board server on a chosen port, then replays a chosen
+# project's real session history into it so the user opens the browser and
+# watches the board fill + FLY itself from their actual work.
+#
+# DEFAULT (canonical demo, card #264): --replay-mode hourly --chunk-size 2
+# --hourly-show-lifecycle. Buckets the history by the hour, sends each bucket
+# to `claude -p haiku`, gets back high-quality WORK-UNIT cards, and flies each
+# task→inprogress→done. Compute-heavy by design (one Haiku call per bucket) —
+# kept for architectural fidelity; compute-light rework tracked as #264.
+#
+# Fallback: --replay-mode bulk = no-API-key discover2 heuristic (lower quality;
+# "plops" rather than the LLM voice).
 #
 # Idempotent: tearing down any existing sim on the same port + wiping the
 # sim dir before re-running is safe. Real boards on :7891/:7892 are never
 # touched (this script refuses those ports).
 #
 # Usage:
-#   scripts/simulate_install.sh                         # defaults: HFTAgents, :7894
+#   scripts/simulate_install.sh                         # defaults: HFTAgents, :7894, hourly chunk=2
 #   scripts/simulate_install.sh --project PATH
 #   scripts/simulate_install.sh --project PATH --port 7895
 #   scripts/simulate_install.sh --project PATH --sim-dir ~/Desktop/my-sim
 #   scripts/simulate_install.sh --no-open               # skip browser open
-#   scripts/simulate_install.sh --days 14 --max 30      # bootstrap reach
+#   scripts/simulate_install.sh --days 14               # history reach
+#   scripts/simulate_install.sh --replay-mode bulk      # no-API-key fallback
 #
 set -euo pipefail
 
@@ -29,19 +37,15 @@ DAYS=7
 MAX=20
 OPEN_BROWSER=1
 PROFILE="software"
-LIFECYCLE=1                         # replay task→ip→done flight at the end
+LIFECYCLE=0                         # opt-in (--lifecycle) synthetic demo card; hourly cards fly themselves
 LIFECYCLE_INTERVAL=2                # seconds between phases
 LEGACY_DISCOVER=0                   # 1 = use old discover.py (session-shaped)
-REPLAY_MODE=""                      # "" = bulk discover (default), "realtime" = turn-paced, "hourly" = LLM-per-hour
+REPLAY_MODE="hourly"                # "hourly" = LLM-per-bucket fly (canonical demo, #264) · "bulk" = no-API discover fallback
 HOURLY_MAX_BUCKETS=0                # 0 = all hours in --days window
-HOURLY_SHOW_LIFECYCLE=0             # 1 = play task→ip→done per card
+HOURLY_SHOW_LIFECYCLE=1             # 1 = play task→ip→done per card (the fly)
 HOURLY_BUCKET_MIN=60                # bucket size in minutes
-HOURLY_CHUNK_SIZE=1                 # buckets per LLM call (1 = no batching)
+HOURLY_CHUNK_SIZE=2                 # buckets per LLM call (the #217/#218 demo config)
 HOURLY_DATE=""                      # YYYY-MM-DD UTC pin (empty = no pin)
-TURNS_PER_SEC=10.0                  # default replay pace — punchy by default
-GAP_SPEEDUP=""                      # if set, preserve real idle gaps × speedup
-MAX_TURNS=0
-NO_LLM=0                            # 1 = heuristic only, skip LLM rewrite
 
 # ---- arg parsing -------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -57,10 +61,7 @@ while [[ $# -gt 0 ]]; do
     --lifecycle-interval) LIFECYCLE_INTERVAL="$2"; shift 2 ;;
     --legacy-discover) LEGACY_DISCOVER=1; shift ;;
     --replay-mode) REPLAY_MODE="$2"; shift 2 ;;
-    --turns-per-sec) TURNS_PER_SEC="$2"; shift 2 ;;
-    --gap-speedup) GAP_SPEEDUP="$2"; shift 2 ;;
-    --max-turns) MAX_TURNS="$2"; shift 2 ;;
-    --no-llm) NO_LLM=1; shift ;;
+    --lifecycle) LIFECYCLE=1; shift ;;
     --hourly-max-buckets) HOURLY_MAX_BUCKETS="$2"; shift 2 ;;
     --hourly-show-lifecycle) HOURLY_SHOW_LIFECYCLE=1; shift ;;
     --bucket-min) HOURLY_BUCKET_MIN="$2"; shift 2 ;;
@@ -191,30 +192,10 @@ if [[ "$REPLAY_MODE" == "hourly" ]]; then
     HOURLY_ARGS+=(--show-lifecycle)
   fi
   python3 "${SCRIPT_DIR}/hourly_extractor.py" "${HOURLY_ARGS[@]}"
-  REALTIME_DONE=1   # share the gate so bulk-discover is skipped
+  HOURLY_DONE=1   # share the gate so bulk-discover is skipped
 fi
 
-# ---- realtime replay branch (turn-paced) ---------------------------------------
-if [[ "$REPLAY_MODE" == "realtime" ]]; then
-  echo "▶ turn-paced realtime replay from $PROJECT_ABS history"
-  REPLAY_ARGS=(--project "$PROJECT_ABS"
-               --board   "${SIM_DIR}/board/board.json"
-               --port    "$PORT"
-               --days    "$DAYS"
-               --turns-per-sec "$TURNS_PER_SEC"
-               --max-turns "$MAX_TURNS")
-  if [[ -n "$GAP_SPEEDUP" ]]; then
-    REPLAY_ARGS+=(--gap-speedup "$GAP_SPEEDUP")
-  fi
-  if [[ "$NO_LLM" == "1" ]]; then
-    REPLAY_ARGS+=(--no-llm)
-  fi
-  python3 "${SCRIPT_DIR}/lifecycle_replay.py" "${REPLAY_ARGS[@]}"
-  # skip the bulk-discover block below
-  REALTIME_DONE=1
-fi
-
-if [[ -z "${REALTIME_DONE:-}" ]]; then
+if [[ -z "${HOURLY_DONE:-}" ]]; then
 echo "▶ discovering real cards from $PROJECT_ABS history"
 python3 - "$PROJECT_ABS" "$PORT" "$DAYS" "$MAX" "${SCRIPT_DIR}" "${LEGACY_DISCOVER}" <<'PYEOF'
 import sys, subprocess, json, time, urllib.request, urllib.parse
@@ -324,7 +305,7 @@ for sess in items:
     # between cards so the next pop-in doesn't overlap the last landing.
     time.sleep(0.15)
 PYEOF
-fi   # end bulk-discover gate (skipped in realtime replay mode)
+fi   # end bulk-discover gate (skipped in hourly mode)
 
 # ---- lifecycle flight replay -------------------------------------------------
 # Adds one fresh card and walks it task → inprogress → done with sleeps so the
