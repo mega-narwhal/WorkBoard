@@ -148,18 +148,18 @@ if [ -n "$HARVEST" ] && [ "$SERVER_OK" = "1" ]; then
     elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"; fi
     OPEN_BROWSER=0   # don't reopen at the end
   fi
-  say "filling board from ${HARVEST} history (hourly chunk=2 fly, last ${HARVEST_DAYS}d)"
-  # Run with the REAL config dir so `claude -p` can authenticate; if the user
-  # never set one, unset it so claude falls back to ~/.claude.
-  if [ -n "$ORIG_CLAUDE_CONFIG_DIR" ]; then
-    HARVEST_ENV=(env "CLAUDE_CONFIG_DIR=$ORIG_CLAUDE_CONFIG_DIR")
-  else
-    HARVEST_ENV=(env -u CLAUDE_CONFIG_DIR)
-  fi
-  "${HARVEST_ENV[@]}" "$PY" "${SCRIPTS}/hourly_extractor.py" \
+  say "staging ${HARVEST} history for inline fill (free — main Claude emits, no Haiku)"
+  # INLINE (the default): stage extraction_pending.json. No claude -p call here,
+  # so no auth/config-dir concern — main Claude (the session you're in) emits the
+  # cards next, per SKILL.md §J. (Use --bootstrap-mode haiku for the autonomous
+  # background path on headless/no-session installs.)
+  "$PY" "${SCRIPTS}/hourly_extractor.py" \
     --project "$HARVEST" --board "${PROJECT}/board/board.json" --port "$PORT" \
-    --days "$HARVEST_DAYS" --bucket-min 30 --chunk-size 2 --show-lifecycle \
-    || warn "harvest fill reported an issue (non-fatal)"
+    --days "$HARVEST_DAYS" --bucket-min 30 --chunk-size 2 --recent-first --mode inline \
+    || warn "harvest stage reported an issue (non-fatal)"
+  NPEND="$("$PY" -c "import json;print(len(json.load(open('${PROJECT}/board/extraction_pending.json')).get('chunks',[])))" 2>/dev/null || echo '?')"
+  ok "staged ${NPEND} chunk(s) → ${PROJECT}/board/extraction_pending.json"
+  echo "    → main Claude: process it per SKILL.md §J (emit cards + completeness sweep, then delete)"
 fi
 
 # ---- 3. hooks ----------------------------------------------------------------
