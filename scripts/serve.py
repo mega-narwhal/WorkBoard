@@ -360,15 +360,20 @@ def _session_to_card_args(session: dict) -> list[str] | None:
 def _stream_discovered_cards(project_root: Path, board_dir: Path,
                               port: int, days: int, max_items: int,
                               delay_s: float = 0.25,
-                              legacy: bool = False) -> None:
+                              legacy: bool = False,
+                              harvest_root: Path | None = None) -> None:
     """Background-thread worker: run discover2.py (or discover.py if --legacy),
     then issue `card.py add` for each task at `delay_s` pacing. Cards land via
-    the live HTTP server, which fires SSE events — the browser animates them in."""
+    the live HTTP server, which fires SSE events — the browser animates them in.
+
+    harvest_root mines history from a different dir than the board lives in
+    (isolated sim/--demo); defaults to the board's own project."""
     script_dir = Path(__file__).resolve().parent
     discover_py = script_dir / ("discover.py" if legacy else "discover2.py")
     card_py = script_dir / "card.py"
     if not discover_py.exists() or not card_py.exists():
         return
+    project_root = harvest_root or project_root
 
     for _ in range(20):
         try:
@@ -422,7 +427,8 @@ def _stream_discovered_cards(project_root: Path, board_dir: Path,
 
 def _stream_hourly_cards(project_root: Path, board_dir: Path, port: int,
                           days: int, bucket_min: int = 30,
-                          chunk_size: int = 2) -> None:
+                          chunk_size: int = 2,
+                          harvest_root: Path | None = None) -> None:
     """Background-thread worker: the HIGH-COMPUTE startup fill (card #265/#268).
 
     Runs hourly_extractor.py over the project's full history — multi-source
@@ -449,8 +455,11 @@ def _stream_hourly_cards(project_root: Path, board_dir: Path, port: int,
         except Exception:
             time.sleep(0.2)
 
+    # harvest_root lets the board live in one dir while history is mined from
+    # another (the isolated-sim / --demo case). Defaults to the board's own
+    # project — the normal same-project install.
     base = [sys.executable, str(extractor),
-            "--project", str(project_root),
+            "--project", str(harvest_root or project_root),
             "--board", str(board_dir / "board.json"),
             "--port", str(port),
             "--bucket-min", str(bucket_min),
@@ -1043,6 +1052,10 @@ def main():
                     help="hourly bootstrap: minutes per bucket (default 30)")
     ap.add_argument("--chunk-size", type=int, default=2,
                     help="hourly bootstrap: buckets per Haiku call (default 2)")
+    ap.add_argument("--harvest-project", type=Path, default=None,
+                    help="hourly bootstrap: mine history from THIS project while "
+                         "the board lives in --project (isolated sim/--demo; "
+                         "default: same as --project)")
     ap.add_argument("--legacy-discover", action="store_true",
                     help="Use the older discover.py (session-shaped) instead of discover2.py (task-shaped); forces discover mode")
     ap.add_argument("--install-hooks", action="store_true",
@@ -1094,7 +1107,9 @@ def main():
                             target=_stream_hourly_cards,
                             args=(start, board_dir, args.port,
                                   args.discover_days, args.bucket_min,
-                                  args.chunk_size),
+                                  args.chunk_size,
+                                  args.harvest_project.resolve()
+                                  if args.harvest_project else None),
                             daemon=True,
                         ).start()
                     else:
@@ -1102,7 +1117,9 @@ def main():
                             target=_stream_discovered_cards,
                             args=(start, board_dir, args.port,
                                   args.discover_days, args.discover_max,
-                                  0.25, args.legacy_discover),
+                                  0.25, args.legacy_discover,
+                                  args.harvest_project.resolve()
+                                  if args.harvest_project else None),
                             daemon=True,
                         ).start()
                 # Nudge first-time installers toward wiring the hook so the

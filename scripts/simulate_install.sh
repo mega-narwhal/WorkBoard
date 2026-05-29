@@ -120,17 +120,36 @@ if [[ -d "$SIM_DIR" ]]; then
 fi
 mkdir -p "$SIM_DIR"
 
-# ---- spawn server ------------------------------------------------------------
+# ---- spawn server = THE REAL INSTALL ENGINE ----------------------------------
+# The sim runs the EXACT serve.py --bootstrap a real user triggers, so the
+# simulation == the install experience. The only isolation: the board lives in
+# the throwaway $SIM_DIR while history is mined from the real $PROJECT_ABS via
+# --harvest-project (decoupled board-location vs harvest-source). serve.py's
+# own daemon thread does the two-tier hourly fill (tier-1 last 1d fast →
+# tier-2 older backfill) — identical to install.
+if [[ -n "${HOURLY_DATE}" ]]; then
+  echo "  (note: --date is ignored in sim==install mode; install always does the two-tier window)" >&2
+fi
+
+BOOTSTRAP_MODE="hourly"
+[[ "$REPLAY_MODE" == "bulk" ]] && BOOTSTRAP_MODE="discover"
+
+SERVE_ARGS=(--bootstrap
+            --project "$SIM_DIR"
+            --harvest-project "$PROJECT_ABS"
+            --port "$PORT"
+            --profile "$PROFILE"
+            --title "WorkBoard — $(basename "$PROJECT_ABS") (sim)"
+            --bootstrap-mode "$BOOTSTRAP_MODE"
+            --discover-days "$DAYS"
+            --discover-max "$MAX"
+            --bucket-min "$HOURLY_BUCKET_MIN"
+            --chunk-size "$HOURLY_CHUNK_SIZE")
+[[ "$LEGACY_DISCOVER" == "1" ]] && SERVE_ARGS+=(--legacy-discover)
+
 LOG_FILE="${SIM_DIR}/serve.log"
-echo "▶ spawning serve.py --bootstrap"
-nohup python3 "$SERVE_PY" \
-  --bootstrap \
-  --no-discover \
-  --project "$SIM_DIR" \
-  --port "$PORT" \
-  --profile "$PROFILE" \
-  --title "WorkBoard — $(basename "$PROJECT_ABS") (sim)" \
-  > "$LOG_FILE" 2>&1 &
+echo "▶ spawning serve.py --bootstrap --bootstrap-mode $BOOTSTRAP_MODE (harvest: $PROJECT_ABS, last ${DAYS}d)"
+nohup python3 "$SERVE_PY" "${SERVE_ARGS[@]}" > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 echo "  pid=$SERVER_PID  log=$LOG_FILE"
 
@@ -146,8 +165,8 @@ if ! curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Open the browser NOW (before discovery / replay) so the user watches cards
-# pop in live. Final report still prints at the end.
+# Open the browser NOW so the user watches serve.py's bootstrap thread fly cards
+# in live (tier-1 lands within seconds; tier-2 backfills in the background).
 if [[ "$OPEN_BROWSER" == "1" ]]; then
   if command -v open >/dev/null 2>&1; then
     open "http://127.0.0.1:${PORT}/"
@@ -155,198 +174,6 @@ if [[ "$OPEN_BROWSER" == "1" ]]; then
     xdg-open "http://127.0.0.1:${PORT}/"
   fi
   OPEN_BROWSER=0   # don't reopen at end
-fi
-
-# The bootstrap discovery thread runs in the background and streams cards via
-# SSE; cards may still be arriving when the browser opens (that's the point —
-# user sees them pop in live). Discovery streams real session history from the
-# REAL project at $PROJECT_ABS, but writes cards into the SIM board.
-#
-# Note: serve.py --project is what controls where discovery walks for cwd
-# matches. It also controls where the board lives. Same arg, two roles. So
-# for a "fresh install on dir X" sim we point --project at the SIM dir (above)
-# — discover.py walks ~/.claude/projects/*/sessions/*.jsonl and includes
-# sessions whose cwd is at/under the sim dir, which is empty, so no cards
-# stream. For "first-user feel on REAL history of project X" we'd swap
-# --project to point at X — but then the sim's board.json would live INSIDE
-# X, polluting it. The clean compromise: this script kicks off discovery
-# manually pointed at the real project, via a one-shot subprocess invocation
-# of card.py (mirroring what _stream_discovered_cards does in serve.py).
-
-export SIM_BOARD_DIR="${SIM_DIR}/board"
-
-# ---- hourly LLM-digest branch --------------------------------------------------
-if [[ "$REPLAY_MODE" == "hourly" ]]; then
-  echo "▶ hourly LLM extraction from $PROJECT_ABS history"
-  HOURLY_ARGS=(--project "$PROJECT_ABS"
-               --board   "${SIM_DIR}/board/board.json"
-               --port    "$PORT"
-               --days    "$DAYS"
-               --bucket-min "$HOURLY_BUCKET_MIN"
-               --chunk-size "$HOURLY_CHUNK_SIZE"
-               --recent-first
-               --max-buckets "$HOURLY_MAX_BUCKETS")
-  if [[ -n "$HOURLY_DATE" ]]; then
-    HOURLY_ARGS+=(--date "$HOURLY_DATE")
-  fi
-  if [[ "$HOURLY_SHOW_LIFECYCLE" == "1" ]]; then
-    HOURLY_ARGS+=(--show-lifecycle)
-  fi
-  python3 "${SCRIPT_DIR}/hourly_extractor.py" "${HOURLY_ARGS[@]}"
-  HOURLY_DONE=1   # share the gate so bulk-discover is skipped
-fi
-
-if [[ -z "${HOURLY_DONE:-}" ]]; then
-echo "▶ discovering real cards from $PROJECT_ABS history"
-python3 - "$PROJECT_ABS" "$PORT" "$DAYS" "$MAX" "${SCRIPT_DIR}" "${LEGACY_DISCOVER}" <<'PYEOF'
-import sys, subprocess, json, time, urllib.request, urllib.parse
-project, port, days, mx, sdir, legacy = (
-    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
-)
-# Run discover2.py (or legacy discover.py) against the REAL project.
-script = f"{sdir}/discover.py" if legacy == "1" else f"{sdir}/discover2.py"
-cap_flag = "--max-sessions" if legacy == "1" else "--max-tasks"
-proc = subprocess.run(
-    ["python3", script, "--project", project,
-     "--days", days, cap_flag, mx],
-    capture_output=True, text=True
-)
-if proc.returncode != 0:
-    print(f"{script} failed: {proc.stderr[:400]}", file=sys.stderr)
-    sys.exit(0)  # don't break the script
-try:
-    payload = json.loads(proc.stdout)
-except json.JSONDecodeError:
-    print(f"{script} returned non-JSON: {proc.stdout[:200]}", file=sys.stderr)
-    sys.exit(0)
-if legacy == "1":
-    items = payload.get("sessions", [])
-    items.sort(key=lambda s: s.get("startedAt", ""))
-    label = "session"
-else:
-    items = payload.get("tasks", [])
-    items.sort(key=lambda t: t.get("ts_start", ""))
-    label = "task"
-print(f"  → {len(items)} {label}(s) to stream into sim board")
-import os
-env = os.environ.copy()
-env["BOARD_SERVER"] = f"http://127.0.0.1:{port}"
-sys.path.insert(0, sdir)
-from serve import _session_to_card_args, _task_to_card_args
-mapper = _session_to_card_args if legacy == "1" else _task_to_card_args
-for sess in items:
-    args = mapper(sess)
-    if not args:
-        continue
-    sim_board_json = os.path.join(os.environ.get("SIM_BOARD_DIR", ""), "board.json")
-    # Pull out --column FINAL so we can override to task and walk the path.
-    final_col = "backlog"
-    try:
-        ci = args.index("--column")
-        final_col = args[ci + 1]
-        args = args[:ci] + args[ci + 2:]
-    except ValueError:
-        pass
-    # Born in task — every card pops here, then flies to its real home so
-    # the user watches the chronological history reconstruct itself.
-    try:
-        subprocess.run(
-            ["python3", f"{sdir}/card.py", "--board", sim_board_json, "add",
-             "--column", "task"] + args,
-            env=env, capture_output=True, text=True, timeout=8
-        )
-    except Exception as e:
-        print(f"  ! card add failed: {e}", file=sys.stderr)
-        continue
-    # Resolve the num we just added so subsequent flies target the right card.
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/board.json", timeout=4) as r:
-            board = json.loads(r.read())
-        num = max((c.get("num", 0) for c in board["cards"]), default=0)
-    except Exception:
-        num = 0
-    if num == 0:
-        continue
-
-    # Path table — every hop = one card.py fly call with its own pause.
-    # final 'task' = 0 hops (just the pop-in).
-    hops = []                                        # list of (col, flags_dict)
-    if final_col == "backlog":
-        hops = [("backlog", {})]
-    elif final_col == "inprogress":
-        hops = [("inprogress", {})]
-    elif final_col == "blocked":
-        hops = [("blocked", {})]
-    elif final_col == "done":
-        hops = [("inprogress", {}), ("done", {"writeup": "shipped (discovered)"})]
-        # Bug bounces — sessions with bug signals re-open + re-ship to mirror
-        # real life. Cap at 2 so wall-time stays sane.
-        # discover.py used 'bugHints'; discover2.py uses 'bug_hits'.
-        bugs = (sess.get("bug_hits") or sess.get("bugHints") or [])[:2]
-        for bh in bugs:
-            reason = (bh.splitlines()[0] if isinstance(bh, str) else "")[:80]
-            hops.append(("inprogress", {"bug": reason or "regression"}))
-            hops.append(("done", {"writeup": "patched"}))
-    elif final_col == "task":
-        hops = []
-    else:
-        hops = [(final_col, {})]                     # unknown col — just hop once
-
-    for col, flags in hops:
-        fly_args = ["python3", f"{sdir}/card.py", "--board", sim_board_json,
-                    "fly", str(num), col]
-        for k, v in flags.items():
-            fly_args.extend([f"--{k}", v])
-        try:
-            subprocess.run(fly_args, env=env, capture_output=True, text=True, timeout=8)
-        except Exception as e:
-            print(f"  ! fly {num} → {col} failed: {e}", file=sys.stderr)
-            break
-    # fly --pause-ms (default 400) already paced each hop; small pause
-    # between cards so the next pop-in doesn't overlap the last landing.
-    time.sleep(0.15)
-PYEOF
-fi   # end bulk-discover gate (skipped in hourly mode)
-
-# ---- lifecycle flight replay -------------------------------------------------
-# Adds one fresh card and walks it task → inprogress → done with sleeps so the
-# browser plays simulateUserDragMove (pickup-ghost-flight, e9e643e on 5/27).
-# Static bulk discovery only triggers card-pop-in, not the cross-column glide.
-if [[ "$LIFECYCLE" == "1" ]]; then
-  echo "▶ lifecycle replay (interval=${LIFECYCLE_INTERVAL}s)"
-  BOARD_JSON="${SIM_DIR}/board/board.json"
-  BS_ENV="BOARD_SERVER=http://127.0.0.1:${PORT}"
-  CARD_PY="${SCRIPT_DIR}/card.py"
-  TS=$(date +%H%M%S)
-  TITLE="SIMULATION lifecycle replay ${TS}"
-
-  env "$BS_ENV" python3 "$CARD_PY" --board "$BOARD_JSON" add \
-    --title "$TITLE" --column task --priority mid \
-    --tag simulation --tag lifecycle \
-    --origin "Generated by simulate_install.sh --lifecycle to demo the task→inprogress→done flight animation." \
-    >/dev/null
-
-  # Find the num we just assigned (highest num on board).
-  NUM=$(curl -s "http://127.0.0.1:${PORT}/board.json" | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-print(max(c.get('num',0) for c in d['cards']))
-")
-  echo "  + #${NUM} → task"
-  sleep "$LIFECYCLE_INTERVAL"
-
-  env "$BS_ENV" python3 "$CARD_PY" --board "$BOARD_JSON" move "$NUM" inprogress >/dev/null
-  echo "  ↻ #${NUM} task → inprogress  (watch the ghost-flight)"
-  sleep "$LIFECYCLE_INTERVAL"
-
-  env "$BS_ENV" python3 "$CARD_PY" --board "$BOARD_JSON" subtask add "$NUM" "explore options" >/dev/null
-  env "$BS_ENV" python3 "$CARD_PY" --board "$BOARD_JSON" subtask add "$NUM" "ship it" >/dev/null
-  echo "  + #${NUM} subtasks (active-work pulse)"
-  sleep "$LIFECYCLE_INTERVAL"
-
-  env "$BS_ENV" python3 "$CARD_PY" --board "$BOARD_JSON" move "$NUM" done \
-    --writeup "Demo card from simulate_install.sh lifecycle replay. Walked task → inprogress → done at ${LIFECYCLE_INTERVAL}s intervals to exercise simulateUserDragMove." >/dev/null
-  echo "  ✓ #${NUM} inprogress → done"
 fi
 
 # ---- final report ------------------------------------------------------------
