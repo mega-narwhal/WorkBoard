@@ -66,6 +66,17 @@ REGEN_SCRIPT = SKILL_DIR / "scripts" / "regen_index.py"
 # Default fallback if no server is found by path-match. Override via BOARD_SERVER.
 DEFAULT_SERVER_URL = "http://127.0.0.1:7891"
 
+# Ensure scripts/ is importable for the sibling _boardio helper even if card.py
+# is imported rather than run as a script (when run, its dir is sys.path[0]).
+_scripts_dir = str(Path(__file__).resolve().parent)
+if _scripts_dir not in sys.path:
+    sys.path.insert(0, _scripts_dir)
+import _boardio  # noqa: E402  (write-safety: flock + rolling backups)
+
+# Set True by main() while it holds the cross-process file lock for the
+# no-server direct-write path. atomic_save reads it to skip POST + re-lock.
+_HOLDING_LOCK = False
+
 
 # ===== board locating =====
 
@@ -171,29 +182,48 @@ def _try_post_to_server(d: dict, board_path: Path) -> bool:
         return False
 
 
+def _write_direct(p: Path, data: bytes) -> None:
+    """Atomic file write + rolling backup (3.5b). Caller decides locking."""
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".board.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, p)
+    except Exception:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+    _boardio.write_backup(p, data)
+
+
 def atomic_save(p: Path, d: dict, regen: bool = True) -> int:
     """Bump rev, set savedAt/savedBy=claude.
 
     Preferred path: POST to the running board server so SSE clients animate
     the change in real-time. Fallback: write the file directly + regen index.
     Returns new rev.
+
+    Concurrency (3.5a): when no server owns the board, main() holds the
+    cross-process file lock across the whole load→mutate→save so two direct
+    writers can't both read the same rev and clobber each other (lost update).
+    While that lock is held (_HOLDING_LOCK) we MUST NOT POST — a server's own
+    write also grabs the file lock, so POSTing under it would deadlock — and we
+    must NOT re-lock (flock on a second fd in the same process self-deadlocks).
     """
     d["rev"] = d.get("rev", 0) + 1
     d["savedAt"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     d["savedBy"] = "claude"
 
-    if _try_post_to_server(d, p):
-        return d["rev"]
-
-    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".board.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(d, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, p)
-    except Exception:
-        try: os.unlink(tmp)
-        except OSError: pass
-        raise
+    data = json.dumps(d, indent=2, ensure_ascii=False).encode()
+    if _HOLDING_LOCK:
+        # No-server path: caller (main) already holds the lock and chose direct.
+        _write_direct(p, data)
+    else:
+        if _try_post_to_server(d, p):
+            return d["rev"]
+        # Server vanished mid-command → self-lock this one write.
+        with _boardio.board_lock(p):
+            _write_direct(p, data)
     if regen and REGEN_SCRIPT.exists():
         subprocess.run(
             [sys.executable, str(REGEN_SCRIPT), str(p)],
@@ -1401,10 +1431,30 @@ def build_parser():
 
 
 def main():
+    global _HOLDING_LOCK
     args = build_parser().parse_args()
     board = find_board(args.board)
-    d = load(board)
-    args.fn(args, d, board)
+
+    # If a server owns this board, writes funnel through it (POST) and the
+    # server serializes them — no file lock here (holding it during a POST would
+    # deadlock the server's own locked write). If NOT, we write directly, so we
+    # hold the file lock across load→dispatch→save: the read is then fresh under
+    # the lock and concurrent direct writers can't lose each other's updates.
+    server_present = (
+        os.environ.get("BOARD_NO_SERVER") != "1"
+        and _resolve_server_url(board) is not None
+    )
+    if server_present:
+        d = load(board)
+        args.fn(args, d, board)
+    else:
+        with _boardio.board_lock(board):
+            _HOLDING_LOCK = True
+            try:
+                d = load(board)
+                args.fn(args, d, board)
+            finally:
+                _HOLDING_LOCK = False
 
 
 if __name__ == "__main__":

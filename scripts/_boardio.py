@@ -1,0 +1,141 @@
+"""Shared board write-safety helpers — Phase 3.5a (flock) + 3.5b (rolling backups).
+
+Imported by BOTH writers so they cannot corrupt or lose each other's work:
+  - card.py  : direct-write fallback (when no server owns the board)
+  - serve.py : the server's POST /board.json write path
+
+Why this exists (VISION: "data loss is unforgivable" at millions-of-installs scale):
+  * Two processes (a running server + a `card.py` invoked from a shell that can't
+    reach it) can both read rev=N and write rev=N+1, silently losing one update.
+    `board_lock` serializes every committed write on a single lock file so the
+    read-modify-write windows can't interleave across processes.
+  * `os.replace` is atomic, but once a bad/empty board is committed there is no
+    way back. `write_backup` snapshots every committed rev to <board>/.backups/
+    and keeps the newest N, so `card.py recover` (3.5c) can roll back.
+
+Pure stdlib, no third-party deps. Sibling-importable: when either script runs
+as `python3 .../scripts/<x>.py`, its own dir is sys.path[0], so `import _boardio`
+resolves. serve.py also explicitly inserts scripts/ onto sys.path.
+"""
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import time
+from pathlib import Path
+
+try:
+    import fcntl  # POSIX
+    _HAVE_FCNTL = True
+    msvcrt = None
+except ImportError:  # Windows
+    _HAVE_FCNTL = False
+    try:
+        import msvcrt
+    except ImportError:
+        msvcrt = None
+
+BACKUP_KEEP = 10
+LOCK_NAME = ".board.lock"
+BACKUP_DIR = ".backups"
+
+
+@contextlib.contextmanager
+def board_lock(target, timeout: float = 5.0):
+    """Exclusive cross-process lock keyed on ``<board_dir>/.board.lock``.
+
+    Both writers lock the SAME path (derived from the board.json location) so a
+    server write and a direct fallback write serialize instead of racing.
+
+    Yields True if the lock was acquired, False if it timed out. On timeout the
+    caller STILL writes — ``os.replace`` remains atomic, and we would rather risk
+    a rare lost update than drop the user's write entirely to honor a stuck lock.
+    """
+    target = Path(target)
+    lock_path = target.parent / LOCK_NAME
+    f = None
+    acquired = False
+    try:
+        f = open(lock_path, "a+")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if _HAVE_FCNTL:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                elif msvcrt is not None:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    break  # proceed unlocked rather than lose the write
+                time.sleep(0.05)
+        yield acquired
+    finally:
+        if f is not None:
+            if acquired:
+                try:
+                    if _HAVE_FCNTL:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    elif msvcrt is not None:
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            f.close()
+
+
+def write_backup(board_path, data: bytes, keep: int = BACKUP_KEEP) -> None:
+    """Snapshot a just-committed board to ``<board_dir>/.backups/board-<rev>.json``
+    and prune to the newest ``keep`` revs.
+
+    Best-effort: any failure is swallowed so backups can never break the write
+    path. ``data`` is the exact bytes that were written to board.json.
+    """
+    try:
+        board_path = Path(board_path)
+        rev = _extract_rev(data)
+        bdir = board_path.parent / BACKUP_DIR
+        bdir.mkdir(exist_ok=True)
+        dest = bdir / f"board-{rev}.json"
+        tmp = bdir / f".board-{rev}.json.tmp"
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
+        _prune(bdir, keep)
+    except Exception:
+        pass
+
+
+def list_backups(board_path):
+    """Return existing backup snapshots, newest rev first: [(rev, Path), ...]."""
+    bdir = Path(board_path).parent / BACKUP_DIR
+    if not bdir.is_dir():
+        return []
+    snaps = [(_rev_of(p), p) for p in bdir.glob("board-*.json")]
+    snaps = [(r, p) for r, p in snaps if r >= 0]
+    return sorted(snaps, key=lambda rp: rp[0], reverse=True)
+
+
+def _extract_rev(data: bytes) -> int:
+    try:
+        return int(json.loads(data).get("rev", 0))
+    except Exception:
+        return 0
+
+
+def _rev_of(p: Path) -> int:
+    try:
+        return int(p.stem.split("-", 1)[1])
+    except (ValueError, IndexError):
+        return -1
+
+
+def _prune(bdir: Path, keep: int) -> None:
+    if keep <= 0:
+        return
+    snaps = sorted(bdir.glob("board-*.json"), key=_rev_of)
+    for p in snaps[:-keep]:
+        try:
+            p.unlink()
+        except OSError:
+            pass

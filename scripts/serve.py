@@ -49,6 +49,8 @@ _scripts_dir = str(Path(__file__).resolve().parent)
 if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
+import _boardio  # noqa: E402  (write-safety: flock + rolling backups)
+
 _write_lock = threading.Lock()
 _clients_lock = threading.Lock()
 _clients: list[queue.Queue] = []
@@ -416,17 +418,21 @@ def _stream_discovered_cards(project_root: Path, board_dir: Path,
 
 
 def atomic_write(path: Path, data: bytes) -> None:
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".board.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.replace(tmp, path)
-    except Exception:
+    # Cross-process lock (3.5a): a `card.py` invoked from a shell that can't
+    # reach this server writes the same file directly; the lock keeps the two
+    # paths from interleaving. The in-process _write_lock alone doesn't cover that.
+    with _boardio.board_lock(path):
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".board.", suffix=".tmp")
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
 
 def regen_index(board_dir: Path) -> None:
@@ -779,13 +785,12 @@ class BoardHandler(BaseHTTPRequestHandler):
             return
 
         global _cached_state
+        body_out = json.dumps(payload, indent=2).encode()
         with _write_lock:
             with _cached_lock:
                 prev = _cached_state
-            atomic_write(
-                self.board_dir / "board.json",
-                json.dumps(payload, indent=2).encode(),
-            )
+            atomic_write(self.board_dir / "board.json", body_out)
+            _boardio.write_backup(self.board_dir / "board.json", body_out)  # 3.5b
             regen_index(self.board_dir)
             with _cached_lock:
                 _cached_state = payload
