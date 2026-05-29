@@ -547,6 +547,22 @@ def cmd_update(args, d, board):
             c["tags"].remove(t)
             changed.append(f"-tag:{t}")
 
+    # #102 BOARD-AUTO-LINK — linkedFiles drive the PreToolUse flash hook.
+    # Paths are normalised to absolute form so basename + absolute hits both
+    # work against the same canonical entry.
+    for fp in (getattr(args, "add_linked_file", None) or []):
+        fp_abs = str(Path(fp).expanduser().resolve())
+        c.setdefault("linkedFiles", [])
+        if fp_abs not in c["linkedFiles"]:
+            c["linkedFiles"].append(fp_abs)
+            changed.append(f"+file:{Path(fp_abs).name}")
+    for fp in (getattr(args, "rm_linked_file", None) or []):
+        fp_abs = str(Path(fp).expanduser().resolve())
+        before = list(c.get("linkedFiles") or [])
+        c["linkedFiles"] = [x for x in before if x != fp_abs]
+        if len(c["linkedFiles"]) != len(before):
+            changed.append(f"-file:{Path(fp_abs).name}")
+
     if not changed:
         sys.exit("nothing to update — pass at least one field")
     c["updatedAt"] = now_iso()
@@ -1256,6 +1272,12 @@ def build_parser():
     pu.add_argument("--writeup-stdin", action="store_true")
     pu.add_argument("--add-tag", action="append", default=None)
     pu.add_argument("--rm-tag", action="append", default=None)
+    pu.add_argument("--add-linked-file", action="append", default=None,
+                    help="path to a file this card 'owns' (#102 AUTO-LINK). When the "
+                         "PreToolUse hook sees Edit/Write on this path, the board flashes "
+                         "this card's border. Paths are normalised to absolute form.")
+    pu.add_argument("--rm-linked-file", action="append", default=None,
+                    help="remove a linked-file path (matched after the same abs-path normalisation)")
     pu.add_argument("--force", action="store_true",
                     help="Accept tags that aren't in board.json tagTaxonomy")
     pu.set_defaults(fn=cmd_update)

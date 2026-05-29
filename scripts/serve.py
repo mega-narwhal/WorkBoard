@@ -33,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -659,6 +660,40 @@ class BoardHandler(BaseHTTPRequestHandler):
             if not idx.exists():
                 regen_index(self.board_dir)
             self._send_file(idx, "application/json")
+            return
+
+        if path == "/flash":
+            # #102 BOARD-AUTO-LINK — broadcast a transient flash to the board.
+            # No state mutation; just a one-shot SSE pulse. Query params:
+            #   ?card=<num|id> — required, the card to flash
+            #   ?file=<path>   — optional, file path that triggered the flash
+            #                    (shown in the toast)
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            ref = (qs.get("card") or [""])[0]
+            fpath = (qs.get("file") or [""])[0]
+            if not ref:
+                self._send(400, b'{"error":"missing card param"}')
+                return
+            try:
+                state = json.loads((self.board_dir / "board.json").read_text())
+            except Exception:
+                self._send(500, b'{"error":"board.json unreadable"}')
+                return
+            target = None
+            for c in state.get("cards", []):
+                if str(c.get("num")) == ref or c.get("id") == ref or c.get("code") == ref:
+                    target = c
+                    break
+            if target is None:
+                self._send(404, json.dumps({"error": f"card not found: {ref}"}).encode())
+                return
+            broadcast("card-flash", {
+                "id": target["id"],
+                "num": target.get("num"),
+                "title": target.get("title", ""),
+                "file": fpath,
+            })
+            self._send(200, json.dumps({"ok": True, "flashed": target.get("num")}).encode())
             return
 
         if path == "/health":

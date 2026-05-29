@@ -305,6 +305,42 @@ python3 ~/.agents/skills/board-steward/scripts/card.py auto-ship 101 \
 
 ---
 
+### I. Auto-link files to cards (the VISION zero-input promise · #102)
+
+When Claude edits a file that "belongs to" an in-progress card, the card border flashes coral and a one-line toast names the file. The user glances at the board, sees `#83 ⚡ board.html`, and knows exactly which card the work is feeding — without typing anything, without asking Claude what they were doing.
+
+**Mechanism:**
+
+- `card.linkedFiles` — array of absolute paths the card claims (added via `card.py update`)
+- `hook_pre_tool_use.sh` (PreToolUse hook, matcher `Edit|Write|MultiEdit|NotebookEdit`) — fires on every file mutation, looks up matching cards, pings `/flash?card=N&file=...` on the live board
+- `serve.py /flash` — no state mutation; just broadcasts a one-shot `card-flash` SSE event
+- `board.html` — adds `.card.linked-flash` (1.8s coral pulse) + drops the toast
+
+**Linking a file when you create or start a card:**
+
+```bash
+# Add at create time via --link is for cards; files use update:
+python3 ~/.agents/skills/board-steward/scripts/card.py update 83 \
+  --add-linked-file ~/Desktop/WorkBoard/templates/board.html \
+  --add-linked-file ~/Desktop/WorkBoard/scripts/serve.py
+
+# Remove a stale link:
+python3 ~/.agents/skills/board-steward/scripts/card.py update 83 \
+  --rm-linked-file ~/Desktop/WorkBoard/templates/board.html
+```
+
+Paths normalise to absolute form; basename match is the fallback so editing the relative path still triggers when the card stored the absolute version.
+
+**Discipline — when to link, when NOT to link:**
+
+1. **Link when you start work on a card** (in §E step 2, after `fly inprogress`). One `card.py update <num> --add-linked-file <path>` per file you expect to touch this cycle. Repeat for files you discover mid-flight.
+2. **Don't pre-emptively link** every file a card might one day touch. That's how `#83 ⚡` ends up flashing on every Edit of board.html forever. Link tight, unlink at `move done`.
+3. **One file → many cards is OK** (up to 4 simultaneous flashes — capped in `_hook_flash_linked.py`). If a file flashes for 5+ cards, the cards are too overlapping; consolidate.
+4. **The hook is non-blocking.** 1s hard timeout, silent on any failure. If you don't see the flash, the linkage isn't wired — check `card.py show <num>` for `linkedFiles`.
+5. **Install the hook with `install_hooks.py --hook all`** (session-start + pre-tool-use). Without that, linkedFiles do nothing.
+
+---
+
 ## Saving cleanly — prefer `card.py` (v3 default)
 
 For 95% of mutations, **don't write Python dict literals inline** — use `card.py`. It handles load + mutate + `rev` bump + `savedAt`/`savedBy='claude'` + atomic write + `index.json` regen in one shot. Saves tokens and prevents drift across hand-rolled scripts.

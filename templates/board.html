@@ -99,6 +99,15 @@
     100% { box-shadow: var(--shadow); background: var(--card-bg); }
   }
   .card.flashing { animation: card-flash 1200ms ease-out; }
+  /* #102 BOARD-AUTO-LINK — coral pulse when a linked file was just edited.
+     Distinct from .flashing's green poll-flash so users can tell "you
+     touched a file this card claims" vs "the card just got updated". */
+  @keyframes card-linked-flash {
+    0%   { box-shadow: 0 0 0 3px rgba(217,119,87,.65), 0 6px 18px rgba(217,119,87,.45); background: #FBEEE6; transform: translateY(-1px); }
+    60%  { box-shadow: 0 0 0 2px rgba(217,119,87,.35), 0 4px 14px rgba(217,119,87,.22); background: #FBEEE6; transform: translateY(0); }
+    100% { box-shadow: var(--shadow); background: var(--card-bg); transform: translateY(0); }
+  }
+  .card.linked-flash { animation: card-linked-flash 1800ms ease-out; }
   /* ═══════════════════════════════════════════════════════════════════
    * LIFECYCLE ANIMATIONS — DO NOT BREAK
    * These rules + the JS counterparts (simulateUserDragMove,
@@ -4583,6 +4592,25 @@ function applyActiveWorkTransition(cardId, fromCol, toCol) {
   }
 }
 
+// #102 BOARD-AUTO-LINK: server broadcasts card-flash via /flash?card=N&file=PATH
+// when the PreToolUse hook sees Claude editing a file in this card's linkedFiles.
+// Adds .linked-flash for 1.8s + drops a one-line toast naming the file.
+function handleCardFlash({ id, num, title, file }) {
+  if (!state) return;
+  const el = findCardEl(id);
+  if (el) {
+    el.classList.remove('linked-flash');
+    void el.offsetWidth;            // re-trigger CSS animation
+    el.classList.add('linked-flash');
+    el.addEventListener('animationend', () => el.classList.remove('linked-flash'), { once: true });
+  }
+  const f = file ? (file.split('/').pop() || file) : '';
+  toast(`⚡ #${num} — touched ${f || 'linked file'}`, 2400);
+  if (typeof logEvent === 'function') {
+    logEvent('flash', `#${num} ⚡ ${f || ''}`, { id, num, file });
+  }
+}
+
 function handleCardAdded({ card }) {
   if (!state) return;
   const existing = state.cards.find(c => c.id === card.id);
@@ -4877,6 +4905,7 @@ function startSSE() {
   _es.addEventListener('card-added',     e => handleCardAdded(JSON.parse(e.data)));
   _es.addEventListener('card-updated',   e => handleCardUpdated(JSON.parse(e.data)));
   _es.addEventListener('card-removed',   e => handleCardRemoved(JSON.parse(e.data)));
+  _es.addEventListener('card-flash',     e => handleCardFlash(JSON.parse(e.data)));
   _es.addEventListener('column-added',   e => handleColumnAdded(JSON.parse(e.data)));
   _es.addEventListener('column-removed', e => handleColumnRemoved(JSON.parse(e.data)));
   _es.addEventListener('column-renamed', e => handleColumnRenamed(JSON.parse(e.data)));
