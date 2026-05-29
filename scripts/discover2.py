@@ -182,13 +182,33 @@ def harvest_jsonl(since: datetime | None) -> list[dict]:
     return events
 
 
+def _memory_summary(p: Path) -> str:
+    """Filename + the frontmatter `description:` + first body paragraph, capped.
+    The content (not just the filename) is the richest context on the box (#286)."""
+    try:
+        txt = p.read_text(errors="replace")
+    except OSError:
+        return p.name
+    desc = ""
+    m = re.search(r"^description:\s*(.+)$", txt, re.M)
+    if m:
+        desc = m.group(1).strip()
+    body = re.sub(r"(?s)\A\s*---.*?---\s*", "", txt).strip()   # drop frontmatter
+    first_para = body.split("\n\n", 1)[0].strip() if body else ""
+    summary = " — ".join(x for x in (desc, first_para) if x)
+    return (f"{p.name}: {summary}" if summary else p.name)[:500]
+
+
 def harvest_memory(since: datetime | None) -> list[dict]:
-    """memory/*.md files — mtime is the signal (no useful event timeline inside)."""
+    """Auto-memory across ALL project slugs (#280) with content read in (#286).
+    Memory lives at ~/.claude/projects/<slug>/memory/*.md where <slug> is the
+    cwd path of the session that wrote it — so glob every slug, never hardcode
+    one ('-Users-malco' was this machine's HOME slug only)."""
     out: list[dict] = []
-    mem_dir = Path.home() / ".claude" / "projects" / "-Users-malco" / "memory"
-    if not mem_dir.is_dir():
+    root = Path.home() / ".claude" / "projects"
+    if not root.is_dir():
         return out
-    for p in mem_dir.glob("*.md"):
+    for p in root.glob("*/memory/*.md"):
         try:
             ts = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
         except OSError:
@@ -197,7 +217,7 @@ def harvest_memory(since: datetime | None) -> list[dict]:
             continue
         out.append({
             "ts": ts, "source": "memory", "kind": "memory_write",
-            "text": p.name, "files": [str(p)], "meta": {},
+            "text": _memory_summary(p), "files": [str(p)], "meta": {},
         })
     return out
 
