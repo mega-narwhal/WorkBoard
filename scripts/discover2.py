@@ -247,7 +247,14 @@ _CONVO_HEADER_RE = re.compile(r"^\[(USER|CLAUDE)\]\s+(\d{1,2}):(\d{2})", re.M)
 
 def harvest_convo(since: datetime | None, convo_dir: Path | None = None) -> list[dict]:
     """conversation_raw_YYMMDD.md — parses [USER] HH:MM markers. convo_dir must
-    be resolved by the caller (find_convo_dir); no hardcoded path. None → []."""
+    be resolved by the caller (find_convo_dir); no hardcoded path. None → [].
+
+    Deliberately reads ONLY the _raw_ SUMMARY dumps, not conversation_verbatim_*.md
+    (#287, decision A 2026-05-29): the verbatim dumps are the *.jsonl transcripts
+    re-rendered to markdown, and we already harvest those raw via harvest_jsonl —
+    so parsing verbatim would double-count. The _raw_ summaries are kept because
+    they carry the user's curated session structure that the jsonl lacks; the
+    cross-source dedupe in _flatten_events drops any that overlap jsonl turns."""
     out: list[dict] = []
     if convo_dir is None or not convo_dir.is_dir():
         return out
