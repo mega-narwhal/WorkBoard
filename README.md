@@ -9,20 +9,29 @@ Originally built as the `board-steward` Claude Code skill; this repo is the cano
 ## What's in the box
 
 - `SKILL.md` — the playbook Claude follows (greet → traverse → act → log → sign off)
-- `scripts/` — Python helpers
-  - `serve.py` — local HTTP server with SSE live-streaming (no File System Access API; cross-browser)
-  - `card.py` — one-line CLI for card add / move / update / link / subtask / column ops
+- `scripts/` — Python helpers (stdlib-only, no dependencies)
+  - `serve.py` — local HTTP server with SSE live-streaming (no File System Access API; cross-browser). Serves `/board.json`, `/events`, `/metrics`, `/export.md`, `/export.html`, `/flash`, `/health`.
+  - `card.py` — the CLI. Mutations (`add` / `move` / `fly` / `update` / `link` / `subtask` / `column` / `bug` / `improve` / `auto-ship`), reads (`digest` / `query` / `show` / `list` / `wiki` / `export` / `metrics`), and data-safety (`recover` / `migrate` / `repair-links`).
+  - `_boardio.py` · `_render.py` · `_metrics.py` — shared internals (write-safety, HTML/MD renderers, velocity compute) imported by both `card.py` and `serve.py`.
   - `regen_index.py` — produces a small `index.json` digest for cheap Tier-1 reads
   - `archive_done.py` — sweeps Done cards older than 14d into monthly archives
-  - `discover.py` — mines `~/.claude/projects/*/sessions/*.jsonl` to bootstrap a board from prior chat history
+  - `discover.py` / `discover2.py` — mine `~/.claude/projects/*/sessions/*.jsonl` to bootstrap a board from prior chat history
   - `log_event.py` / `report.py` — Steward self-telemetry
-  - `install_hooks.py` / `hook_session_start.sh` — wires a Claude Code SessionStart hook that injects a board digest once per session
-  - `install_launchd.py` — registers the server as a launchd job so it auto-starts at login (macOS)
-  - `health_check.py` — green/red dashboard verifying launchd + server + hook installed + hook fired
+  - `install_hooks.py` — wires the Claude Code hooks: `SessionStart` (board digest once per session) + `PreToolUse` (flashes a card when Claude edits a file linked to it)
+  - `install_autostart.py` — **cross-platform** autostart dispatcher → delegates to `install_launchd.py` (macOS), `install_systemd.py` (Linux), or `install_taskscheduler.py` (Windows); identical flags on every OS
+  - `health_check.py` — green/red dashboard verifying autostart + server + hook installed + hook fired
 - `templates/`
-  - `board.html` — the kanban UI (single-file, vanilla JS)
-  - `board.json` — empty-board starter (4 default columns: Ideas / Backlog / In Progress / Done)
+  - `board.html` — the kanban UI (single-file, vanilla JS; Board / Calendar / Velocity views)
+  - `board.json` — empty-board starter (6 default columns: Task / Backlog / In Progress / Done / Notes / Mandatory)
   - `tag-profiles.json` — 5 industry tag taxonomies (software / marketing / research / product / operations)
+
+## Features
+
+- **Zero-input auto-logging** — Claude files a card when work starts, slides it through In Progress, and writes a completion summary on ship. Idea-intent in a prompt auto-creates a card (with a 5s Undo toast); a commit auto-ships the matching card via `git log` scoring.
+- **Live, animated UI** — cards pop/glide between columns over SSE as work happens. The current in-progress card pulses and pins to the top.
+- **Token-efficient reads** — a progressive-disclosure ladder: `digest` (~120 tok board pulse) → `query` (sliced JSON) → `show` (one card) → `board.json` (last resort). The big file is never auto-loaded.
+- **Data-safety** — cross-process `flock` + rolling backups on every write; `recover` / `migrate` / `repair-links` CLI to restore, evolve schema, and fix broken links.
+- **Share + glance** — `export` to standalone HTML/Markdown for a sprint recap; a `/metrics` Velocity view (throughput, cycle time, blockers); optional bearer-token auth (`--auth-token`) to glance on your phone over the LAN.
 
 ## Quick start
 
@@ -31,13 +40,14 @@ cd <your-project>
 python ~/Desktop/WorkBoard/scripts/serve.py --bootstrap
 # creates board/ with a starter board.json + serves at http://127.0.0.1:7891
 
-# REQUIRED — wire the SessionStart hook so Claude sees the board digest
-# at the top of every new session. One-time, idempotent, safe to re-run.
-python ~/Desktop/WorkBoard/scripts/install_hooks.py
+# REQUIRED — wire the Claude Code hooks (SessionStart digest + PreToolUse
+# card-flash). One-time, idempotent, safe to re-run.
+python ~/Desktop/WorkBoard/scripts/install_hooks.py --hook all
 
-# RECOMMENDED — register the server with launchd so it auto-starts at login
-# (macOS). Run once per project. Pick a unique port per project (default 7891).
-python ~/Desktop/WorkBoard/scripts/install_launchd.py --project $(pwd) --port 7891
+# RECOMMENDED — register the server to auto-start at login. Cross-platform:
+# the dispatcher picks launchd (macOS) / systemd (Linux) / Task Scheduler (Windows).
+# Run once per project. Pick a unique port per project (default 7891).
+python ~/Desktop/WorkBoard/scripts/install_autostart.py --project $(pwd) --port 7891
 ```
 
 Then either point Claude at the board (it'll invoke the skill) or open the URL in any browser.
@@ -52,7 +62,7 @@ python ~/Desktop/WorkBoard/scripts/health_check.py
 
 Prints a green/red dashboard checking, for every registered port:
 
-- launchd has a live PID (server auto-starts at login)
+- autostart has a live PID (server auto-starts at login — launchd/systemd/Task Scheduler)
 - `/health` responds with rev + card count
 - `SessionStart` hook is installed in `~/.claude/settings.json`
 - Hook actually fired in the most recent Claude session (greps the session jsonl for the injection marker)
