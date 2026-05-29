@@ -272,6 +272,39 @@ python3 ~/.agents/skills/board-steward/scripts/card.py add \
 
 ---
 
+### H. Auto-ship after every commit (the VISION zero-input promise · #101)
+
+The §E lifecycle ends with `card.py fly <num> done --writeup "..."` after the work commits. Hand-typing the writeup every turn is the failure mode — Claude rushes, the writeup goes empty, and the card silently drifts into Done without a SHA pointer. (You watched this happen to #101 itself before this card existed.)
+
+**Use `card.py auto-ship` instead.** It reads `git log` between `--since-ref` and `HEAD`, scores inprogress cards against commit subjects (code-exact = 3pts, `#num` marker = 2pts, long title tokens = 1pt), and assembles the writeup from the matched commits + any extra prose you pass.
+
+**Two modes:**
+
+```bash
+# Scan: which inprogress cards look shipped in the last N commits?
+python3 ~/.agents/skills/board-steward/scripts/card.py auto-ship --since-ref HEAD~3
+# → table of (card, score, matched_shas). Run this in §F reconciliation.
+
+# Ship: dry-run preview (always run first)
+python3 ~/.agents/skills/board-steward/scripts/card.py auto-ship 101 --since-ref HEAD~1
+# → prints the writeup it WOULD set, plus any low-confidence warning.
+
+# Ship for real, with extra prose for human context the commit doesn't carry:
+python3 ~/.agents/skills/board-steward/scripts/card.py auto-ship 101 \
+  --since-ref HEAD~1 --apply \
+  --writeup-extra "Verified via fresh-tmp smoke + live :7892 fire. Browser undo toast tested by hand."
+```
+
+**Discipline:**
+
+1. **Run scan after every commit cluster.** When you've made 2+ commits without a `move done` in between, `auto-ship --since-ref HEAD~N` (N = commits since last ship) surfaces drift before the user has to ask "did that ship?"
+2. **Always dry-run first.** Confirms the right card was matched (score ≥ 2) and the writeup reads cleanly. Never `--apply` blind.
+3. **Add `--writeup-extra` for what git can't see.** The commit subject is one line; smoke-test evidence, gotchas worked around, deferred follow-ups — that goes in `--writeup-extra`.
+4. **Score < 2 means STOP.** No confident commit match in the range. Either the card hasn't actually shipped yet, or your `--since-ref` window is wrong. Don't `--force` past low-score warnings without reading the diff.
+5. **`fly done` is still valid** for cases where the work isn't a commit (a config tweak, a deferral decision, a "we explored this and chose not to ship"). Auto-ship is for git-shipped work specifically.
+
+---
+
 ## Saving cleanly — prefer `card.py` (v3 default)
 
 For 95% of mutations, **don't write Python dict literals inline** — use `card.py`. It handles load + mutate + `rev` bump + `savedAt`/`savedBy='claude'` + atomic write + `index.json` regen in one shot. Saves tokens and prevents drift across hand-rolled scripts.
