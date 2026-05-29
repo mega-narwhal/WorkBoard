@@ -3,7 +3,7 @@
 _hook_flash_linked.py — PreToolUse helper for #102 BOARD-AUTO-LINK.
 
 Reads a JSON event on stdin (Claude Code PreToolUse payload), looks at the
-edited file path, walks up from PWD for board/board.json, finds cards whose
+edited file path, walks up from that file (then PWD) for board/board.json, finds cards whose
 linkedFiles include that path (or its basename), and pings /flash?card=N&file=…
 on the board server. Fire-and-forget — any error stays silent so the hook
 never delays Claude's Edit/Write.
@@ -129,7 +129,14 @@ def main() -> int:
     if not fp:
         return 0
 
-    board_path = find_board(pwd)
+    # Locate the board by walking UP from the edited file first — the file is
+    # inside the project, whereas PWD may be a *parent* of the project (e.g.
+    # Claude Code launched from $HOME while the board lives in a subdir). Fall
+    # back to PWD only if the file-anchored search comes up empty.
+    fp_anchor = Path(fp)
+    if not fp_anchor.is_absolute():
+        fp_anchor = pwd / fp_anchor
+    board_path = find_board(fp_anchor.parent) or find_board(pwd)
     if board_path is None:
         return 0
 
