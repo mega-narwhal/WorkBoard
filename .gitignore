@@ -20,3 +20,6 @@ board/
 
 # Telemetry logs (regenerate per install)
 telemetry/events.jsonl
+
+# Conversation-derived training data — private, never commit
+training_data/
