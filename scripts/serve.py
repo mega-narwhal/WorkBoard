@@ -50,6 +50,7 @@ if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
 import _boardio  # noqa: E402  (write-safety: flock + rolling backups)
+import _render   # noqa: E402  (shared markdown/html renderers — #115 export)
 
 _write_lock = threading.Lock()
 _clients_lock = threading.Lock()
@@ -666,6 +667,28 @@ class BoardHandler(BaseHTTPRequestHandler):
             if not idx.exists():
                 regen_index(self.board_dir)
             self._send_file(idx, "application/json")
+            return
+
+        if path in ("/export.md", "/export.html"):
+            # #115 BOARD-EXPORT — static shareable snapshot. ?since=Nd narrows
+            # the recently-shipped section to a sprint window (e.g. ?since=7d).
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            since_days = None
+            raw = (qs.get("since") or [""])[0].strip().rstrip("d")
+            if raw.isdigit():
+                since_days = int(raw)
+            try:
+                state = json.loads((self.board_dir / "board.json").read_text())
+            except Exception:
+                self._send(500, b'{"error":"board.json unreadable"}')
+                return
+            if path == "/export.html":
+                body = _render.to_html(state, recent=20, since_days=since_days)
+                ctype = "text/html; charset=utf-8"
+            else:
+                body = _render.to_markdown(state, recent=20, since_days=since_days)
+                ctype = "text/markdown; charset=utf-8"
+            self._send(200, body.encode("utf-8"), ctype)
             return
 
         if path == "/flash":

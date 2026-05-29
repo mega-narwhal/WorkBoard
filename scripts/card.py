@@ -73,6 +73,7 @@ _scripts_dir = str(Path(__file__).resolve().parent)
 if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 import _boardio  # noqa: E402  (write-safety: flock + rolling backups)
+import _render   # noqa: E402  (shared markdown/html renderers — #115 export/wiki)
 
 # Set True by main() while it holds the cross-process file lock for the
 # no-server direct-write path. atomic_save reads it to skip POST + re-lock.
@@ -1621,42 +1622,26 @@ def cmd_query(args, d, board):
 
 def cmd_wiki(args, d, board):
     """5c (nice-to-have) — pre-rendered narrative Markdown of the board, for a
-    human glance or a paste into a PR/standup. Grouped by column in canonical
-    order, plus a 'Recently shipped' lead section."""
-    cards = d.get("cards", [])
-    cols = {c["id"]: c.get("name", c["id"]) for c in d.get("columns", [])}
-    by_col: dict[str, list] = {}
-    for c in cards:
-        by_col.setdefault(c.get("column", "?"), []).append(c)
+    human glance or a paste into a PR/standup. Shares the renderer with
+    `export` and serve.py /export.md (see _render.py)."""
+    print(_render.to_markdown(d, recent=args.recent))
 
-    out = [f"# Board — rev {d.get('rev', 0)} · {len(cards)} cards",
-           f"_generated {now_iso()}_", ""]
 
-    done = sorted((c for c in cards if c.get("column") == "done"),
-                  key=lambda c: c.get("doneAt") or "", reverse=True)
-    recent = done[:args.recent]
-    if recent:
-        out.append(f"## ✅ Recently shipped (last {len(recent)})")
-        for c in recent:
-            out.append(f"- **#{c['num']} {c.get('code') or ''}** — {c.get('title','')}  ·  _{_ago(c.get('doneAt'))}_")
-        out.append("")
-
-    order = [k for k in _DIGEST_ORDER if k != "done"] + [
-        k for k in by_col if k not in _DIGEST_ORDER]
-    for col in order:
-        items = by_col.get(col)
-        if not items:
-            continue
-        items.sort(key=lambda c: c.get("updatedAt") or "", reverse=True)
-        out.append(f"## {cols.get(col, col)} ({len(items)})")
-        for c in items:
-            p = (c.get("priority") or "-")[:1].upper()
-            subs = c.get("subtasks") or []
-            prog = f" · {sum(1 for s in subs if s.get('done'))}/{len(subs)}" if subs else ""
-            out.append(f"- `[{p}]` **#{c['num']} {c.get('code') or ''}** — {c.get('title','')}{prog}")
-        out.append("")
-
-    print("\n".join(out))
+def cmd_export(args, d, board):
+    """5.5c (#115) — write a shareable snapshot (Markdown or HTML) to a file or
+    stdout. Format inferred from --to extension (.html → HTML, else Markdown),
+    or forced with --format. --since-days N narrows the 'Recently shipped'
+    section to a sprint window. For CI: `card.py export --since-days 7 --to sprint.html`."""
+    fmt = args.format
+    if fmt is None:
+        fmt = "html" if (args.to or "").lower().endswith((".html", ".htm")) else "md"
+    render = _render.to_html if fmt == "html" else _render.to_markdown
+    body = render(d, recent=args.recent, since_days=args.since_days)
+    if args.to:
+        Path(args.to).write_text(body, encoding="utf-8")
+        print(f"exported {fmt} snapshot → {args.to} ({len(body)} bytes, rev {d.get('rev', 0)})")
+    else:
+        print(body)
 
 
 # ===== argparse wiring =====
@@ -1885,6 +1870,20 @@ def build_parser():
     pwk.add_argument("--recent", type=int, default=10,
                      help="how many recently-shipped cards to lead with (default 10)")
     pwk.set_defaults(fn=cmd_wiki)
+
+    # export (5.5c · #115) — write a shareable HTML/Markdown snapshot
+    pex = sub.add_parser("export",
+                         help="write a shareable snapshot (Markdown or HTML) to a file or "
+                              "stdout — for showing a sprint to your boss. CI-friendly.")
+    pex.add_argument("--to", default=None,
+                     help="output file (extension picks format); omit to print to stdout")
+    pex.add_argument("--format", choices=["md", "html"], default=None,
+                     help="force format (default: infer from --to, else md)")
+    pex.add_argument("--since-days", type=int, default=None, dest="since_days",
+                     help="narrow 'Recently shipped' to the last N days (sprint window)")
+    pex.add_argument("--recent", type=int, default=20,
+                     help="max recently-shipped cards to lead with (default 20)")
+    pex.set_defaults(fn=cmd_export)
 
     # prelaunch-check (#91) — exit 9 if any super-urgent/mandatory items open
     ppl = sub.add_parser("prelaunch-check",
