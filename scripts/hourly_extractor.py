@@ -43,7 +43,7 @@ Your job: identify the DISCRETE UNITS OF WORK that happened in each bucket. Each
 
 Output: a JSON ARRAY of card objects. Each card:
 {
-  "title": "verb + noun phrase, ≤70 chars. Examples: 'BOARD-FLY: atomic-hop primitive', 'Fix card-drag freeze on iPhone', 'Investigate convo dedup'. NO conversational openers (btw, can u, oh wait). NO verbatim user wording — summarize the WORK.",
+  "title": "verb + noun phrase, ≤70 chars. CLEAN — do NOT prefix with the code (the code renders as its own badge). Examples: 'Atomic-hop primitive for card moves', 'Fix card-drag freeze on iPhone', 'Investigate convo dedup'. NO conversational openers (btw, can u, oh wait). NO verbatim user wording — summarize the WORK.",
   "code": "short CAPS badge from the noun cluster, ≤24 chars (e.g. 'BOARD-FLY', 'DISCOVER2', 'SIM-60D'). Give one to EVERY card that names a concrete feature/system/fix — it renders as a colored badge and is how work is referenced. Only leave empty for a pure observation/note with no nameable subject.",
   "column": "one of: task | backlog | inprogress | done | mandatory | notes",
   "priority": "low | mid | critical",
@@ -495,8 +495,11 @@ def _card_add(card_py: Path, board: Path, card: dict) -> int | None:
     if not title:
         return None
     code = (card.get("code") or "").strip()
-    if code and not title.lower().startswith(code.lower()):
-        title = f"{code}: {title}"[:80]
+    # The code renders as its own badge — keep the title CLEAN (no "CODE: " prefix),
+    # matching the manual board (code 'BOARD-AUTO-MOVE' + title 'Auto-promotion …').
+    # Strip a redundant leading "CODE:" if the LLM put one in the title.
+    if code and title.lower().startswith(code.lower()):
+        title = title[len(code):].lstrip(" :—-").strip() or title
     column = card.get("column") or "task"
     if column not in ("task", "backlog", "inprogress", "done",
                       "mandatory", "notes"):
