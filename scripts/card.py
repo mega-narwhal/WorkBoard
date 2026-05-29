@@ -784,6 +784,174 @@ def cmd_bug(args, d, board):
     print(f"🐞 #{c['num']} {old} → inprogress (+bug tag, +subtask {sid}) (rev {rev})")
 
 
+# ===== auto-ship (#101 Phase 3b) =====
+
+def _find_git_root(start: Path) -> Path:
+    """Walk up from start looking for a .git dir/file. Returns start if none."""
+    p = start.resolve()
+    for _ in range(8):
+        g = p / ".git"
+        if g.is_dir() or g.is_file():
+            return p
+        if p.parent == p:
+            break
+        p = p.parent
+    return start.resolve()
+
+
+def _git_log_since(since_ref: str, cwd: Path) -> list[tuple[str, str]]:
+    """git log <since_ref>..HEAD → [(short_sha, subject), ...] oldest-first."""
+    try:
+        out = subprocess.run(
+            ["git", "log", f"{since_ref}..HEAD", "--format=%h\t%s", "--reverse"],
+            cwd=str(cwd), capture_output=True, text=True, timeout=5, check=True,
+        )
+    except Exception:
+        return []
+    rows = []
+    for ln in out.stdout.strip().splitlines():
+        if "\t" in ln:
+            sha, subj = ln.split("\t", 1)
+            rows.append((sha.strip(), subj.strip()))
+    return rows
+
+
+def _score_card_against_commits(card: dict, commits: list[tuple[str, str]]) -> tuple[int, list[str]]:
+    """Score how strongly a card matches a list of commit subjects.
+
+    Code exact match     = 3 pts
+    #num marker          = 2 pts
+    long title token     = 1 pt each (token >= 5 chars, max 3 tokens counted)
+
+    Returns (total_score, matched_sha_list). A score >= 2 is treated as a
+    confident match (either code+anything, OR #num+anything)."""
+    score = 0
+    hits: list[str] = []
+    code = (card.get("code") or "").upper().strip()
+    num_marker = f"#{card.get('num')}"
+    title = (card.get("title") or "").lower()
+    title_tokens = [w for w in title.split() if len(w) >= 5][:3]
+    for sha, subj in commits:
+        s = 0
+        su = subj.upper()
+        sl = subj.lower()
+        if code and code in su:
+            s += 3
+        if num_marker in subj:
+            s += 2
+        for w in title_tokens:
+            if w in sl:
+                s += 1
+        if s:
+            score += s
+            hits.append(sha)
+    return score, hits
+
+
+def _auto_ship_writeup(card: dict, commits: list[tuple[str, str]], hits: list[str], extra: str | None) -> str:
+    """Build the writeup body for an auto-ship: one-line header naming the
+    matched SHAs, then a bullet list of relevant commit subjects, then the
+    optional extra prose."""
+    relevant = [(s, sub) for s, sub in commits if not hits or s in hits]
+    if not relevant:
+        relevant = commits[-3:]  # last 3 commits as soft fallback
+    sha_list = ", ".join(hits) if hits else relevant[-1][0]
+    lines = [f"Shipped in {sha_list}.", ""]
+    for sha, subj in relevant:
+        lines.append(f"  {sha}  {subj}")
+    if extra:
+        lines.append("")
+        lines.append(extra.strip())
+    return "\n".join(lines)
+
+
+def cmd_auto_ship(args, d, board):
+    """#101 BOARD-AUTO-MOVE: auto-promote inprogress cards to done using git log.
+
+    Two modes:
+      Scan mode (no ref):  scan inprogress cards, score matches against commits
+                           in <since-ref>..HEAD, print candidate table.
+      Ship mode (ref):     move that card to done with an auto-generated writeup
+                           assembled from the matching commits.
+
+    Default is dry-run preview. Pass --apply to actually move."""
+    git_root = _find_git_root(board.parent)
+    commits = _git_log_since(args.since_ref, cwd=git_root)
+    if not commits:
+        sys.exit(f"no commits in range {args.since_ref}..HEAD (git_root={git_root})")
+
+    # SCAN mode
+    if not args.ref:
+        inprog = [c for c in d["cards"] if c.get("column") == "inprogress"]
+        if not inprog:
+            print("(no cards in inprogress)")
+            return
+        rows = []
+        for c in inprog:
+            score, hits = _score_card_against_commits(c, commits)
+            if score >= 2:
+                rows.append((c, score, hits))
+        rows.sort(key=lambda r: (-r[1], r[0]["num"]))
+        print(f"# auto-ship candidates ({args.since_ref}..HEAD, {len(commits)} commits)")
+        if not rows:
+            print("(no inprogress cards match recent commits)")
+            return
+        for c, score, hits in rows:
+            code = c.get("code") or c.get("id")
+            print(f"  #{c['num']:>3} score={score:<2}  {code:<22} {c.get('title','')[:54]}")
+            for sha in hits:
+                subj = next((s for x, s in commits if x == sha), "")
+                print(f"        ↳ {sha}  {subj[:80]}")
+        print(f"\n→ to ship one: card.py auto-ship <num> --since-ref {args.since_ref} --apply")
+        return
+
+    # SHIP mode
+    c = find_card(d, args.ref)
+    if c.get("column") == "done" and not args.force:
+        sys.exit(f"#{c['num']} already in done (use --force to re-ship)")
+    score, hits = _score_card_against_commits(c, commits)
+    writeup = _auto_ship_writeup(c, commits, hits, getattr(args, "writeup_extra", None))
+
+    if not args.apply:
+        code = c.get("code") or c.get("id")
+        print(f"DRY-RUN: would ship #{c['num']} {code} (score={score}, {len(hits)} commit hits)")
+        if score < 2:
+            print(f"WARN: low match score — no commit in {args.since_ref}..HEAD obviously mentions this card.")
+            print("      Re-run with --apply if you've confirmed by eye, or pick a wider --since-ref.")
+        print("--- writeup ---")
+        print(writeup)
+        print("--- end ---")
+        print("(re-run with --apply to actually move)")
+        return
+
+    # Apply: mirror the cmd_move done branch.
+    old = c["column"]
+    c["column"] = "done"
+    ts = now_iso()
+    c["doneAt"] = c.get("doneAt") or ts
+    if "bug" in (c.get("tags") or []):
+        c["tags"] = [t for t in c["tags"] if t != "bug"]
+    c.setdefault("subtasks", [])
+    if not c["subtasks"]:
+        sid = new_subtask_id(c)
+        c["subtasks"].append({
+            "id": sid, "text": "☑ initial ship",
+            "done": True, "doneAt": ts,
+            "createdAt": ts, "children": [],
+        })
+        c["lastTouchedSubtask"] = sid
+    else:
+        sid = c.get("lastTouchedSubtask")
+        st = _find_subtask_anywhere(c["subtasks"], sid) if sid else None
+        if st and not st.get("done"):
+            st["done"] = True
+            st["doneAt"] = ts
+    c["writeup"] = writeup
+    c["updatedAt"] = ts
+    rev = atomic_save(board, d)
+    print(f"✈ #{c['num']} {old} → done [auto-ship, {len(hits)} commit hits] (rev {rev})")
+
+
 def cmd_sim(args, d, board):
     try:
         gap_ip, gap_done = (float(x) for x in args.intervals.split(","))
@@ -1166,6 +1334,21 @@ def build_parser():
     pimp.add_argument("ref", help="card num or id")
     pimp.add_argument("text", help="subtask text (the improvement)")
     pimp.set_defaults(fn=cmd_improve)
+
+    pas = sub.add_parser("auto-ship",
+                         help="auto-promote inprogress cards to done using git log (#101). "
+                              "No ref = scan mode (table of candidates); ref + --apply = ship that one.")
+    pas.add_argument("ref", nargs="?", default=None,
+                     help="card num/code/id to ship (omit for scan mode)")
+    pas.add_argument("--since-ref", default="HEAD~1",
+                     help="git ref starting bound; commits in <ref>..HEAD are scanned (default HEAD~1)")
+    pas.add_argument("--writeup-extra", default=None,
+                     help="append this prose to the auto-generated writeup")
+    pas.add_argument("--apply", action="store_true",
+                     help="actually move the card (default is dry-run preview)")
+    pas.add_argument("--force", action="store_true",
+                     help="re-ship a card already in done")
+    pas.set_defaults(fn=cmd_auto_ship)
 
     psim = sub.add_parser("sim", help="run canonical lifecycle: task → inprogress → done")
     psim.add_argument("--title", default=None, help="card title (default: auto-named)")
