@@ -9,7 +9,7 @@ Edit/Write/Read as file markers) — so the card.py transition calls are preserv
 in place for the training pipeline (#251).
 
 Usage:
-  render_session_raw.py                      # newest session for $PWD's project → stdout
+  render_session_raw.py                      # current (globally newest-mtime) session → stdout
   render_session_raw.py path/to/session.jsonl
   render_session_raw.py --append-daily       # append to ~/Desktop/conversation_history/
                                              #   conversation_verbatim_YYMMDD.md (dedup by sessionId)
@@ -34,13 +34,20 @@ PROJECTS = Path.home() / ".claude" / "projects"
 HIST_DIR = Path.home() / "Desktop" / "conversation_history"
 
 
-def newest_session_for_cwd() -> Path | None:
-    """The most-recently-modified transcript for the project matching $PWD."""
-    enc = str(Path.cwd().resolve()).replace("/", "-")
-    proj = PROJECTS / enc
-    if not proj.is_dir():
-        return None
-    sessions = sorted(proj.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+def newest_live_session() -> Path | None:
+    """The current session's transcript = the most-recently-MODIFIED jsonl across
+    ALL projects.
+
+    #259 fix: the old version scoped to the project matching $PWD. But the shell
+    cwd drifts (a stray `cd`, or running from a subdir), so $PWD often resolves to
+    a DIFFERENT project than the live session — and it would render a stale
+    transcript into the wrong day's file. The live session is the one Claude Code
+    is actively writing *right now*, i.e. the globally newest-mtime jsonl,
+    regardless of cwd. (Claude Code exposes no session-id env var to key off, so
+    mtime is the reliable signal; pass an explicit path to override.)
+    """
+    sessions = sorted(PROJECTS.glob("*/*.jsonl"),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
     return sessions[0] if sessions else None
 
 
@@ -126,7 +133,7 @@ def main():
     ap.add_argument("--with-results", action="store_true", help="include truncated tool-result markers")
     args = ap.parse_args()
 
-    path = args.jsonl or newest_session_for_cwd()
+    path = args.jsonl or newest_live_session()
     if not path or not path.is_file():
         sys.exit("error: no transcript found (pass a JSONL path explicitly)")
 
