@@ -121,6 +121,21 @@ Each Steward run pays for whatever it reads. Default to the minimum.
 
 **Rule of thumb:** session start = Tier 1 only. Drift detection = Tier 1 + maybe Tier 2 for the 2-3 in-progress cards. After-shipped = Tier 1 + the one card you're updating.
 
+### The progressive-disclosure ladder (CLI · Phase 5)
+
+The four tiers above are *files*. In a live session you rarely read files directly — you ask `card.py` for exactly the slice you need, and pay only for that. The ladder, cheapest → most expensive:
+
+| Rung | Command | Cost | Use when |
+|---|---|---|---|
+| **digest** | `card.py digest` | ~120 tok | You need the board *pulse* mid-session — counts + last-shipped + launch-blocking. Same shape the SessionStart hook injects, but on demand (e.g. after a cluster of `fly` calls, to confirm the new shape). `--json` for machine form. |
+| **query** | `card.py query --column inprogress --fields num,title,updatedAt` | ~10–40 tok/card | You need *several* cards but only a few fields. The machine sibling of `list`. Filters: `--column / --priority / --tag / --since-days N / --limit`. `--fields` selects keys (aliases `n,col,prio,upd`; specials `p`=subtask progress, `links`=link count, `all`=full cards). Newest-updated first. |
+| **show** | `card.py show <num>` | one full card | You need everything about *one* card — notes, subtasks, writeup, history. |
+| **board.json** | (Read tool) | whole file | Last resort — bulk migration, schema surgery. Almost never in a normal session. |
+
+**Reach for the lowest rung that answers the question.** "How many cards are open?" → `digest`. "Which in-progress cards touched perf?" → `query --column inprogress --tag perf --fields num,title`. "What's the writeup on #103?" → `show 103`. Reading `board.json` to count columns is the anti-pattern this ladder exists to kill.
+
+`card.py wiki` is a side-tool, not a rung: it renders the whole board as narrative Markdown (recently-shipped lead + grouped-by-column) for a human glance or a PR/standup paste — not for agent context (it's deliberately verbose).
+
 ---
 
 ## What to do (by trigger)
@@ -373,9 +388,14 @@ card.py column add consideration "Consideration" --kind blocked --at 3
 card.py column rename consideration "Discuss first"
 card.py column rm consideration         # only if no cards reference it
 
-# read / filter
-card.py show 32
-card.py list --column inprogress --priority critical
+# read / filter (progressive-disclosure ladder — see Traversal section)
+card.py digest                                          # board pulse, ~120 tok
+card.py digest --json                                   # machine form
+card.py query --column inprogress --fields num,title    # sliced JSON, only what you need
+card.py query --since-days 1 --fields n,code,col        # recently-touched, compact
+card.py show 32                                          # one full card
+card.py list --column inprogress --priority critical     # human-readable text view
+card.py wiki --recent 10                                 # narrative Markdown (human glance / PR paste)
 ```
 
 **Live streaming:** When `serve.py` is running on `127.0.0.1:7891`, every `card.py` call POSTs the new state to the server, which broadcasts an SSE event so the browser animates the change in real-time (card pop / column slide). If the server is down, `card.py` falls back to direct file write — same end state, no animation. Set `BOARD_NO_SERVER=1` to force the fallback for batch ops.

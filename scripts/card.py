@@ -1471,6 +1471,194 @@ def cmd_list(args, d, board):
     print(f"({len(cards)} cards)")
 
 
+# ===== Phase 5: token-efficiency read tier (query / digest / wiki) =====
+#
+# The progressive-disclosure ladder (VISION pillar #2):
+#   digest  → ~120-tok board pulse (counts + last-shipped + launch-blocking)
+#   query   → sliced JSON, only the fields you ask for, machine-readable
+#   show    → one full card
+#   board.json → the whole thing (last resort)
+# `list` stays the human-readable text view; `query` is its JSON sibling so an
+# agent pulls exactly the columns it needs without paying for notes/writeups.
+
+_DIGEST_ORDER = ["super-urgent", "mandatory", "ideas", "task",
+                 "backlog", "inprogress", "blocked", "done"]
+
+
+def _ago(iso: str | None) -> str:
+    """Relative time like '<1h ago' / '5h ago' / '3d ago'. '' on bad input."""
+    if not iso:
+        return ""
+    try:
+        when = datetime.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        delta = datetime.datetime.now(datetime.timezone.utc) - when
+        hrs = int(delta.total_seconds() // 3600)
+        if hrs < 1:
+            return "<1h ago"
+        if hrs < 24:
+            return f"{hrs}h ago"
+        return f"{hrs // 24}d ago"
+    except Exception:
+        return iso[:10]
+
+
+def cmd_digest(args, d, board):
+    """5a — the compact board pulse, on demand. Same shape the SessionStart
+    hook injects, but callable mid-session so Claude refreshes without
+    re-reading board.json. ~120 tokens of text (or --json)."""
+    cards = d.get("cards", [])
+    cols = {c["id"]: c.get("name", c["id"]) for c in d.get("columns", [])}
+    counts: dict[str, int] = {}
+    for c in cards:
+        counts[c.get("column", "?")] = counts.get(c.get("column", "?"), 0) + 1
+
+    done = sorted((c for c in cards if c.get("column") == "done"),
+                  key=lambda c: c.get("doneAt") or "", reverse=True)
+    last = ""
+    if done:
+        t = done[0]
+        last = f"#{t.get('num','?')} {t.get('code') or t.get('id','')} ({_ago(t.get('doneAt'))})"
+
+    blocking = sum(
+        1 for c in cards
+        if c.get("column") in ("super-urgent", "mandatory")
+        and (c.get("priority") or "low") in ("critical", "mid")
+    )
+
+    if getattr(args, "json", False):
+        ordered = {k: counts[k] for k in _DIGEST_ORDER if counts.get(k)}
+        for k, n in counts.items():
+            if k not in ordered and n:
+                ordered[k] = n
+        print(json.dumps({
+            "rev": d.get("rev", 0),
+            "totalCards": len(cards),
+            "counts": ordered,
+            "lastShipped": last,
+            "launchBlocking": blocking,
+        }, ensure_ascii=False))
+        return
+
+    parts, seen = [], set()
+    for k in _DIGEST_ORDER:
+        if counts.get(k):
+            parts.append(f"{cols.get(k, k)}: {counts[k]}")
+            seen.add(k)
+    for k, n in counts.items():
+        if k not in seen and n:
+            parts.append(f"{cols.get(k, k)}: {n}")
+    print(f"rev {d.get('rev', 0)} · {len(cards)} cards · " + " · ".join(parts))
+    if last:
+        print(f"Last shipped: {last}")
+    if blocking:
+        print(f"🚨 LAUNCH-BLOCKING: {blocking} open · run `card.py prelaunch-check` before any launch/publish action")
+
+
+# Convenience aliases so callers can use index.json short keys or card keys.
+_QUERY_FIELD_ALIASES = {
+    "n": "num", "col": "column", "prio": "priority",
+    "upd": "updatedAt", "done": "doneAt", "created": "createdAt",
+}
+_QUERY_DEFAULT_FIELDS = ["num", "code", "title", "column", "priority", "updatedAt"]
+
+
+def cmd_query(args, d, board):
+    """5a — sliced JSON view. Same filters as `list`, but emits a JSON array
+    with only the fields requested (default: a compact 6-field projection).
+    The token-efficient machine tier between `digest` and `show`.
+
+    --fields p          → subtask progress 'done/total'
+    --fields links      → count of linkedCards
+    --fields all        → whole cards (= multi-card `show`)
+    """
+    cards = list(d.get("cards", []))
+    if args.column:
+        cards = [c for c in cards if c.get("column") == args.column]
+    if args.priority:
+        cards = [c for c in cards if c.get("priority") == args.priority]
+    if args.tag:
+        cards = [c for c in cards if args.tag in (c.get("tags") or [])]
+    if args.since_days is not None:
+        cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                  - datetime.timedelta(days=args.since_days))
+        kept = []
+        for c in cards:
+            try:
+                upd = datetime.datetime.fromisoformat(
+                    (c.get("updatedAt") or "").replace("Z", "+00:00"))
+                if upd >= cutoff:
+                    kept.append(c)
+            except Exception:
+                pass
+        cards = kept
+
+    # Sort newest-updated first so the most relevant rows lead.
+    cards.sort(key=lambda c: c.get("updatedAt") or "", reverse=True)
+    if args.limit is not None:
+        cards = cards[:args.limit]
+
+    raw_fields = [f.strip() for f in (args.fields or "").split(",") if f.strip()]
+    if raw_fields == ["all"]:
+        print(json.dumps(cards, indent=2, ensure_ascii=False))
+        return
+    fields = [_QUERY_FIELD_ALIASES.get(f, f) for f in raw_fields] or _QUERY_DEFAULT_FIELDS
+
+    def project(c: dict) -> dict:
+        out = {}
+        for f in fields:
+            if f == "p":
+                subs = c.get("subtasks") or []
+                done_n = sum(1 for s in subs if s.get("done"))
+                out["p"] = f"{done_n}/{len(subs)}" if subs else ""
+            elif f == "links":
+                out["links"] = len(c.get("linkedCards") or [])
+            else:
+                out[f] = c.get(f)
+        return out
+
+    print(json.dumps([project(c) for c in cards], ensure_ascii=False))
+
+
+def cmd_wiki(args, d, board):
+    """5c (nice-to-have) — pre-rendered narrative Markdown of the board, for a
+    human glance or a paste into a PR/standup. Grouped by column in canonical
+    order, plus a 'Recently shipped' lead section."""
+    cards = d.get("cards", [])
+    cols = {c["id"]: c.get("name", c["id"]) for c in d.get("columns", [])}
+    by_col: dict[str, list] = {}
+    for c in cards:
+        by_col.setdefault(c.get("column", "?"), []).append(c)
+
+    out = [f"# Board — rev {d.get('rev', 0)} · {len(cards)} cards",
+           f"_generated {now_iso()}_", ""]
+
+    done = sorted((c for c in cards if c.get("column") == "done"),
+                  key=lambda c: c.get("doneAt") or "", reverse=True)
+    recent = done[:args.recent]
+    if recent:
+        out.append(f"## ✅ Recently shipped (last {len(recent)})")
+        for c in recent:
+            out.append(f"- **#{c['num']} {c.get('code') or ''}** — {c.get('title','')}  ·  _{_ago(c.get('doneAt'))}_")
+        out.append("")
+
+    order = [k for k in _DIGEST_ORDER if k != "done"] + [
+        k for k in by_col if k not in _DIGEST_ORDER]
+    for col in order:
+        items = by_col.get(col)
+        if not items:
+            continue
+        items.sort(key=lambda c: c.get("updatedAt") or "", reverse=True)
+        out.append(f"## {cols.get(col, col)} ({len(items)})")
+        for c in items:
+            p = (c.get("priority") or "-")[:1].upper()
+            subs = c.get("subtasks") or []
+            prog = f" · {sum(1 for s in subs if s.get('done'))}/{len(subs)}" if subs else ""
+            out.append(f"- `[{p}]` **#{c['num']} {c.get('code') or ''}** — {c.get('title','')}{prog}")
+        out.append("")
+
+    print("\n".join(out))
+
+
 # ===== argparse wiring =====
 
 def build_parser():
@@ -1666,6 +1854,37 @@ def build_parser():
     pls.add_argument("--priority", default=None)
     pls.add_argument("--tag", default=None)
     pls.set_defaults(fn=cmd_list)
+
+    # digest (5a) — compact board pulse on demand (same shape as SessionStart hook)
+    pdg = sub.add_parser("digest",
+                         help="print the compact board pulse (counts + last-shipped + "
+                              "launch-blocking). ~120 tokens; --json for machine form.")
+    pdg.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    pdg.set_defaults(fn=cmd_digest)
+
+    # query (5a) — sliced JSON, the machine sibling of `list`
+    pq = sub.add_parser("query",
+                        help="sliced JSON view: same filters as list, only the --fields "
+                             "you ask for (default 6-field projection). Token-efficient.")
+    pq.add_argument("--column", default=None)
+    pq.add_argument("--priority", default=None)
+    pq.add_argument("--tag", default=None)
+    pq.add_argument("--since-days", type=int, default=None, dest="since_days",
+                    help="only cards updated within the last N days")
+    pq.add_argument("--limit", type=int, default=None, help="cap the number of rows")
+    pq.add_argument("--fields", default=None,
+                    help="comma-list of fields (aliases: n,col,prio,upd,done,created; "
+                         "specials: p=subtask progress, links=link count, all=full cards). "
+                         "Default: num,code,title,column,priority,updatedAt")
+    pq.set_defaults(fn=cmd_query)
+
+    # wiki (5c) — narrative Markdown render of the board
+    pwk = sub.add_parser("wiki",
+                         help="pre-rendered narrative Markdown of the board (nice-to-have, "
+                              "for a human glance / PR paste).")
+    pwk.add_argument("--recent", type=int, default=10,
+                     help="how many recently-shipped cards to lead with (default 10)")
+    pwk.set_defaults(fn=cmd_wiki)
 
     # prelaunch-check (#91) — exit 9 if any super-urgent/mandatory items open
     ppl = sub.add_parser("prelaunch-check",
