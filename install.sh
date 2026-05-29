@@ -7,10 +7,12 @@
 #     ./install.sh                      # install skill + bootstrap a board in $(pwd)
 #     ./install.sh --project ~/code/foo # ...in a specific project
 #     ./install.sh --demo               # ISOLATED dry-run of the whole experience
+#     ./install.sh --demo --harvest ~/code/foo   # ...filled (flying) from real history
 #
 # What it does (in order):
 #   1. Install the skill   → $CLAUDE_CONFIG_DIR/skills/board-steward (symlink to this repo)
-#   2. Bootstrap a board   → serve.py --bootstrap in the project (server + browser + history stream)
+#   2. Bootstrap a board   → serve.py --bootstrap (server + browser + the hourly
+#                            two-tier FLY fill: last-1d fast → older backfills live)
 #   3. Wire Claude hooks   → install_hooks.py --hook all (SessionStart digest + PreToolUse flash)
 #   4. Autostart at login  → install_autostart.py (launchd/systemd/Task Scheduler)
 #   5. Open the browser    → http://127.0.0.1:<port>
@@ -22,8 +24,6 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# If quarantined under _attic/, the real repo root (with scripts/ + SKILL.md) is the parent.
-if [ "$(basename "$REPO")" = "_attic" ]; then REPO="$(dirname "$REPO")"; fi
 SCRIPTS="${REPO}/scripts"
 PY="$(command -v python3 || command -v python)"
 
