@@ -678,19 +678,28 @@ Bootstrap defaults to `--bootstrap-mode inline`: rather than spending Haiku, `se
 
 **When you see that nudge (or find the file), process it — don't ask:**
 
-1. Read `extraction_pending.json`. It has `board`, `card_py`, a `card_format` (the exact schema + routing rules), `instructions`, and a `chunks` array (each: `label`, `bucket_ts_iso`, `digest`) ordered **newest-first**.
-2. For **each chunk**, read its `digest` and identify the discrete units of work per `card_format`. For each unit, emit:
+1. Read `extraction_pending.json`. It has `board`, `card_py`, a `card_format` (the exact schema + routing rules), `instructions`, and a `chunks` array (each: `label`, `bucket_ts_iso`, `digest`) ordered **newest-first**. Process chunks in order, and **dedupe across chunks** — a multi-chunk effort is ONE card, not one per chunk (this is your advantage over Haiku).
+2. For **each chunk**, identify the discrete units of work per `card_format`. Add each born in **task**, then **fly it through its lifecycle** so it glides (don't plop into the final column):
    ```bash
-   python3 <card_py> --board <board> add --column COL --priority PRIO \
+   python3 <card_py> --board <board> add --column task --priority PRIO \
      --title "clean title (NO code prefix)" [--code CODE] \
      --origin "the user's WHY" --notes "what/how/state; cite the SHA if a COMMIT line is in the digest" \
      --created-at <bucket_ts_iso> [--tag T]
+   # done card → TWO hops (lays in In Progress); card.py auto-adds the ☑ initial-ship subtask:
+   python3 <card_py> --board <board> fly <num> inprogress --pause-ms 400
+   python3 <card_py> --board <board> fly <num> done --pause-ms 400 --writeup "<the notes>"
+   # inprogress card → one hop: fly <num> inprogress. backlog/mandatory/notes → leave in that column (no fly).
    ```
-   For a `done` card, fly it: `python3 <card_py> --board <board> fly <num> done --pause-ms 150`.
 3. Same quality bar as the live board: clean titles, `code` only for distinctly-named features/systems (~half), SHA citations in notes, distinct origin (WHY) vs notes (WHAT).
-4. **Delete `extraction_pending.json` when all chunks are done.**
+4. **Completeness sweep — the "never miss a point" guarantee (priority: mandatory > notes > backlog).** A ship-oriented read catches `done` work (it has commit markers) but *silently drops the categories with NO marker*. After emitting, re-scan **every** chunk digest specifically for:
+   - **🚨 mandatory (most important — never miss):** urgency the user voiced — "this is impt", "must", "urgent", "asap", "p0", "blocker", a launch gate. → a `mandatory` card.
+   - **📝 notes:** a decision, rationale, or observation that isn't a unit of shippable work. → a `notes` card.
+   - **backlog:** anything deferred — "later", "next session", "tomorrow", "defer", "nvm save it". → a `backlog` card with a `⏸ OPEN — <what remains + resume trigger>` note.
 
-`--bootstrap-mode haiku` (opt-in) does this with `claude -p` instead — costs usage but runs in the background without spending your context. `--bootstrap-mode discover` is the zero-LLM heuristic floor.
+   For each signal that **didn't already become a card**, add one. Mandatory first — a missed urgent item is the worst failure mode.
+5. **Delete `extraction_pending.json` when all chunks + the completeness sweep are done.**
+
+**Mode decision (durable):** `inline` is the **default** (free, no key, full-context quality). `--bootstrap-mode haiku` stays as an **opt-in** — do NOT remove it — it's the autonomous fallback for **headless / no-live-session installs** (cron, standalone `serve.py`, install-and-never-prompt) and **huge histories** where inline would flood the main session's context; it runs `claude -p` in the background. `--bootstrap-mode discover` is the zero-LLM heuristic floor.
 
 ---
 
