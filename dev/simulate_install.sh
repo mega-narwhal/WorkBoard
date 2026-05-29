@@ -85,8 +85,8 @@ if [[ -z "$SIM_DIR" ]]; then
   SIM_DIR="${HOME}/Desktop/board-sim-$(date +%y%m%d)"
 fi
 
-# Resolve script location → repo root → serve.py path.
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# This script lives in dev/; the runtime scripts (serve.py) are in ../scripts.
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../scripts" && pwd )"
 SERVE_PY="${SCRIPT_DIR}/serve.py"
 if [[ ! -f "$SERVE_PY" ]]; then
   echo "✗ serve.py not found at $SERVE_PY" >&2

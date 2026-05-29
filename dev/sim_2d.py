@@ -32,7 +32,7 @@ import urllib.request
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
-HARNESS = SKILL_DIR / "scripts" / "simulate_install.sh"
+HARNESS = SKILL_DIR / "dev" / "simulate_install.sh"
 
 DEFAULTS = {
     "project": str(Path.home() / "Desktop" / "WorkBoard"),

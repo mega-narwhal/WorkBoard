@@ -37,7 +37,7 @@ import urllib.request
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
-HARNESS = SKILL_DIR / "scripts" / "simulate_install.sh"
+HARNESS = SKILL_DIR / "dev" / "simulate_install.sh"
 HOOK = SKILL_DIR / "scripts" / "hook_session_start.sh"
 ARCHIVE = SKILL_DIR / "scripts" / "archive_done.py"
 REGEN_INDEX = SKILL_DIR / "scripts" / "regen_index.py"
