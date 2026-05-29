@@ -2,7 +2,7 @@
 """Hook fallback helper. Argv[1] = PWD. Stdout = board.json path, or empty.
 
 When the SessionStart hook's CWD-walk fails, this helper searches
-~/.claude/projects/*/sessions/*.jsonl for recent sessions whose recorded
+~/.claude/projects/*/*.jsonl for recent sessions whose recorded
 cwd is DESCENDED FROM the current PWD (so a parent shell with a board
 project under it gets picked up — but unrelated projects don't leak).
 """

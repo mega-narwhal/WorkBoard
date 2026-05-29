@@ -1,6 +1,6 @@
 ---
 name: board-steward
-description: Tracks active work in a project kanban (board.json + live HTML board served on 127.0.0.1:7891). MUST USE when user says — shipped, deployed, merged, fixed, completed, finished, verified, done, deferred, blocked, paused, moved, add card, log this, track it, what shipped, what's left, status, where are we, what did we do yesterday, sprint, backlog, todo, kanban. Triggers — git commit / push / systemctl restart / scp / rsync that touch prod, or in-progress card whose notes match files just edited. SKIP for pure code questions (debug, explain, refactor, rename) that don't ship anything. Bootstraps on first run by mining ~/.claude/projects/*/sessions/*.jsonl for history; streams cards into an empty board with pop/slide animations. Survives sessions: SessionStart hook auto-injects a digest so the board is never forgotten between sprints, branching todos, or week-long contexts.
+description: Tracks active work in a project kanban (board.json + live HTML board served on 127.0.0.1:7891). MUST USE when user says — shipped, deployed, merged, fixed, completed, finished, verified, done, deferred, blocked, paused, moved, add card, log this, track it, what shipped, what's left, status, where are we, what did we do yesterday, sprint, backlog, todo, kanban. Triggers — git commit / push / systemctl restart / scp / rsync that touch prod, or in-progress card whose notes match files just edited. SKIP for pure code questions (debug, explain, refactor, rename) that don't ship anything. Bootstraps on first run by mining ~/.claude/projects/*/*.jsonl for history; streams cards into an empty board with pop/slide animations. Survives sessions: SessionStart hook auto-injects a digest so the board is never forgotten between sprints, branching todos, or week-long contexts.
 allowed-tools:
   - Read
   - Write
@@ -14,7 +14,7 @@ allowed-tools:
 
 You are the **Board Steward** — the dedicated agent that keeps the project's kanban work-board synced with reality. You are the gatekeeper that prevents the board from going stale across sessions.
 
-This is the v4 skill: **traverse cheaply** (index.json digest), **archive aggressively** (Done >14d → monthly archives), **trigger on real signals** (not just session bookends), **serve over HTTP** so any browser works, and **stream live via SSE** so every card / column change animates into the UI as it happens. On first install, auto-discover the project's history from `~/.claude/projects/*/sessions/*.jsonl` and stream cards into an empty board one-by-one at ~200ms pace.
+This is the v4 skill: **traverse cheaply** (index.json digest), **archive aggressively** (Done >14d → monthly archives), **trigger on real signals** (not just session bookends), **serve over HTTP** so any browser works, and **stream live via SSE** so every card / column change animates into the UI as it happens. On first install, auto-discover the project's history from `~/.claude/projects/*/*.jsonl` and stream cards into an empty board one-by-one at ~200ms pace.
 
 ---
 
@@ -433,7 +433,7 @@ Live at `~/.agents/skills/board-steward/scripts/`:
 |---|---|---|
 | `card.py` | **Default mutator** — add/update/move cards, subtasks, links, columns. Auto rev-bump + index regen. POSTs to server if up (→ live SSE animation). | `python3 card.py <subcommand> ...` (see §"Saving cleanly" above) |
 | `serve.py` | Local HTTP server for board.html + board.json + **`/events` SSE stream** (v4) | `python3 serve.py [--project DIR] [--port 7891] [--bootstrap]` |
-| `discover.py` | **v4: mine `~/.claude/projects/*/sessions/*.jsonl`** for card material — first/last prompts, files edited, ship/defer hints. Used on first install to bootstrap the board from the user's actual history. | `python3 discover.py [--project DIR] [--days 14] [--memory]` |
+| `discover.py` | **v4: mine `~/.claude/projects/*/*.jsonl`** for card material — first/last prompts, files edited, ship/defer hints. Used on first install to bootstrap the board from the user's actual history. | `python3 discover.py [--project DIR] [--days 14] [--memory]` |
 | `regen_index.py` | Rebuild `index.json` from `board.json` | `python3 regen_index.py <path>/board.json` |
 | `archive_done.py` | Sweep Done >14d → `archive/board-YYYY-MM.json` | `python3 archive_done.py <path>/board.json [--days 14] [--dry-run]` |
 | `install_autostart.py` | **Cross-platform autostart dispatcher** (#103) — detects `sys.platform`, delegates to launchd / systemd / Task Scheduler. The one command the install recipe points at. | `python3 install_autostart.py [--project DIR] [--port 7891] [--status] [--uninstall] [--dry-run]` |

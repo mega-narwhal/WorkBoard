@@ -68,7 +68,7 @@ Target: **<2KB of context** consumed by the board on a typical session start, vs
 
 - **Autostart.** macOS `launchd` plist (Linux: systemd unit, Windows: scheduled task) brings the local server up at boot. The user never starts anything. The URL `http://127.0.0.1:7891` just works.
 - **Hook fallback.** If `launchd` ever dies, the `SessionStart` hook detects the dead port and re-spawns the server in the same turn. The user never sees a broken board.
-- **Auto-bootstrap.** On first install, `discover.py` mines `~/.claude/projects/*/sessions/*.jsonl` to seed the board with cards inferred from prior chat history — so the user opens the board for the first time and **already sees their last week of work**, chronologically, animated in card-by-card. No empty-state to fill.
+- **Auto-bootstrap.** On first install, `discover.py` mines `~/.claude/projects/*/*.jsonl` to seed the board with cards inferred from prior chat history — so the user opens the board for the first time and **already sees their last week of work**, chronologically, animated in card-by-card. No empty-state to fill.
 - **One command to install** in any project: `python serve.py --bootstrap`. No config file. No account. No cloud.
 
 ### 4. Minimal friction — Claude does everything

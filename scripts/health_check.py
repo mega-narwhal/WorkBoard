@@ -6,7 +6,7 @@ Verifies four layers in order:
   2. /health responds on each port with a sane rev + card count
   3. SessionStart hook is installed in ~/.claude/settings.json
   4. SessionStart hook actually fired in the most recent Claude session
-     (greps ~/.claude/projects/*/sessions/*.jsonl for the marker)
+     (greps ~/.claude/projects/*/*.jsonl for the marker)
 
 Exit code is 0 only when all four pass. Designed to run in <1s.
 
