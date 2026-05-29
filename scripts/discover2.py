@@ -18,8 +18,8 @@ adjacent fragments sharing files into one card.
 
 Sources harvested (all silent, no user prompts on default install):
   ~/.claude/projects/*/*.jsonl                       — session turns + tool_use
-  ~/.claude/projects/-Users-malco/memory/*.md        — auto-memory mtime
-  ~/Desktop/conversation_history/conversation_raw_*.md — manual dumps
+  ~/.claude/projects/*/memory/*.md                   — auto-memory mtime
+  conversation_{raw,verbatim}_*.md (dir auto-derived) — manual dumps
   ~/.claude/plans/*.md                               — plan mtime
   git log on the project repo                        — commits with timestamps
 
@@ -226,10 +226,10 @@ _CONVO_HEADER_RE = re.compile(r"^\[(USER|CLAUDE)\]\s+(\d{1,2}):(\d{2})", re.M)
 
 
 def harvest_convo(since: datetime | None, convo_dir: Path | None = None) -> list[dict]:
-    """conversation_raw_YYMMDD.md — parses [USER] HH:MM markers."""
+    """conversation_raw_YYMMDD.md — parses [USER] HH:MM markers. convo_dir must
+    be resolved by the caller (find_convo_dir); no hardcoded path. None → []."""
     out: list[dict] = []
-    convo_dir = convo_dir or (Path.home() / "Desktop" / "conversation_history")
-    if not convo_dir.is_dir():
+    if convo_dir is None or not convo_dir.is_dir():
         return out
     for p in sorted(convo_dir.glob("conversation_raw_*.md")):
         m = re.search(r"conversation_raw_(\d{6})\.md$", p.name)
@@ -689,20 +689,131 @@ def save_config(project: Path, cfg: dict) -> None:
         pass
 
 
+# A convo-dump file is conversation_raw_YYMMDD.md or conversation_verbatim_YYMMDD.md.
+# A path token mentioning "conversation" and ending in .md (even a YYMMDD template)
+# points at the dump dir via its parent — we validate the dir by globbing it.
+_CONVO_PATH_RE = re.compile(r"[~./][^\s'\"`)]*conversation[^\s'\"`)]*\.md")
+
+
+def _dir_has_convo_dumps(d: Path) -> bool:
+    try:
+        if not d.is_dir():
+            return False
+        return any(d.glob("conversation_raw_*.md")) or \
+               any(d.glob("conversation_verbatim_*.md"))
+    except OSError:
+        return False
+
+
+def _claude_md_files(project: Path) -> list[Path]:
+    """CLAUDE.md locations, most-authoritative first (global, home, project)."""
+    return [
+        Path.home() / ".claude" / "CLAUDE.md",
+        Path.home() / "CLAUDE.md",
+        project / "CLAUDE.md",
+    ]
+
+
+def _convo_dir_from_text(text: str) -> Path | None:
+    """Pull the first convo-dump dir referenced in arbitrary text (CLAUDE.md,
+    a transcript line, a shell command). Validates the parent dir actually holds
+    dumps so a stale/templated mention can't return a bogus path."""
+    for m in _CONVO_PATH_RE.finditer(text):
+        try:
+            d = Path(m.group(0)).expanduser().parent
+        except (ValueError, RuntimeError):
+            continue
+        if _dir_has_convo_dumps(d):
+            return d
+    return None
+
+
+def _mine_convo_dir(project: Path) -> Path | None:
+    """Derive the convo-dump dir from Claude-specific, always-present data —
+    no hardcoded path, no interactive ask. Ladder:
+      1. CLAUDE.md (global + home + project): users who keep dumps DOCUMENT the
+         path/render-command there. Cheap (≤3 small files) and authoritative.
+      2. ~/.claude/history.jsonl: the all-projects command chronicle — render
+         invocations + paths land here. Single file, bounded scan.
+      3. Recent session transcripts: tally the dir of any convo-dump path the
+         user touched (Read/Write/Bash); most-frequent wins. Bounded to the
+         newest N sessions so the scan stays cheap.
+    Returns None if nothing is found — callers must treat convo as optional
+    enrichment (we already harvest the raw *.jsonl directly)."""
+    # 1. CLAUDE.md — most reliable signal.
+    for cm in _claude_md_files(project):
+        try:
+            if cm.is_file():
+                hit = _convo_dir_from_text(cm.read_text(errors="replace"))
+                if hit:
+                    return hit
+        except OSError:
+            continue
+
+    # 2. global history.jsonl — one file, scan as text.
+    hist = Path.home() / ".claude" / "history.jsonl"
+    try:
+        if hist.is_file():
+            hit = _convo_dir_from_text(hist.read_text(errors="replace"))
+            if hit:
+                return hit
+    except OSError:
+        pass
+
+    # 3. recent transcripts — tally dirs of touched convo-dump paths.
+    root = Path.home() / ".claude" / "projects"
+    if root.is_dir():
+        try:
+            jpaths = sorted(root.glob("*/*.jsonl"),
+                            key=lambda p: p.stat().st_mtime, reverse=True)[:30]
+        except OSError:
+            jpaths = []
+        tally: dict[str, int] = {}
+        for jp in jpaths:
+            try:
+                text = jp.read_text(errors="replace")
+            except OSError:
+                continue
+            for m in _CONVO_PATH_RE.finditer(text):
+                try:
+                    d = Path(m.group(0)).expanduser().parent
+                except (ValueError, RuntimeError):
+                    continue
+                if _dir_has_convo_dumps(d):
+                    tally[str(d)] = tally.get(str(d), 0) + 1
+        if tally:
+            best = max(tally, key=tally.get)
+            return Path(best)
+    return None
+
+
 def find_convo_dir(project: Path, asked: bool = False) -> Path | None:
-    """Search known-safe locations. Returns first hit or None."""
+    """Resolve the convo-dump dir. Config override → auto-derive from Claude's
+    own data (no hardcode, no ask) → legacy candidate dirs → None."""
     cfg = load_config(project)
     if cfg.get("convo_dir"):
         p = Path(cfg["convo_dir"]).expanduser()
         if p.is_dir():
             return p
+
+    derived = _mine_convo_dir(project)
+    if derived:
+        # Cache so subsequent runs skip the scan.
+        try:
+            cfg["convo_dir"] = str(derived)
+            save_config(project, cfg)
+        except Exception:
+            pass
+        return derived
+
+    # Legacy fallback: the old fixed candidate list.
     candidates = [
         Path.home() / "Desktop" / "conversation_history",
         Path.home() / "conversation_history",
         project / "conversation_history",
     ]
     for c in candidates:
-        if c.is_dir() and any(c.glob("conversation_raw_*.md")):
+        if _dir_has_convo_dumps(c):
             return c
     return None
 

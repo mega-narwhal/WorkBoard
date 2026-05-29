@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from discover2 import (
     harvest_jsonl, harvest_convo, harvest_git, harvest_memory, harvest_plans,
-    parse_ts,
+    parse_ts, find_convo_dir,
 )
 
 _CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
@@ -649,7 +649,13 @@ def _flatten_events(project: Path, days: int) -> list[dict]:
              if days > 0 else None)
     events: list[dict] = []
     events.extend(harvest_jsonl(since))
-    events.extend(harvest_convo(since))
+    # Convo dir is auto-derived from Claude's own data (CLAUDE.md / transcripts),
+    # not hardcoded — same resolver discover2.main() uses, so the inline path is
+    # as portable as the standalone tool (#284). None → convo is skipped, which
+    # is fine: convo dumps are enrichment over the raw *.jsonl we already have.
+    convo_dir = find_convo_dir(project)
+    if convo_dir:
+        events.extend(harvest_convo(since, convo_dir))
     events.extend(harvest_git(project, since))
     events.extend(harvest_memory(since))
     events.extend(harvest_plans(since))
