@@ -10,10 +10,21 @@ path does, and reports:
 Run before/after touching digest_compact.py to report the actual % saved.
 Token estimate = chars / 4; chars are reported too so the % is exact.
 
-Usage: python3 scripts/measure_digest.py [days]
+Usage:
+  python3 scripts/measure_digest.py [days]            # full measure report
+  python3 scripts/measure_digest.py [days] --diff     # COMPACT vs BASELINE
+                                                       # card-set-unchanged proof
+
+--diff stages baseline (compact OFF) and compacted (compact ON) digests from the
+SAME harvest, then classifies every line compaction removed: a card can only be
+extracted from a PROTECTED (USER/COMMIT/edited/MEMORY/PLAN) or WORK-SIGNAL
+(file/sha/#ref/§-rev/result-figure) line, so if both counts are 0 the set of
+extractable cards is provably unchanged — a stronger result than any LLM
+card-count (which is noise: no Haiku seed + timeout re-splits).
 """
 from __future__ import annotations
 import os
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -60,14 +71,66 @@ def line_breakdown(digest: str) -> Counter:
     return c
 
 
+_HEAD_RE = re.compile(r"CLAUDE:\s*(.*)$")
+
+
+def diff_report(days: int, base: str, comp: str, events: list) -> None:
+    """COMPACT vs BASELINE — classify every removed line; prove the card set
+    is unchanged (card-bearing lines removed == 0)."""
+    bc, cc = len(base), len(comp)
+    print(f"=== COMPACT vs ORIGINAL BASELINE — {days}d, project={PROJECT} (deterministic, no LLM) ===")
+    print(f"events harvested  : {len(events)}")
+    print(f"digest chars      : {bc:,} -> {cc:,}  (-{bc-cc:,}, -{100*(bc-cc)/max(bc,1):.1f}%)")
+    print(f"~tokens (/4)      : {bc//4:,} -> {cc//4:,}  (-{(bc-cc)//4:,})")
+
+    comp_lines = set(comp.splitlines())
+    removed = protected = signal = 0
+    sample: list[str] = []
+    for ln in base.splitlines():
+        if ln in comp_lines:
+            continue
+        removed += 1
+        s = ln.strip()
+        if any(t in s for t in ("USER:", "CLAUDE edited:", "COMMIT", "MEMORY:", "PLAN:")):
+            protected += 1
+            continue
+        m = _HEAD_RE.search(ln)
+        if m and digest_compact.head_signal(m.group(1)):
+            signal += 1
+        elif len(sample) < 8:
+            sample.append(s[:70])
+
+    print(f"\nlines removed by compaction (all buckets): {removed}")
+    print(f"  of which PROTECTED (USER/COMMIT/edited/MEMORY/PLAN): {protected}")
+    print(f"  of which carried a WORK SIGNAL                     : {signal}")
+    print(f"  -> card-bearing lines removed = {protected + signal}")
+    if sample:
+        print("\nsample of what got dropped (zero-signal noise):")
+        for s in sample:
+            print("   DROP|", s)
+    ok = (protected + signal) == 0
+    print(f"\nVERDICT: {'PASS' if ok else 'FAIL'} — "
+          + ("0 card-bearing lines removed; the extractable card SET is provably unchanged."
+             if ok else f"{protected+signal} card-bearing line(s) removed — compaction is LOSSY, investigate."))
+    if not ok:
+        sys.exit(1)
+
+
 def main():
-    days = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+    args = [a for a in sys.argv[1:]]
+    diff_mode = "--diff" in args
+    args = [a for a in args if a != "--diff"]
+    days = int(args[0]) if args else 2
     events, buckets = harvest(days)
 
     os.environ["DIGEST_COMPACT"] = "0"   # compact_enabled() reads env per call
     base = combined_digest(buckets)
     os.environ["DIGEST_COMPACT"] = "1"
     comp = combined_digest(buckets)
+
+    if diff_mode:
+        diff_report(days, base, comp, events)
+        return
 
     bc, cc = len(base), len(comp)
     print(f"=== DIGEST MEASURE — {days}d harvest, project={PROJECT} ===")
