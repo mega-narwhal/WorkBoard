@@ -28,6 +28,18 @@ def _banner_update_text(card_py: Path, board: Path, num: int, title: str) -> Non
 
 # ---------- progress banner ----------
 
+def _emit_progress(card_py: Path, board: Path, done: int, total: int,
+                   label: str = "") -> None:
+    """#318 — drive the live BOARD-LOAD HUD via `card.py progress` (best-effort)."""
+    try:
+        subprocess.run(
+            [sys.executable, str(card_py), "--board", str(board), "progress",
+             "--done", str(done), "--total", str(total), "--label", label],
+            capture_output=True, text=True, timeout=4)
+    except subprocess.SubprocessError:
+        pass
+
+
 def _banner_create(card_py: Path, board: Path, total_chunks: int) -> int | None:
     """Spawn the live progress banner in the 'notes' column."""
     args = [sys.executable, str(card_py), "--board", str(board), "add",
@@ -43,6 +55,7 @@ def _banner_create(card_py: Path, board: Path, total_chunks: int) -> int | None:
         return None
     if out.returncode != 0:
         return None
+    _emit_progress(card_py, board, 0, total_chunks, "staged — beginning extraction…")
     m = re.search(r"#(\d+)", out.stdout)
     return int(m.group(1)) if m else None
 
@@ -57,6 +70,8 @@ def _banner_update(card_py: Path, board: Path, num: int,
         subprocess.run(args, capture_output=True, text=True, timeout=4)
     except subprocess.SubprocessError:
         pass
+    _emit_progress(card_py, board, done, total,
+                   f"chunk {done}/{total} · {cards_so_far} cards emitted")
 
 
 def _banner_finish(card_py: Path, board: Path, num: int,

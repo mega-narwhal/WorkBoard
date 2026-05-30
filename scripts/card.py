@@ -209,6 +209,15 @@ def build_parser():
                           "never exits nonzero")
     pss.set_defaults(fn=cmd_sweep_status)
 
+    # progress (#318) — report extraction progress to the live BOARD-LOAD HUD.
+    ppr = sub.add_parser("progress",
+                         help="report inline/haiku extraction progress to the live "
+                              "board HUD (best-effort SSE relay; no-op if no server).")
+    ppr.add_argument("--done", type=int, required=True, help="chunks completed so far")
+    ppr.add_argument("--total", type=int, required=True, help="total chunks staged")
+    ppr.add_argument("--label", default=None, help="current chunk label (e.g. its time window)")
+    ppr.set_defaults(fn=cmd_progress)
+
     # recover (3.5c) — list rolling backups or restore one
     prc = sub.add_parser("recover", help="list rolling backups, or restore one (3.5c)")
     prc.add_argument("rev", nargs="?", type=int, help="backup rev to restore (omit to list)")

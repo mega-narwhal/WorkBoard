@@ -550,7 +550,28 @@ class BoardHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._gate():
             return
-        if self.path.split("?", 1)[0].rstrip("/") != "/board.json":
+        path = self.path.split("?", 1)[0].rstrip("/")
+        # #318 — extraction progress relay. Inline (card.py progress) and haiku
+        # (hourly_emit) POST {done,total,label} here; we just rebroadcast it as an
+        # SSE event for the BOARD-LOAD HUD. No board write, small payload only.
+        if path == "/progress":
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 8192:
+                self._send(400, b'{"error":"bad progress payload"}')
+                return
+            try:
+                p = json.loads(self.rfile.read(length))
+                broadcast("extract_progress", {
+                    "done": int(p.get("done", 0)),
+                    "total": int(p.get("total", 0)),
+                    "label": str(p.get("label", ""))[:200],
+                })
+            except (ValueError, TypeError) as e:
+                self._send(400, json.dumps({"error": f"bad progress: {e}"}).encode())
+                return
+            self._send(200, b'{"ok":true}')
+            return
+        if path != "/board.json":
             self._send(404, b'{"error":"not found"}')
             return
 

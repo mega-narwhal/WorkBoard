@@ -48,7 +48,7 @@ SUBCOMMANDS = [
     "add", "update", "move", "fly", "bug", "improve", "subtask", "link",
     "column", "show", "recover", "migrate", "repair-links", "prelaunch-check",
     "list", "digest", "query", "wiki", "metrics", "export", "sim", "auto-ship",
-    "sweep-status",
+    "sweep-status", "progress",
 ]
 
 # `import *` provenance, so the audit knows what each module inherits.

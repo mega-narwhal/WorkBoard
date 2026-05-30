@@ -815,6 +815,25 @@ def cmd_sweep_status(args, d, board):
         sys.exit(rc)
 
 
+def cmd_progress(args, d, board):
+    """#318 — report extraction progress to the live board's BOARD-LOAD HUD.
+    Best-effort: POSTs {done,total,label} to the server's /progress relay, which
+    rebroadcasts it as an SSE event. No live server → silent no-op (e.g. headless).
+    Never fails the caller — progress is cosmetic."""
+    url = _resolve_server_url(board)
+    if not url:
+        return
+    body = json.dumps({"done": args.done, "total": args.total,
+                       "label": args.label or ""}).encode()
+    req = urllib.request.Request(
+        url.rstrip("/") + "/progress", data=body, method="POST",
+        headers={"Content-Type": "application/json", **_auth_headers()})
+    try:
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass  # cosmetic; the HUD just won't advance if the relay is unreachable
+
+
 def cmd_recover(args, d, board):
     """3.5c — list the rolling backups (3.5b) or restore one.
 

@@ -1442,6 +1442,41 @@
     white-space: nowrap;
   }
   .col-add-btn:hover { background: rgba(217,119,87,.06); border-style: solid; border-color: var(--accent); color: var(--accent); }
+
+  /* ===== #318 BOARD-LOAD HUD — History Replay inline/haiku extraction progress.
+     Terminal-cyberpunk readout, consistent with the #119 drag HUD (green-on-black,
+     monospace, draggable, 6px radius). Driven by the `extract_progress` SSE event. ===== */
+  #load-hud{position:fixed;width:330px;background:rgba(0,0,0,0.92);color:#0f0;
+    font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;z-index:99999;
+    border-radius:6px;border:1px solid #0f0;box-shadow:0 0 14px rgba(0,255,0,0.28),0 2px 12px rgba(0,0,0,0.5);
+    user-select:none;overflow:hidden;}
+  #load-hud::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:6px;
+    background:repeating-linear-gradient(0deg,rgba(0,255,0,0.045) 0 1px,transparent 1px 3px);mix-blend-mode:screen;}
+  #load-hud-head{display:flex;align-items:center;gap:6px;color:#9dff9d;
+    border-bottom:1px solid #0f0;padding:5px 10px;cursor:grab;background:rgba(0,255,0,0.10);
+    text-shadow:0 0 6px rgba(0,255,0,0.7);letter-spacing:0.04em;font-weight:600;}
+  #load-hud-head .lh-dot{width:7px;height:7px;border-radius:50%;background:#0f0;box-shadow:0 0 6px #0f0;}
+  #load-hud-body{padding:9px 11px 11px;position:relative;}
+  .lh-status{display:flex;justify-content:space-between;align-items:baseline;
+    text-shadow:0 0 6px rgba(0,255,0,0.55);margin-bottom:3px;}
+  .lh-status b{font-weight:700;letter-spacing:0.03em;}
+  .lh-count{font-variant-numeric:tabular-nums;font-weight:700;}
+  .lh-window{color:#5fbf6f;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lh-track{position:relative;height:14px;border:1px solid #0a0;background:rgba(0,40,0,0.45);border-radius:3px;overflow:hidden;}
+  .lh-fill{position:absolute;inset:0;transform-origin:left center;transform:scaleX(0);
+    background:linear-gradient(90deg,#0a0,#0f0);box-shadow:0 0 10px rgba(0,255,0,0.7);transition:transform .35s ease-out;}
+  .lh-pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:700;color:#001a00;text-shadow:0 0 2px rgba(255,255,255,0.4);font-variant-numeric:tabular-nums;}
+  .lh-tail{margin-top:7px;color:#3f8f4f;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .lh-cur{display:inline-block;width:7px;background:#0f0;color:#0f0;}
+  @media (prefers-reduced-motion: no-preference){
+    .lh-cur{animation:lh-blink 1s steps(1) infinite;}
+    #load-hud-head .lh-dot{animation:lh-pulse 1.4s ease-in-out infinite;}
+  }
+  @keyframes lh-blink{50%{opacity:0;}}
+  @keyframes lh-pulse{50%{opacity:0.35;}}
+  #load-hud.lh-done .lh-fill{background:linear-gradient(90deg,#0f0,#7dff7d);}
+  #load-hud.lh-done #load-hud-head{color:#0f0;}
 </style>
 </head>
 <body>
@@ -4682,6 +4717,71 @@ function renderColumn(col, cards) {
   return el;
 }
 
+// ===== #318 BOARD-LOAD HUD — live inline/haiku extraction progress =====
+// A draggable terminal panel that fills as each chunk of staged session
+// history is processed. Driven by the `extract_progress` SSE event (emitted by
+// `card.py progress` in inline mode, and by hourly_emit's banner in haiku mode).
+// Sibling of the #119 drag HUD; position persists to localStorage.
+(function(){
+  const POS_KEY = 'workboard.loadHudPos';
+  function el(){
+    let h = document.getElementById('load-hud'); if (h) return h;
+    h = document.createElement('div'); h.id = 'load-hud';
+    h.innerHTML =
+      '<div id="load-hud-head"><span class="lh-dot"></span>'+
+      '<span>HISTORY REPLAY ░ inline extraction</span></div>'+
+      '<div id="load-hud-body">'+
+        '<div class="lh-status"><b>▶ EXTRACTING<span class="lh-cur">▋</span></b>'+
+          '<span class="lh-count"><span id="lh-done">0</span>/<span id="lh-total">0</span></span></div>'+
+        '<div class="lh-window" id="lh-window">awaiting staged digest…</div>'+
+        '<div class="lh-track"><div class="lh-fill" id="lh-fill"></div>'+
+          '<div class="lh-pct" id="lh-pct">0%</div></div>'+
+        '<div class="lh-tail" id="lh-tail">&nbsp;</div>'+
+      '</div>';
+    let s = null; try { s = JSON.parse(localStorage.getItem(POS_KEY) || 'null'); } catch (e) {}
+    if (s && isFinite(s.left) && isFinite(s.top)) { h.style.left = s.left+'px'; h.style.top = s.top+'px'; }
+    else { h.style.top = '110px'; h.style.right = '12px'; }
+    document.body.appendChild(h);
+    const head = h.querySelector('#load-hud-head'); let d = null;
+    head.addEventListener('mousedown', e => { e.preventDefault(); const r = h.getBoundingClientRect();
+      d = { dx: e.clientX-r.left, dy: e.clientY-r.top }; head.style.cursor = 'grabbing';
+      h.style.left = r.left+'px'; h.style.top = r.top+'px'; h.style.right = ''; });
+    document.addEventListener('mousemove', e => { if (!d) return;
+      h.style.left = Math.max(0, Math.min(innerWidth-60, e.clientX-d.dx))+'px';
+      h.style.top  = Math.max(0, Math.min(innerHeight-24, e.clientY-d.dy))+'px'; });
+    document.addEventListener('mouseup', () => { if (!d) return; d = null; head.style.cursor = 'grab';
+      try { localStorage.setItem(POS_KEY, JSON.stringify({ left: parseFloat(h.style.left)||0, top: parseFloat(h.style.top)||0 })); } catch (e) {} });
+    return h;
+  }
+  let _hideTimer = null;
+  const HUD = {
+    show(){ const h = el(); h.style.display = ''; if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; } return HUD; },
+    hide(){ const h = el(); h.style.display = 'none'; return HUD; },
+    update(done, total, label){
+      const h = el(); h.classList.remove('lh-done'); h.style.display = '';
+      const pct = total ? Math.round(done/total*100) : 0;
+      h.querySelector('#lh-done').textContent = String(done).padStart(String(total||0).length, '0');
+      h.querySelector('#lh-total').textContent = total;
+      h.querySelector('#lh-fill').style.transform = 'scaleX('+(pct/100)+')';
+      h.querySelector('#lh-pct').textContent = pct+'%';
+      if (label) { h.querySelector('#lh-window').textContent = label; h.querySelector('#lh-tail').textContent = '✓ '+label; }
+      return HUD;
+    },
+    done(label){
+      const h = el(); h.classList.add('lh-done'); h.style.display = '';
+      h.querySelector('#lh-fill').style.transform = 'scaleX(1)';
+      h.querySelector('#lh-pct').textContent = '100%';
+      h.querySelector('.lh-status b').innerHTML = '✓ COMPLETE';
+      h.querySelector('#lh-window').textContent = label || 'extraction + sweep done';
+      // auto-fade the completed HUD so it doesn't linger over the filled board
+      if (_hideTimer) clearTimeout(_hideTimer);
+      _hideTimer = setTimeout(() => { try { el().style.display = 'none'; } catch (e) {} }, 6000);
+      return HUD;
+    }
+  };
+  window.BoardLoadHUD = HUD;
+})();
+
 // ===== SSE: live event stream from serve.py /events =====
 // Server diffs every POST /board.json against the prior cached state and
 // broadcasts per-card / per-column events. We update state in place and
@@ -5085,6 +5185,14 @@ function startSSE() {
   _es.addEventListener('column-removed', e => handleColumnRemoved(JSON.parse(e.data)));
   _es.addEventListener('column-renamed', e => handleColumnRenamed(JSON.parse(e.data)));
   _es.addEventListener('rev-bumped',     e => handleRevBumped(JSON.parse(e.data)));
+  _es.addEventListener('extract_progress', e => {        // #318 BOARD-LOAD HUD
+    try {
+      const d = JSON.parse(e.data);
+      if (!window.BoardLoadHUD) return;
+      if (d.total > 0 && d.done >= d.total) BoardLoadHUD.done(d.label);
+      else BoardLoadHUD.update(d.done || 0, d.total || 0, d.label || '');
+    } catch (_) {}
+  });
   _es.onerror = () => {
     // Browser auto-reconnects; just downgrade status badge.
     if (_sseConnected) setStatus('reconnecting…', 'unsynced');
