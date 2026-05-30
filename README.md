@@ -15,7 +15,8 @@ Originally built as the `board-steward` Claude Code skill; this repo is the cano
   - `_boardio.py` · `_render.py` · `_metrics.py` — shared internals (write-safety, HTML/MD renderers, velocity compute) imported by both `card.py` and `serve.py`.
   - `regen_index.py` — produces a small `index.json` digest for cheap Tier-1 reads
   - `archive_done.py` — sweeps Done cards older than 14d into monthly archives
-  - `discover.py` / `discover2.py` — mine `~/.claude/projects/*/sessions/*.jsonl` to bootstrap a board from prior chat history
+  - `discover.py` / `discover2.py` / `hourly_extractor.py` — the **History Replay**: mine `~/.claude/projects/*/sessions/*.jsonl` and fly cards onto a fresh board so a new user opens the board and already sees their last week of work, animated in card-by-card
+  - `digest_compact.py` — lossless token-cut applied to each History Replay digest before extraction (drops zero-signal boilerplate, never a file/commit/decision line)
   - `log_event.py` / `report.py` — Steward self-telemetry
   - `install_hooks.py` — wires the Claude Code hooks: `SessionStart` (board digest once per session) + `PreToolUse` (flashes a card when Claude edits a file linked to it)
   - `install_autostart.py` — **cross-platform** autostart dispatcher → delegates to `install_launchd.py` (macOS), `install_systemd.py` (Linux), or `install_taskscheduler.py` (Windows); identical flags on every OS
@@ -24,6 +25,34 @@ Originally built as the `board-steward` Claude Code skill; this repo is the cano
   - `board.html` — the kanban UI (single-file, vanilla JS; Board / Calendar / Velocity views)
   - `board.json` — empty-board starter (6 default columns: Task / Backlog / In Progress / Done / Notes / Mandatory)
   - `tag-profiles.json` — 5 industry tag taxonomies (software / marketing / research / product / operations)
+
+## Repo vs installed skill (source of truth)
+
+board-steward lives in two places, on purpose:
+
+| | Path | Role |
+|---|---|---|
+| **Dev repo** | `~/Desktop/WorkBoard/` | **Source of truth.** Git history, the live dev `board/`, the `training_data/` corpus. Edit here. |
+| **Installed skill** | `~/.agents/skills/board-steward/` | The clean, standalone copy Claude Code actually loads — repo minus `.git`/`board`/`training_data`/cruft. Never edit here. |
+
+The installed copy is kept in lockstep by **one** path — no manual `cp`:
+
+```bash
+dev/sync_skill.sh          # mirror repo → installed skill (rsync, drops dev cruft, preserves runtime telemetry/)
+dev/sync_skill.sh --check  # report drift only (exit 1 if they differ)
+```
+
+`dev/install_git_hooks.sh` installs a **`post-commit`** hook that runs the sync on every commit, so the installed skill always reflects the last committed state. (`install.sh` is the separate copy-based path for end users who don't have the repo.) Run the hook installer once after cloning.
+
+## History Replay
+
+The **History Replay** is the onboarding demo: point it at a project's `~/.claude` chat history and it reconstructs the work as kanban cards, flying them onto a fresh empty board (`task → in-progress → done`, including real bug-bounces and improvements via `transitions[]`). It's how a brand-new user opens the board and *already* sees their last week of work instead of an empty state.
+
+```bash
+dev/simulate_install.sh --project <dir> --days N --port 7896   # run a History Replay on an isolated board
+```
+
+It is distinct from the per-card *lifecycle* walk — History Replay is the **retrospective** fill from past history; the lifecycle tracking is the **going-forward** capture as you work.
 
 ## Features
 

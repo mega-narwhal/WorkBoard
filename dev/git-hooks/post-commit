@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#
+# post-commit — keep the installed skill in lockstep with committed repo state.
+#
+# Runs AFTER a commit succeeds (so the skill always mirrors what was actually
+# committed, never an aborted/amended state). The skill dir lives outside the
+# repo, so this hook has no effect on the commit itself — it just refreshes the
+# external copy. Installed by dev/install_git_hooks.sh; source lives in
+# dev/git-hooks/ so it's version-controlled and reproducible.
+#
+set -euo pipefail
+REPO="$(git rev-parse --show-toplevel)"
+exec "$REPO/dev/sync_skill.sh"
