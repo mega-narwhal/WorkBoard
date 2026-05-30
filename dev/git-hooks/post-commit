@@ -10,4 +10,15 @@
 #
 set -euo pipefail
 REPO="$(git rev-parse --show-toplevel)"
-exec "$REPO/dev/sync_skill.sh"
+
+# 1. keep the installed skill in lockstep with committed state
+"$REPO/dev/sync_skill.sh"
+
+# 2. fast regression guard (#316): ~3s import/CLI/undefined-name core — the
+#    #307 split-gap bug class. Non-blocking (the commit already happened); silent
+#    on success, loud only on a real regression so you fix it before pushing.
+if ! python3 "$REPO/dev/smoke_test.py" --fast >/tmp/board-steward-smoke.log 2>&1; then
+  echo ""
+  echo "⚠  post-commit regression smoke FAILED (commit succeeded — fix before pushing):"
+  cat /tmp/board-steward-smoke.log
+fi
