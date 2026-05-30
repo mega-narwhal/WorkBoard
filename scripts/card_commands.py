@@ -798,6 +798,23 @@ def cmd_show(args, d, board):
     print(json.dumps(c, indent=2, ensure_ascii=False))
 
 
+def cmd_sweep_status(args, d, board):
+    """#315 — report whether the inline-extraction completeness sweep was done
+    for this board. A leftover extraction_pending.json = sweep skipped (the
+    protocol deletes it only after the sweep). Deterministic; exit 1 if a
+    sweep is still pending so scripts / the smoke harness can assert on it."""
+    import sweep_status  # pure-stdlib single source of truth (hook reuses it)
+    if getattr(args, "hook_line", False):
+        line = sweep_status.hook_line(board)
+        if line:
+            print(line)
+        return
+    text, rc = sweep_status.human(board)
+    print(text)
+    if rc:
+        sys.exit(rc)
+
+
 def cmd_recover(args, d, board):
     """3.5c — list the rolling backups (3.5b) or restore one.
 

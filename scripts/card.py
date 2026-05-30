@@ -198,6 +198,17 @@ def build_parser():
     psh.add_argument("ref")
     psh.set_defaults(fn=cmd_show)
 
+    # sweep-status (#315) — the forgotten-sweep guard. Exit 1 if a leftover
+    # extraction_pending.json means the completeness sweep was never run.
+    pss = sub.add_parser("sweep-status",
+                         help="report whether the inline-extraction completeness "
+                              "sweep is still pending (leftover extraction_pending.json). "
+                              "Exit 1 if pending. The session-start hook reuses this.")
+    pss.add_argument("--hook-line", action="store_true", dest="hook_line",
+                     help="emit the one-line session-start klaxon (empty if clean); "
+                          "never exits nonzero")
+    pss.set_defaults(fn=cmd_sweep_status)
+
     # recover (3.5c) — list rolling backups or restore one
     prc = sub.add_parser("recover", help="list rolling backups, or restore one (3.5c)")
     prc.add_argument("rev", nargs="?", type=int, help="backup rev to restore (omit to list)")

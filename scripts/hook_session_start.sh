@@ -151,13 +151,15 @@ fi
 # Helper path Claude will see and can call.
 card_py="$(dirname "$0")/card.py"
 
-# Inline-extraction nudge (#247): if a bootstrap staged digests for free
-# main-Claude emit, surface it so this session processes it (no Haiku cost).
+# Inline-extraction completion guard (#315): a leftover extraction_pending.json
+# means a bootstrap staged digests but the completeness SWEEP was never run —
+# never-miss cards may have been silently dropped. Single source of truth is
+# sweep_status.py (pure-stdlib, no card.py import) so this stays self-contained
+# and fast; it names the sweep explicitly so emit-then-delete can't skip recon.
 pending_line=""
-pending_file="$(dirname "${board_path}")/extraction_pending.json"
-if [ -f "${pending_file}" ]; then
-  nchunks="$(python3 -c "import json;print(len(json.load(open('${pending_file}')).get('chunks',[])))" 2>/dev/null || echo "?")"
-  pending_line="📋 INLINE EXTRACTION PENDING: ${nchunks} chunk(s) in ${pending_file} — emit cards from each chunk's digest per its instructions (FREE, no Haiku), then delete the file. See SKILL.md §J."
+sweep_py="$(dirname "$0")/sweep_status.py"
+if [ -f "${sweep_py}" ]; then
+  pending_line="$(python3 "${sweep_py}" --board "${board_path}" --hook-line 2>/dev/null)"
 fi
 
 # Sign-off reconciliation backstop (#279): the previous session's Stop hook may

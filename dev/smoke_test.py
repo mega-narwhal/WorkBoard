@@ -15,6 +15,7 @@ Sections:
   D. full card.py lifecycle on a scratch board (no-server flock path)
   E. measure_digest --diff (hourly_extractor → discover2 harvest + digest, lossless)
   F. discover2 full pipeline (harvest → extract → output)
+  G. sweep-status completion guard (#315 leftover-pending detection)
 """
 from __future__ import annotations
 
@@ -40,13 +41,14 @@ MODULES = [
     "serve", "serve_bootstrap",
     "hourly_extractor", "hourly_common", "hourly_emit", "hourly_reconcile",
     "discover2", "discover2_sources", "discover2_extract",
-    "digest_compact", "measure_digest",
+    "digest_compact", "measure_digest", "sweep_status",
 ]
 
 SUBCOMMANDS = [
     "add", "update", "move", "fly", "bug", "improve", "subtask", "link",
     "column", "show", "recover", "migrate", "repair-links", "prelaunch-check",
     "list", "digest", "query", "wiki", "metrics", "export", "sim", "auto-ship",
+    "sweep-status",
 ]
 
 # `import *` provenance, so the audit knows what each module inherits.
@@ -173,6 +175,52 @@ def section_audit() -> None:
            "; ".join(f"{k}:{v}" for k, v in flagged.items()))
 
 
+# ---------- G. sweep-status completion guard (#315) ----------
+def section_sweep_status() -> None:
+    print("G. sweep-status completion guard (#315)")
+    import sweep_status
+    with tempfile.TemporaryDirectory() as td:
+        brd = Path(td) / "board" / "board.json"
+        brd.parent.mkdir(parents=True)
+        brd.write_text(json.dumps({"cards": [], "columns": [], "rev": 0}))
+        pend = brd.parent / "extraction_pending.json"
+
+        # clean: no pending file → not pending, empty hook line, human rc 0
+        st = sweep_status.status(brd)
+        clean_ok = (not st["pending"] and sweep_status.hook_line(brd) == ""
+                    and sweep_status.human(brd)[1] == 0)
+        record("clean board → sweep-status reports done (rc 0)", clean_ok,
+               "" if clean_ok else f"st={st}")
+
+        # CLI agrees on the clean case (exercises card.py wiring end-to-end)
+        r = subprocess.run([PY, str(CARD), "--board", str(brd), "sweep-status"],
+                           capture_output=True, text=True, env={**os.environ, "BOARD_NO_SERVER": "1"})
+        record("card.py sweep-status exits 0 when clean", r.returncode == 0,
+               r.stdout.strip() or r.stderr.strip())
+
+        # pending: a leftover staged file → detected, hook line names the SWEEP, rc 1
+        pend.write_text(json.dumps({"written_at": "2026-05-30T15:00:00+00:00",
+                                    "chunks": [{"digest": "x"}, {"digest": "y"}]}))
+        st = sweep_status.status(brd)
+        line = sweep_status.hook_line(brd)
+        text, rc = sweep_status.human(brd)
+        pend_ok = (st["pending"] and st["chunks"] == 2 and "SWEEP" in line
+                   and "2 chunk" in line and rc == 1)
+        record("leftover pending → klaxon names the SWEEP, rc 1", pend_ok,
+               "" if pend_ok else f"line={line!r} rc={rc}")
+
+        r = subprocess.run([PY, str(CARD), "--board", str(brd), "sweep-status"],
+                           capture_output=True, text=True, env={**os.environ, "BOARD_NO_SERVER": "1"})
+        record("card.py sweep-status exits 1 when pending", r.returncode == 1,
+               f"rc={r.returncode}: {r.stdout.strip()}")
+
+        # corrupt pending file still counts as "sweep not done" (existence is the signal)
+        pend.write_text("{ not valid json")
+        st = sweep_status.status(brd)
+        record("corrupt pending file still flags not-done", st["pending"] and st["chunks"] is None,
+               f"st={st}")
+
+
 # ---------- D. card.py lifecycle ----------
 def section_lifecycle() -> None:
     print("D. card.py full lifecycle (no-server flock path)")
@@ -242,7 +290,7 @@ def main() -> int:
     print("=" * 60)
     # --fast = the import/export-gap class only (the #307 split risk): ~3s, hook-safe.
     # full adds the harvest-based functional checks (~15s): the pre-release gate.
-    sections = (section_imports, section_cli, section_audit)
+    sections = (section_imports, section_cli, section_audit, section_sweep_status)
     if not fast:
         sections += (section_lifecycle, section_measure, section_discover)
     for sec in sections:

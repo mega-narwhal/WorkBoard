@@ -263,7 +263,9 @@ def _emit_extraction_pending(board: Path, card_py: Path,
             "(2) a decision/rationale/observation → a 'notes' card; (3) deferrals "
             "('later'/'next session'/'defer'/'nvm save it') → a 'backlog' card with a "
             "'⏸ OPEN — <what remains>' note. Add any that didn't already become a card; "
-            "mandatory first. DELETE this file when all chunks + the sweep are done."
+            "mandatory first. ONLY DELETE this file AFTER both the per-chunk emit AND the "
+            "completeness sweep above are done — a leftover file is the session-start signal "
+            "(#315) that the sweep was skipped, so deleting it early defeats the guard."
         ),
         "chunks": staged,
     }
