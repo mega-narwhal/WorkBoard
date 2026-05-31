@@ -671,7 +671,7 @@ def _load_initial_cache(board_dir: Path) -> None:
                 pass
 
 
-def main():
+def _build_arg_parser():
     ap = argparse.ArgumentParser(description="board-steward local server")
     ap.add_argument("--port", type=int, default=int(os.environ.get("BOARD_PORT", "7891")))
     ap.add_argument("--host", default="127.0.0.1")
@@ -720,97 +720,141 @@ def main():
                     help="Remove the UserPromptSubmit hook, then exit")
     ap.add_argument("--hooks-status", action="store_true",
                     help="Report hook install state, then exit")
-    args = ap.parse_args()
+    return ap
 
-    if args.install_hooks or args.uninstall_hooks or args.hooks_status:
-        import subprocess
-        installer = Path(__file__).resolve().parent / "install_hooks.py"
-        flag = (
-            "--status" if args.hooks_status
-            else "--uninstall" if args.uninstall_hooks
-            else ""
-        )
-        cmd = [sys.executable, str(installer)] + ([flag] if flag else [])
-        sys.exit(subprocess.run(cmd).returncode)
 
+def main():
+    args = _build_arg_parser().parse_args()
+    _maybe_handle_hooks(args)
+    board_dir = _resolve_board_dir(args)
+    _run_server(board_dir, args)
+
+
+def _maybe_handle_hooks(args):
+    """--install/uninstall/hooks-status: run the hooks installer, then exit."""
+    if not (args.install_hooks or args.uninstall_hooks or args.hooks_status):
+        return
+    import subprocess
+    installer = Path(__file__).resolve().parent / "install_hooks.py"
+    flag = (
+        "--status" if args.hooks_status
+        else "--uninstall" if args.uninstall_hooks
+        else ""
+    )
+    cmd = [sys.executable, str(installer)] + ([flag] if flag else [])
+    sys.exit(subprocess.run(cmd).returncode)
+
+
+def _resolve_board_dir(args):
+    """Resolve the board dir: explicit --board, else find/bootstrap under the
+    project root. On a fresh bootstrap, starts the background card-stream and
+    nudges hook-install. Exits the process on hard errors (missing board, or
+    no board found without --bootstrap)."""
     if args.board:
         board_dir = args.board.resolve().parent
         if not args.board.exists():
             print(f"error: {args.board} does not exist", file=sys.stderr)
             sys.exit(2)
-    else:
-        start = (args.project or Path.cwd()).resolve()
-        board_dir = find_board_dir(start)
-        if board_dir is None:
-            if args.bootstrap:
-                board_dir = start / "board"
-                bootstrap_board(board_dir, profile=args.profile,
-                                title_override=args.title,
-                                share=args.share)
-                print(f"bootstrapped new board at {board_dir} (profile={args.profile})", file=sys.stderr)
-                # Stream cards from prior Claude sessions in a background
-                # thread so the user watches their history fill in. Opt out
-                # with --no-discover for a genuine empty start.
-                #
-                # Two fill modes:
-                #   hourly  (default) — HIGH-COMPUTE: hourly_extractor multi-source
-                #                       harvest + Haiku-per-bucket + flying quality
-                #                       cards (the chosen startup behaviour, #268).
-                #   discover          — cheap discover2 'plop' (no API key needed).
-                if not args.no_discover:
-                    if args.bootstrap_mode in ("inline", "haiku") and not args.legacy_discover:
-                        _tgt = _stream_hourly_cards
-                        _targs = (start, board_dir, args.port,
-                                  args.discover_days, args.bucket_min,
-                                  args.chunk_size,
-                                  args.harvest_project.resolve()
-                                  if args.harvest_project else None,
-                                  args.bootstrap_mode)
-                        # inline only STAGES (main Claude emits later) — nothing
-                        # to watch, so don't make staging wait on a browser.
-                        _flies = (args.bootstrap_mode == "haiku")
-                    else:
-                        _tgt = _stream_discovered_cards
-                        _targs = (start, board_dir, args.port,
-                                  args.discover_days, args.discover_max,
-                                  0.25, args.legacy_discover,
-                                  args.harvest_project.resolve()
-                                  if args.harvest_project else None)
-                        _flies = True  # discover plops cards live → gate on a viewer
-                    # Gate the LIVE fly on a connected browser so cards never
-                    # stream to an empty audience (sseClients=0). Staging-only
-                    # (inline) runs immediately.
-                    if _flies:
-                        _thread_target = (lambda t=_tgt, a=_targs: _gated_stream(t, *a))
-                    else:
-                        _thread_target = (lambda t=_tgt, a=_targs: t(*a))
-                    threading.Thread(target=_thread_target, daemon=True).start()
-                # Nudge first-time installers toward wiring the hook so the
-                # board doesn't silently drift during long active-coding
-                # sessions (root cause of card #84).
-                _installer = Path(__file__).resolve().parent / "install_hooks.py"
-                if _installer.exists():
-                    import subprocess
-                    rc = subprocess.run(
-                        [sys.executable, str(_installer), "--status"],
-                        capture_output=True, text=True,
-                    ).returncode
-                    if rc != 0:
-                        print(
-                            "\n💡 RECOMMENDED next step:\n"
-                            f"   {sys.executable} {_installer}\n"
-                            "   (wires a UserPromptSubmit hook so Claude updates the board automatically;\n"
-                            "    one-time, idempotent, run `--uninstall-hooks` to reverse)\n",
-                            file=sys.stderr,
-                        )
-            else:
-                print(
-                    f"error: no board/board.json found at or above {start}\n"
-                    f"       pass --bootstrap to create a starter board",
-                    file=sys.stderr,
-                )
-                sys.exit(2)
+        return board_dir
 
+    start = (args.project or Path.cwd()).resolve()
+    board_dir = find_board_dir(start)
+    if board_dir is not None:
+        return board_dir
+    if not args.bootstrap:
+        print(
+            f"error: no board/board.json found at or above {start}\n"
+            f"       pass --bootstrap to create a starter board",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    board_dir = start / "board"
+    bootstrap_board(board_dir, profile=args.profile,
+                    title_override=args.title,
+                    share=args.share)
+    print(f"bootstrapped new board at {board_dir} (profile={args.profile})", file=sys.stderr)
+    # Stream cards from prior Claude sessions in a background thread so the
+    # user watches their history fill in. Opt out with --no-discover.
+    if not args.no_discover:
+        _start_bootstrap_stream(args, start, board_dir)
+    _nudge_install_hooks()
+    return board_dir
+
+
+def _start_bootstrap_stream(args, start, board_dir):
+    """Kick off the background fill-stream chosen by --bootstrap-mode.
+    Two fill modes:
+      hourly (inline/haiku) — hourly_extractor multi-source harvest (#268);
+                              inline only STAGES, haiku flies cards live.
+      discover              — cheap discover2 'plop' (no API key needed).
+    The live (flying) modes are gated on a connected browser so cards never
+    stream to an empty audience (sseClients=0); inline staging runs at once."""
+    if args.bootstrap_mode in ("inline", "haiku") and not args.legacy_discover:
+        tgt = _stream_hourly_cards
+        targs = (start, board_dir, args.port,
+                 args.discover_days, args.bucket_min,
+                 args.chunk_size,
+                 args.harvest_project.resolve()
+                 if args.harvest_project else None,
+                 args.bootstrap_mode)
+        flies = (args.bootstrap_mode == "haiku")
+    else:
+        tgt = _stream_discovered_cards
+        targs = (start, board_dir, args.port,
+                 args.discover_days, args.discover_max,
+                 0.25, args.legacy_discover,
+                 args.harvest_project.resolve()
+                 if args.harvest_project else None)
+        flies = True  # discover plops cards live → gate on a viewer
+    if flies:
+        thread_target = (lambda t=tgt, a=targs: _gated_stream(t, *a))
+    else:
+        thread_target = (lambda t=tgt, a=targs: t(*a))
+    threading.Thread(target=thread_target, daemon=True).start()
+
+
+def _nudge_install_hooks():
+    """Nudge first-time installers toward wiring the UserPromptSubmit hook so
+    the board doesn't silently drift during long sessions (root cause of #84)."""
+    installer = Path(__file__).resolve().parent / "install_hooks.py"
+    if not installer.exists():
+        return
+    import subprocess
+    rc = subprocess.run(
+        [sys.executable, str(installer), "--status"],
+        capture_output=True, text=True,
+    ).returncode
+    if rc != 0:
+        print(
+            "\n💡 RECOMMENDED next step:\n"
+            f"   {sys.executable} {installer}\n"
+            "   (wires a UserPromptSubmit hook so Claude updates the board automatically;\n"
+            "    one-time, idempotent, run `--uninstall-hooks` to reverse)\n",
+            file=sys.stderr,
+        )
+
+
+def _print_lan_url(args):
+    """#116 — print the scan-me URL with the bearer token baked in. Detect the
+    primary LAN IP without sending a packet (UDP connect just picks the route's
+    source address)."""
+    lan_ip = args.host
+    if args.host in ("0.0.0.0", "::"):
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("10.255.255.255", 1))
+            lan_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            lan_ip = "<lan-ip>"
+    print(f"🔒 auth ON — open on another device:\n"
+          f"   http://{lan_ip}:{args.port}/?t={BoardHandler.auth_token}", flush=True)
+
+
+def _run_server(board_dir, args):
+    """Configure the handler, register our port, and serve until interrupted."""
     BoardHandler.board_dir = board_dir
     BoardHandler.auth_token = args.auth_token or None
     _load_initial_cache(board_dir)
@@ -827,21 +871,7 @@ def main():
         print(f"warn: port-registry write failed: {e}", file=sys.stderr)
     print(f"📋 board-steward v4 serving {board_dir} at {url} (SSE on /events)", flush=True)
     if BoardHandler.auth_token:
-        # #116 — print the scan-me URL with the token baked in. Detect the
-        # primary LAN IP without sending a packet (UDP connect just picks the
-        # route's source address).
-        lan_ip = args.host
-        if args.host in ("0.0.0.0", "::"):
-            try:
-                import socket
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("10.255.255.255", 1))
-                lan_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                lan_ip = "<lan-ip>"
-        print(f"🔒 auth ON — open on another device:\n"
-              f"   http://{lan_ip}:{args.port}/?t={BoardHandler.auth_token}", flush=True)
+        _print_lan_url(args)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
