@@ -8,6 +8,12 @@
 #     ./install.sh --project ~/code/foo # ...in a specific project
 #     ./install.sh --demo               # ISOLATED dry-run of the whole experience
 #     ./install.sh --demo --harvest ~/code/foo   # ...filled (flying) from real history
+#     ./install.sh --demo --harvest ~/code/foo --fill haiku  # ...filled AUTONOMOUSLY (no main-Claude step)
+#
+#   --fill {inline|haiku|discover}  how --harvest fills the board (default inline):
+#     inline   = main Claude (this session) emits the cards — free, highest quality, agent does the work
+#     haiku    = autonomous background workers emit them — one command, fills itself, costs Haiku
+#     discover = (not yet wired for --harvest) pure-heuristic, no LLM
 #
 # What it does (in order):
 #   1. Install the skill   → $CLAUDE_CONFIG_DIR/skills/board-steward (symlink to this repo)
@@ -42,6 +48,7 @@ DO_HOOKS=1
 DO_SKILL=1
 HARVEST=""          # if set: mine THIS real project's history into the (isolated) board
 HARVEST_DAYS=2      # history window for --harvest
+FILL="inline"       # --harvest fill engine: inline (main Claude, free) | haiku (autonomous, costs) | discover
 
 usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
@@ -52,6 +59,7 @@ while [ $# -gt 0 ]; do
     --demo)    DEMO=1; shift ;;
     --harvest) HARVEST="$2"; shift 2 ;;
     --harvest-days) HARVEST_DAYS="$2"; shift 2 ;;
+    --fill)    FILL="$2"; shift 2 ;;
     --no-open) OPEN_BROWSER=0; shift ;;
     --no-autostart) DO_AUTOSTART=0; shift ;;
     --no-hooks)     DO_HOOKS=0; shift ;;
@@ -153,18 +161,39 @@ if [ -n "$HARVEST" ] && [ "$SERVER_OK" = "1" ]; then
     elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"; fi
     OPEN_BROWSER=0   # don't reopen at the end
   fi
-  say "staging ${HARVEST} history for inline fill (free — main Claude emits, no Haiku)"
-  # INLINE (the default): stage extraction_pending.json. No claude -p call here,
-  # so no auth/config-dir concern — main Claude (the session you're in) emits the
-  # cards next, per SKILL.md §J. (Use --bootstrap-mode haiku for the autonomous
-  # background path on headless/no-session installs.)
-  "$PY" "${SCRIPTS}/hourly_extractor.py" \
-    --project "$HARVEST" --board "${PROJECT}/board/board.json" --port "$PORT" \
-    --days "$HARVEST_DAYS" --bucket-min 30 --chunk-size 2 --recent-first --mode inline \
-    || warn "harvest stage reported an issue (non-fatal)"
-  NPEND="$("$PY" -c "import json;print(len(json.load(open('${PROJECT}/board/extraction_pending.json')).get('chunks',[])))" 2>/dev/null || echo '?')"
-  ok "staged ${NPEND} chunk(s) → ${PROJECT}/board/extraction_pending.json"
-  echo "    → main Claude: process it per SKILL.md §J (emit cards + completeness sweep, then delete)"
+  case "$FILL" in
+    discover)
+      # discover is a serve.py --bootstrap-mode (discover2 heuristics on the board's
+      # OWN project); it isn't wired for the --harvest two-project split yet.
+      warn "--fill discover is not wired for --harvest yet (hourly_extractor supports inline|haiku). Use --fill inline or --fill haiku."
+      ;;
+    inline)
+      # INLINE (default): stage extraction_pending.json. No claude -p call, so no
+      # auth/config-dir concern — main Claude (this session) emits the cards next
+      # per SKILL.md §J. Free, highest-quality, but the agent does the work.
+      say "staging ${HARVEST} history for INLINE fill (free — main Claude emits, no Haiku)"
+      "$PY" "${SCRIPTS}/hourly_extractor.py" \
+        --project "$HARVEST" --board "${PROJECT}/board/board.json" --port "$PORT" \
+        --days "$HARVEST_DAYS" --bucket-min 30 --chunk-size 2 --recent-first --mode inline \
+        || warn "harvest inline stage reported an issue (non-fatal)"
+      NPEND="$("$PY" -c "import json;print(len(json.load(open('${PROJECT}/board/extraction_pending.json')).get('chunks',[])))" 2>/dev/null || echo '?')"
+      ok "staged ${NPEND} chunk(s) → ${PROJECT}/board/extraction_pending.json"
+      echo "    → main Claude: process it per SKILL.md §J (emit cards + completeness sweep, then delete)"
+      ;;
+    haiku)
+      # HAIKU: autonomous background workers (claude -p) emit the cards themselves —
+      # one command, board fills + HUD ticks with no main-Claude step. Costs Haiku.
+      say "filling board from ${HARVEST} history via HAIKU (autonomous — no main-Claude step)"
+      "$PY" "${SCRIPTS}/hourly_extractor.py" \
+        --project "$HARVEST" --board "${PROJECT}/board/board.json" --port "$PORT" \
+        --days "$HARVEST_DAYS" --bucket-min 30 --chunk-size 2 --recent-first --mode haiku \
+        || warn "harvest haiku fill reported an issue (non-fatal)"
+      ok "haiku fill complete — board filled autonomously (no main-Claude step needed)"
+      ;;
+    *)
+      warn "unknown --fill '${FILL}' (expected inline|haiku|discover); skipping harvest fill"
+      ;;
+  esac
 fi
 
 # ---- 3. hooks ----------------------------------------------------------------
