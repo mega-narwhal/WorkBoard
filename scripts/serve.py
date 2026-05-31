@@ -390,161 +390,167 @@ class BoardHandler(BaseHTTPRequestHandler):
 
         if path == "/events":
             self._handle_sse()
-            return
-
-        if path == "/" or path == "/board.html":
-            html_path = self.board_dir / "board.html"
-            if not html_path.exists():
-                html_path = TEMPLATE_HTML
-            # On a ?t= hit, hand back a cookie so subsequent board.json / SSE /
-            # POST requests from this browser authenticate automatically — no
-            # board.html changes needed.
-            self._send_file(html_path, "text/html; charset=utf-8",
-                            extra=getattr(self, "_cookie_extra", None))
-            return
-
-        if path == "/board.json":
+        elif path in ("/", "/board.html"):
+            self._handle_index()
+        elif path == "/board.json":
             self._send_file(self.board_dir / "board.json", "application/json")
-            return
-
-        if path == "/index.json":
-            idx = self.board_dir / "index.json"
-            if not idx.exists():
-                regen_index(self.board_dir)
-            self._send_file(idx, "application/json")
-            return
-
-        if path == "/metrics":
-            # #114 BOARD-METRICS — velocity JSON. ?since=Nd window (default 7).
-            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
-            raw = (qs.get("since") or ["7"])[0].strip().rstrip("d")
-            since_days = int(raw) if raw.isdigit() and int(raw) > 0 else 7
-            try:
-                state = json.loads((self.board_dir / "board.json").read_text())
-            except Exception:
-                self._send(500, b'{"error":"board.json unreadable"}')
-                return
-            self._send(200, json.dumps(_metrics.compute(state, since_days),
-                                       ensure_ascii=False).encode("utf-8"))
-            return
-
-        if path in ("/export.md", "/export.html"):
-            # #115 BOARD-EXPORT — static shareable snapshot. ?since=Nd narrows
-            # the recently-shipped section to a sprint window (e.g. ?since=7d).
-            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
-            since_days = None
-            raw = (qs.get("since") or [""])[0].strip().rstrip("d")
-            if raw.isdigit():
-                since_days = int(raw)
-            try:
-                state = json.loads((self.board_dir / "board.json").read_text())
-            except Exception:
-                self._send(500, b'{"error":"board.json unreadable"}')
-                return
-            if path == "/export.html":
-                body = _render.to_html(state, recent=20, since_days=since_days)
-                ctype = "text/html; charset=utf-8"
-            else:
-                body = _render.to_markdown(state, recent=20, since_days=since_days)
-                ctype = "text/markdown; charset=utf-8"
-            self._send(200, body.encode("utf-8"), ctype)
-            return
-
-        if path == "/flash":
-            # #102 BOARD-AUTO-LINK — broadcast a transient flash to the board.
-            # No state mutation; just a one-shot SSE pulse. Query params:
-            #   ?card=<num|id> — required, the card to flash
-            #   ?file=<path>   — optional, file path that triggered the flash
-            #                    (shown in the toast)
-            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
-            ref = (qs.get("card") or [""])[0]
-            fpath = (qs.get("file") or [""])[0]
-            if not ref:
-                self._send(400, b'{"error":"missing card param"}')
-                return
-            try:
-                state = json.loads((self.board_dir / "board.json").read_text())
-            except Exception:
-                self._send(500, b'{"error":"board.json unreadable"}')
-                return
-            target = None
-            for c in state.get("cards", []):
-                if str(c.get("num")) == ref or c.get("id") == ref or c.get("code") == ref:
-                    target = c
-                    break
-            if target is None:
-                self._send(404, json.dumps({"error": f"card not found: {ref}"}).encode())
-                return
-            broadcast("card-flash", {
-                "id": target["id"],
-                "num": target.get("num"),
-                "title": target.get("title", ""),
-                "file": fpath,
-            })
-            self._send(200, json.dumps({"ok": True, "flashed": target.get("num")}).encode())
-            return
-
-        if path == "/health":
-            try:
-                state = json.loads((self.board_dir / "board.json").read_text())
-                rev = state.get("rev", 0)
-                cards = len(state.get("cards", []))
-            except Exception:
-                rev, cards = -1, 0
-            with _clients_lock:
-                n_clients = len(_clients)
-            # #177 — include current git commit (short SHA + first line of
-            # message) so the Logs HUD can show "running fde639b" without a
-            # separate round-trip. Best-effort; silent fail if not a repo.
-            commit_sha, commit_msg = "", ""
-            try:
-                # Walk up from board_dir looking for a .git
-                cur = self.board_dir.resolve()
-                for _ in range(6):
-                    if (cur / ".git").exists():
-                        commit_sha = subprocess.check_output(
-                            ["git", "-C", str(cur), "rev-parse", "--short", "HEAD"],
-                            stderr=subprocess.DEVNULL, timeout=1
-                        ).decode().strip()
-                        commit_msg = subprocess.check_output(
-                            ["git", "-C", str(cur), "log", "-1", "--pretty=%s"],
-                            stderr=subprocess.DEVNULL, timeout=1
-                        ).decode().strip()
-                        break
-                    if cur.parent == cur: break
-                    cur = cur.parent
-            except Exception:
-                pass
-            body = json.dumps({
-                "ok": True,
-                "project": str(self.board_dir.parent),
-                "board": str(self.board_dir),
-                "rev": rev,
-                "cards": cards,
-                "sseClients": n_clients,
-                "commit": commit_sha,
-                "commitMsg": commit_msg,
-                "ts": datetime.now(timezone.utc).isoformat(),
-            }).encode()
-            self._send(200, body)
-            return
-
-        if path == "/tags":
+        elif path == "/index.json":
+            self._handle_index_json()
+        elif path == "/metrics":
+            self._handle_metrics()
+        elif path in ("/export.md", "/export.html"):
+            self._handle_export(path)
+        elif path == "/flash":
+            self._handle_flash()
+        elif path == "/health":
+            self._handle_health()
+        elif path == "/tags":
             self._send_tags_page()
-            return
-
-        if path.startswith("/archive/"):
-            rel = path[len("/archive/"):].lstrip("/")
-            target = (self.board_dir / "archive" / rel).resolve()
-            if not str(target).startswith(str((self.board_dir / "archive").resolve())):
-                self._send(403, b'{"error":"forbidden"}')
-                return
-            if target.is_file():
-                self._send_file(target, "application/json")
-                return
+        elif path.startswith("/archive/"):
+            self._handle_archive(path)
+        else:
             self._send(404, b'{"error":"not found"}')
-            return
 
+    def _handle_index(self):
+        """GET / or /board.html — serve the board UI."""
+        html_path = self.board_dir / "board.html"
+        if not html_path.exists():
+            html_path = TEMPLATE_HTML
+        # On a ?t= hit, hand back a cookie so subsequent board.json / SSE /
+        # POST requests from this browser authenticate automatically — no
+        # board.html changes needed.
+        self._send_file(html_path, "text/html; charset=utf-8",
+                        extra=getattr(self, "_cookie_extra", None))
+
+    def _handle_index_json(self):
+        """GET /index.json — the regenerable digest index."""
+        idx = self.board_dir / "index.json"
+        if not idx.exists():
+            regen_index(self.board_dir)
+        self._send_file(idx, "application/json")
+
+    def _handle_metrics(self):
+        """GET /metrics — #114 velocity JSON. ?since=Nd window (default 7)."""
+        qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        raw = (qs.get("since") or ["7"])[0].strip().rstrip("d")
+        since_days = int(raw) if raw.isdigit() and int(raw) > 0 else 7
+        try:
+            state = json.loads((self.board_dir / "board.json").read_text())
+        except Exception:
+            self._send(500, b'{"error":"board.json unreadable"}')
+            return
+        self._send(200, json.dumps(_metrics.compute(state, since_days),
+                                   ensure_ascii=False).encode("utf-8"))
+
+    def _handle_export(self, path):
+        """GET /export.md|/export.html — #115 static shareable snapshot.
+        ?since=Nd narrows the recently-shipped section to a sprint window."""
+        qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        since_days = None
+        raw = (qs.get("since") or [""])[0].strip().rstrip("d")
+        if raw.isdigit():
+            since_days = int(raw)
+        try:
+            state = json.loads((self.board_dir / "board.json").read_text())
+        except Exception:
+            self._send(500, b'{"error":"board.json unreadable"}')
+            return
+        if path == "/export.html":
+            body = _render.to_html(state, recent=20, since_days=since_days)
+            ctype = "text/html; charset=utf-8"
+        else:
+            body = _render.to_markdown(state, recent=20, since_days=since_days)
+            ctype = "text/markdown; charset=utf-8"
+        self._send(200, body.encode("utf-8"), ctype)
+
+    def _handle_flash(self):
+        """GET /flash — #102 BOARD-AUTO-LINK: broadcast a transient flash to the
+        board. No state mutation; just a one-shot SSE pulse. Query params:
+          ?card=<num|id> — required, the card to flash
+          ?file=<path>   — optional, file path that triggered the flash."""
+        qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        ref = (qs.get("card") or [""])[0]
+        fpath = (qs.get("file") or [""])[0]
+        if not ref:
+            self._send(400, b'{"error":"missing card param"}')
+            return
+        try:
+            state = json.loads((self.board_dir / "board.json").read_text())
+        except Exception:
+            self._send(500, b'{"error":"board.json unreadable"}')
+            return
+        target = None
+        for c in state.get("cards", []):
+            if str(c.get("num")) == ref or c.get("id") == ref or c.get("code") == ref:
+                target = c
+                break
+        if target is None:
+            self._send(404, json.dumps({"error": f"card not found: {ref}"}).encode())
+            return
+        broadcast("card-flash", {
+            "id": target["id"],
+            "num": target.get("num"),
+            "title": target.get("title", ""),
+            "file": fpath,
+        })
+        self._send(200, json.dumps({"ok": True, "flashed": target.get("num")}).encode())
+
+    def _handle_health(self):
+        """GET /health — liveness + board rev/cards + SSE client count +
+        current git commit (#177, best-effort)."""
+        try:
+            state = json.loads((self.board_dir / "board.json").read_text())
+            rev = state.get("rev", 0)
+            cards = len(state.get("cards", []))
+        except Exception:
+            rev, cards = -1, 0
+        with _clients_lock:
+            n_clients = len(_clients)
+        # #177 — include current git commit (short SHA + first line of
+        # message) so the Logs HUD can show "running fde639b" without a
+        # separate round-trip. Best-effort; silent fail if not a repo.
+        commit_sha, commit_msg = "", ""
+        try:
+            # Walk up from board_dir looking for a .git
+            cur = self.board_dir.resolve()
+            for _ in range(6):
+                if (cur / ".git").exists():
+                    commit_sha = subprocess.check_output(
+                        ["git", "-C", str(cur), "rev-parse", "--short", "HEAD"],
+                        stderr=subprocess.DEVNULL, timeout=1
+                    ).decode().strip()
+                    commit_msg = subprocess.check_output(
+                        ["git", "-C", str(cur), "log", "-1", "--pretty=%s"],
+                        stderr=subprocess.DEVNULL, timeout=1
+                    ).decode().strip()
+                    break
+                if cur.parent == cur: break
+                cur = cur.parent
+        except Exception:
+            pass
+        body = json.dumps({
+            "ok": True,
+            "project": str(self.board_dir.parent),
+            "board": str(self.board_dir),
+            "rev": rev,
+            "cards": cards,
+            "sseClients": n_clients,
+            "commit": commit_sha,
+            "commitMsg": commit_msg,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }).encode()
+        self._send(200, body)
+
+    def _handle_archive(self, path):
+        """GET /archive/<rel> — serve an archived board snapshot (path-safe)."""
+        rel = path[len("/archive/"):].lstrip("/")
+        target = (self.board_dir / "archive" / rel).resolve()
+        if not str(target).startswith(str((self.board_dir / "archive").resolve())):
+            self._send(403, b'{"error":"forbidden"}')
+            return
+        if target.is_file():
+            self._send_file(target, "application/json")
+            return
         self._send(404, b'{"error":"not found"}')
 
     def do_POST(self):
