@@ -129,6 +129,58 @@ def bootstrap_board(board_dir: Path, profile: str = "software",
             print(f"gitignore: {status}", file=sys.stderr)
 
 
+def _classify_column(real_ship: bool, urgency: list, defer: list, bugs: list,
+                     age_days: int, has_files: bool) -> str:
+    """Heuristic: map a discovered task's signals to a board column. Branch
+    ORDER is significant — a bugs-only task lands in backlog even if it's old
+    with file activity (the bugs check precedes the stale-with-files → done
+    rule), matching the original inline chain exactly."""
+    if real_ship:
+        return "done"
+    if urgency:                            # urgency-language → mandatory
+        return "mandatory"
+    if defer:
+        return "backlog"
+    if age_days <= 2 and has_files:
+        return "inprogress"
+    if age_days <= 3 and not has_files:
+        return "task"
+    if bugs:
+        return "backlog"
+    if age_days > 7 and has_files:
+        return "done"
+    return "backlog"                       # stale-no-files / default
+
+
+def _build_card_notes(task: dict, files_proj: list, files_all: list,
+                      commits: list, ship: list, defer: list,
+                      bugs: list) -> str:
+    """Assemble the multi-line notes body (task summary + files + commits +
+    ship/defer/bug signals) for a discovered card."""
+    parts: list[str] = []
+    dur = task.get("duration_min", 0)
+    n_user = task.get("n_user_total", 0)
+    src = ", ".join(task.get("source_set") or [])
+    parts.append(f"Task: {n_user} user turn(s) over {dur}min. Sources: {src}.")
+    if files_proj:
+        parts.append("In-proj files: " + ", ".join(files_proj[:8])
+                     + ("..." if len(files_proj) > 8 else ""))
+    elif files_all:
+        parts.append("Files touched: " + ", ".join(
+            Path(f).name for f in files_all[:8]))
+    if commits:
+        parts.append("Commits: " + " / ".join(
+            f"{c.get('shaShort') or c.get('sha','')[:7]} {c.get('subj','')[:60]}"
+            for c in commits[:3]))
+    if ship:
+        parts.append("Ship signals: " + " / ".join(s[:120] for s in ship[:3]))
+    if defer:
+        parts.append("Defer signals: " + " / ".join(s[:120] for s in defer[:3]))
+    if bugs:
+        parts.append("Bug signals: " + " / ".join(s[:120] for s in bugs[:3]))
+    return "\n".join(parts)
+
+
 def _task_to_card_args(task: dict) -> list[str] | None:
     """Map a discover2.py task record to `card.py add` CLI args. Uses both
     files_touched_all (work intensity) and files_touched_in_proj (relevance),
@@ -163,25 +215,8 @@ def _task_to_card_args(task: dict) -> list[str] | None:
 
     real_ship = (bool(ship) and bool(files_all)) or bool(commits)
     urgency = task.get("urgency_hits") or []
-
-    if real_ship:
-        column = "done"
-    elif urgency and not real_ship:
-        column = "mandatory"               # urgency-language → mandatory
-    elif defer:
-        column = "backlog"
-    elif age_days <= 2 and files_all:
-        column = "inprogress"
-    elif age_days <= 3 and not files_all:
-        column = "task"
-    elif bugs and not real_ship:
-        column = "backlog"
-    elif age_days > 7 and files_all:
-        column = "done"
-    elif age_days > 7:
-        column = "backlog"
-    else:
-        column = "backlog"
+    column = _classify_column(real_ship, urgency, defer, bugs,
+                              age_days, bool(files_all))
 
     tags = []
     if bugs: tags.append("bug")
@@ -194,28 +229,8 @@ def _task_to_card_args(task: dict) -> list[str] | None:
     origin = (f"Discovered by discover2 (bucket {task.get('bucket_id')}, "
               f"session {sid}, {ended}). User said: \"{title_seed[:300]}\"")
 
-    notes_parts: list[str] = []
-    dur = task.get("duration_min", 0)
-    n_user = task.get("n_user_total", 0)
-    src = ", ".join(task.get("source_set") or [])
-    notes_parts.append(f"Task: {n_user} user turn(s) over {dur}min. Sources: {src}.")
-    if files_proj:
-        notes_parts.append("In-proj files: " + ", ".join(files_proj[:8])
-                           + ("..." if len(files_proj) > 8 else ""))
-    elif files_all:
-        notes_parts.append("Files touched: " + ", ".join(
-            Path(f).name for f in files_all[:8]))
-    if commits:
-        notes_parts.append("Commits: " + " / ".join(
-            f"{c.get('shaShort') or c.get('sha','')[:7]} {c.get('subj','')[:60]}"
-            for c in commits[:3]))
-    if ship:
-        notes_parts.append("Ship signals: " + " / ".join(s[:120] for s in ship[:3]))
-    if defer:
-        notes_parts.append("Defer signals: " + " / ".join(s[:120] for s in defer[:3]))
-    if bugs:
-        notes_parts.append("Bug signals: " + " / ".join(s[:120] for s in bugs[:3]))
-    notes = "\n".join(notes_parts)
+    notes = _build_card_notes(task, files_proj, files_all,
+                              commits, ship, defer, bugs)
 
     args = ["--column", column, "--priority", "mid", "--title", title,
             "--origin", origin, "--notes", notes, "--tag", "discovered"]
