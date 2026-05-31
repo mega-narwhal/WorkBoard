@@ -28,6 +28,16 @@ _LLM_MODEL = os.environ.get("HOURLY_MODEL", "haiku")
 # call below MUST use this env. Override-respecting: honors a caller's own value.
 _LLM_ENV = {**os.environ}
 _LLM_ENV.setdefault("MAX_THINKING_TOKENS", "0")
+# A launcher that isolates CLAUDE_CONFIG_DIR (e.g. install.sh --demo) but still
+# needs `claude -p` to authenticate against the user's REAL Claude login exports
+# the real config dir here. Redirect claude -p ONLY — the rest of the isolation
+# (hooks/skills) stays intact. Empty value = unset so claude uses ~/.claude.
+if "BOARD_REAL_CLAUDE_CONFIG_DIR" in os.environ:
+    _real_cfg = os.environ["BOARD_REAL_CLAUDE_CONFIG_DIR"]
+    if _real_cfg:
+        _LLM_ENV["CLAUDE_CONFIG_DIR"] = _real_cfg
+    else:
+        _LLM_ENV.pop("CLAUDE_CONFIG_DIR", None)
 
 
 # ---------- digest builder ------------------------------------------------

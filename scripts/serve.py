@@ -699,11 +699,14 @@ def _build_arg_parser():
                     help="Discover sessions touched in the last N days (default 7)")
     ap.add_argument("--discover-max", type=int, default=20,
                     help="Cap how many tasks become cards on bootstrap (default 20, discover mode only)")
-    ap.add_argument("--bootstrap-mode", choices=["inline", "haiku", "discover"], default="inline",
-                    help="How bootstrap fills the board: 'inline' (default) = FREE — stage "
-                         "extraction_pending.json for the main Claude session to emit (no "
-                         "Haiku cost, highest quality); 'haiku' = claude -p per bucket "
-                         "(costs usage, runs in background); 'discover' = cheap discover2 plop")
+    ap.add_argument("--bootstrap-mode", choices=["inline", "haiku", "discover"], default="haiku",
+                    help="How bootstrap fills the board: 'haiku' (default) = AUTONOMOUS — "
+                         "claude -p per bucket fills the board in the background with no "
+                         "main-Claude step (uses the user's existing Claude login, no API key; "
+                         "fast + robust as of the thinking-off + salvage fixes); 'inline' = FREE "
+                         "but stages extraction_pending.json for the main Claude session to emit "
+                         "(highest quality, but waits on a session to act); 'discover' = cheap "
+                         "discover2 plop")
     ap.add_argument("--bucket-min", type=int, default=30,
                     help="hourly bootstrap: minutes per bucket (default 30)")
     ap.add_argument("--chunk-size", type=int, default=2,

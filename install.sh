@@ -10,9 +10,10 @@
 #     ./install.sh --demo --harvest ~/code/foo   # ...filled (flying) from real history
 #     ./install.sh --demo --harvest ~/code/foo --fill haiku  # ...filled AUTONOMOUSLY (no main-Claude step)
 #
-#   --fill {inline|haiku|discover}  how --harvest fills the board (default inline):
+#   --fill {inline|haiku|discover}  how --harvest fills the board (default haiku):
+#     haiku    = autonomous background workers emit them — one command, fills itself (default;
+#                uses the user's existing Claude login, NO API key; fast + robust)
 #     inline   = main Claude (this session) emits the cards — free, highest quality, agent does the work
-#     haiku    = autonomous background workers emit them — one command, fills itself, costs Haiku
 #     discover = (not yet wired for --harvest) pure-heuristic, no LLM
 #
 # What it does (in order):
@@ -48,7 +49,7 @@ DO_HOOKS=1
 DO_SKILL=1
 HARVEST=""          # if set: mine THIS real project's history into the (isolated) board
 HARVEST_DAYS=2      # history window for --harvest
-FILL="inline"       # --harvest fill engine: inline (main Claude, free) | haiku (autonomous, costs) | discover
+FILL="haiku"        # --harvest fill engine: haiku (autonomous, default) | inline (main Claude, free) | discover
 
 usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
@@ -89,10 +90,15 @@ if [ "$DEMO" = "1" ]; then
   DEMO_HOME="$(mktemp -d "${TMPDIR:-/tmp}/wb-demo.XXXXXX")"
   export CLAUDE_CONFIG_DIR="${DEMO_HOME}/claude"
   mkdir -p "${CLAUDE_CONFIG_DIR}"
+  # ...but the haiku `claude -p` calls (install harvest AND serve.py bootstrap)
+  # must auth against the user's REAL login — the demo config dir above has none,
+  # so without this every call exits 1 → 0 cards. _LLM_ENV (hourly_common) reads
+  # this and overrides CLAUDE_CONFIG_DIR for claude -p only. Empty → uses ~/.claude.
+  export BOARD_REAL_CLAUDE_CONFIG_DIR="${ORIG_CLAUDE_CONFIG_DIR}"
   # Temp project so board/ is created in throwaway space (never pollutes a real
   # dir). This gives the clean "empty start" new-user experience. To see the
-  # "watch your board fill from history" moment instead, use simulate_install.sh
-  # (purpose-built, isolated sim dir) or pass --project <a real project>.
+  # "watch your board fill from history" moment instead, add --harvest <a real
+  # project> (fills the demo board from that project's history).
   if [ "$PROJECT" = "$(pwd)" ]; then PROJECT="${DEMO_HOME}/project"; mkdir -p "$PROJECT"; fi
   DO_AUTOSTART=0   # never pollute launchd/systemd in a demo
   say "DEMO mode — isolated, nothing real is touched"
@@ -184,17 +190,9 @@ if [ -n "$HARVEST" ] && [ "$SERVER_OK" = "1" ]; then
       # HAIKU: autonomous background workers (claude -p) emit the cards themselves —
       # one command, board fills + HUD ticks with no main-Claude step. Costs Haiku.
       say "filling board from ${HARVEST} history via HAIKU (autonomous — no main-Claude step)"
-      # The haiku `claude -p` calls need the REAL Claude config — the isolated
-      # --demo config dir is empty, so claude treats it as unconfigured and every
-      # call exits 1 → 0 cards (while still printing "fill complete"). Restore
-      # ORIG_CLAUDE_CONFIG_DIR (captured before --demo overrode it) for this call;
-      # unset it entirely when there was none so claude falls back to ~/.claude.
-      if [ -n "$ORIG_CLAUDE_CONFIG_DIR" ]; then
-        HARVEST_CC=(env "CLAUDE_CONFIG_DIR=$ORIG_CLAUDE_CONFIG_DIR")
-      else
-        HARVEST_CC=(env -u CLAUDE_CONFIG_DIR)
-      fi
-      "${HARVEST_CC[@]}" "$PY" "${SCRIPTS}/hourly_extractor.py" \
+      # claude -p authenticates via BOARD_REAL_CLAUDE_CONFIG_DIR (set in the --demo
+      # block) → the user's real login, not the empty isolated demo config dir.
+      "$PY" "${SCRIPTS}/hourly_extractor.py" \
         --project "$HARVEST" --board "${PROJECT}/board/board.json" --port "$PORT" \
         --days "$HARVEST_DAYS" --bucket-min 30 --chunk-size 2 --recent-first --mode haiku \
         || warn "harvest haiku fill reported an issue (non-fatal)"
