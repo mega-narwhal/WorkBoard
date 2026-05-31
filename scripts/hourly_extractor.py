@@ -100,18 +100,12 @@ def extract_cards_for_chunk(chunk: list[tuple[str, list[dict]]],
         print(f"  ! claude -p exit {proc.returncode} for chunk [{label_summary}]",
               file=sys.stderr)
         return []
-    out = (proc.stdout or "").strip()
-    out = re.sub(r"^```(?:json)?\s*", "", out)
-    out = re.sub(r"\s*```\s*$", "", out)
-    try:
-        cards = json.loads(out)
-        if not isinstance(cards, list):
-            return []
-        return cards
-    except json.JSONDecodeError:
+    cards = parse_card_array(proc.stdout)
+    if cards is None:
         print(f"  ! LLM returned non-JSON for chunk [{label_summary}]",
               file=sys.stderr)
         return []
+    return cards
 
 
 
