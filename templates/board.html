@@ -124,6 +124,18 @@
     100% { opacity: 1; transform: translateY(0)    scale(1);    box-shadow: var(--shadow); }
   }
   .card.popping-in { animation: card-pop-in 640ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  /* #313: first-load entrance — cards fade + rise + settle the first time THIS
+     browser sees them on a board, whether the tab opened late, reconnected after
+     the live SSE card-added events had already fired, or was filled by an inline
+     install before connecting. Closes the "saw nothing because I wasn't connected"
+     gap that the #312 connection-gate can't (sseClients=0 only covers the live
+     stream). Calmer than .popping-in: a settle, not an overshoot. Idempotent via
+     the per-board seen-set, so routine refreshes don't re-animate. */
+  @keyframes card-entrance {
+    0%   { opacity: 0; transform: translateY(16px) scale(0.965); }
+    100% { opacity: 1; transform: translateY(0)    scale(1); }
+  }
+  .card.entering { animation: card-entrance 460ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
   /* v4: card pulse on update (subtask checked, priority changed, etc) */
   @keyframes card-pulse {
     0%, 100% { transform: scale(1); }
@@ -147,7 +159,7 @@
   /* v4: accessibility — honor reduced-motion preference */
   @media (prefers-reduced-motion: reduce) {
     .card.popping-in, .card.removing, .card.pulsing, .column.sliding-in,
-    .card.flashing,
+    .card.flashing, .card.entering,
     .card.active-work { animation: none !important; }
   }
   /* v2: live "↻ updated 12s ago" indicator in the header. Tick every 1s. */
@@ -3563,6 +3575,57 @@ function render() {
   // #249 — reapply the In-Progress pulse from state after the DOM is rebuilt
   // (board.innerHTML was wiped above). This is what makes it survive refresh.
   refreshActiveWork();
+
+  // #313 — animate any never-before-seen card into place. Self-gates to the
+  // board view and to cards not yet in the seen-set, so this is a no-op on a
+  // routine re-render and only fires for genuinely new cards (first load, late
+  // open, reconnect-via-poll, inline install before connect).
+  playEntrance();
+}
+
+// ===== #313 first-load entrance animation =====
+// Cards animate in (fade + rise + settle) the first time THIS browser sees them
+// on a given board. A per-board "seen" set in localStorage keeps routine
+// refreshes calm: only never-before-seen cards animate, exactly once. This is
+// the SSE-timing-independent backstop to .popping-in — it covers boards that
+// were filled while the tab was disconnected, which the live card-added event
+// (and the #312 connection-gate) structurally cannot.
+function _seenKey() {
+  const bid = (state && (state.id || state.title)) || location.pathname || 'board';
+  return 'wb:seen-cards::' + bid;
+}
+function _loadSeen() {
+  try { return new Set(JSON.parse(localStorage.getItem(_seenKey()) || '[]')); }
+  catch (_) { return new Set(); }
+}
+function _saveSeen(set) {
+  try { localStorage.setItem(_seenKey(), JSON.stringify([...set])); } catch (_) {}
+}
+function markCardSeen(id) {
+  if (!id) return;
+  const s = _loadSeen(); s.add(id); _saveSeen(s);
+}
+function playEntrance() {
+  if (_view !== 'board') return;
+  const els = Array.from(document.querySelectorAll('.card[data-card-id]'));
+  if (!els.length) return;
+  const seen = _loadSeen();
+  const unseen = els.filter(el => !seen.has(el.dataset.cardId));
+  if (unseen.length) {
+    // Stagger so cards cascade in; cap total at ~1.2s so a big board (or the
+    // one-time animate-all on first run after this ships) stays snappy.
+    const stagger = Math.min(60, 1200 / unseen.length);
+    unseen.forEach((el, i) => {
+      el.classList.add('entering');
+      el.style.animationDelay = Math.round(i * stagger) + 'ms';
+      el.addEventListener('animationend', () => {
+        el.classList.remove('entering');
+        el.style.animationDelay = '';
+      }, { once: true });
+    });
+  }
+  els.forEach(el => seen.add(el.dataset.cardId));
+  _saveSeen(seen);
 }
 
 // ===== Tag colour + taxonomy lookup =====
@@ -4901,6 +4964,7 @@ function handleCardAdded({ card }) {
   // will regroup on next poll. For Ideas/Backlog/InProgress/Blocked: append.
   body.appendChild(el);
   el.addEventListener('animationend', () => el.classList.remove('popping-in'), { once: true });
+  markCardSeen(card.id);   // #313 — got .popping-in live; don't re-animate via .entering on a later reconnect/refresh
   refreshColumnCount(card.column);
   // If a brand-new card is born directly into In Progress, treat it as
   // a transition from "nothing" → inprogress.
