@@ -155,6 +155,14 @@ If you find yourself responding to a substantive prompt without having read thes
    - **Support** — `digest_compact` · `measure_digest` · `regen_index` · `sweep_status` · `port_registry` · `archive_done` · `report` · `health_check` · `log_event` · `install_*` (per-OS autostart + hook wiring).
    - **Invariant:** 33 modules, all import clean, no cycles, one-directional coupling. The 3 historical smells (oversized files, god-functions, repo↔skill duplication) are CLOSED — don't reintroduce them.
 
+   **Extending the architecture (how future work MUST slot in — the rule that keeps it from falling apart):**
+   - **Isolate, don't rewrite.** New behavior goes in the module that owns that concern, or a NEW focused module — never by restructuring a parent or rewriting a sibling that already works. A feature should be an *addition* at the right boundary, not a reshuffle of the tree.
+   - **Respect the existing boundaries.** Before adding code, find which family owns the concern (`card.*` state/CLI, `serve.*` HTTP/SSE, `hourly_*` extraction, `discover2.*` harvest, `_*` leaf utils) and put it there. If it fits none cleanly, that's the signal to add a new leaf module — not to widen an unrelated one.
+   - **Depend downward only.** New modules import the leaf utilities; leaves never import callers. Adding a feature must NOT introduce a back-edge or a cycle (verify: every module still imports clean).
+   - **Touch the minimum.** Prefer a change that adds one file or extends one function over one that edits five modules. If a change forces edits across many parents, stop — the design is fighting you; re-scope so the change lands at a single boundary.
+   - **Keep this map current.** When you do add/split/rename a module, update the map above IN THE SAME COMMIT so it never drifts from reality. A stale arch map is itself an architectural smell.
+   - **Why:** the whole point is that future work never has to "rewrite parent folders." Clean isolation means each new feature is a bounded diff at one seam — that's what lets the codebase grow without falling apart.
+
 2. **Commit ON EACH CHANGE — atomically, immediately.** After *every* meaningful change (code, docs, plan, card movement that touches files), make a separate atomic commit right then. **Never batch multiple changes into one commit, and never defer committing to "later."** Push if a remote is configured. Tag a `good-state-*` anchor before risky work so any change is reversible. If a turn produced no file changes, no commit — but say so explicitly. User's standing rule from `feedback_commit_each_change`: "make it reflexive."
 
 3. **Dump full raw conversation at session end.** Append to today's file in the same dir. Format per `~/Desktop/conversation_history/instructions.md`. Never summarize; never overwrite.
