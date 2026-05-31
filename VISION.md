@@ -146,14 +146,58 @@ If you find yourself responding to a substantive prompt without having read thes
    - **No duplication.** One source of truth. The repo `scripts/` is canonical; the installed skill dir is synced from it by hook (#302) — never hand-edit the copy.
    - **Don't branch forever.** Architecture = boundaries, coupling, duplication, dependency direction. Once those are clean, STOP — do not chase every function under an arbitrary line count. That loop never converges and is not what "clean" means.
 
-   **Current architecture (the map — keep this accurate when modules change):**
-   - **`card.*`** — board CLI + state. `card.py` (entry/dispatch) · `card_state.py` (load/save/lock/schema) · `card_commands.py` (the `cmd_*` handlers).
-   - **`serve.*`** — local HTTP + SSE server. `serve.py` (runtime: handler, routes, SSE, `_run_server`) · `serve_bootstrap.py` (bootstrap + discovery→card mapping).
-   - **`hourly_*`** — history extraction pipeline (acyclic). `hourly_common.py` (shared) → `hourly_extractor.py` (orchestration: bucket/chunk/run) → `hourly_emit.py` (emit one card) → `hourly_reconcile.py` (post-pass sweep).
-   - **`discover2.*`** — heuristic harvest. `discover2.py` (entry) · `discover2_sources.py` (jsonl/convo/git/memory readers) · `discover2_extract.py` (signals→tasks). `discover.py` = legacy session-shaped fallback.
-   - **`_*` leaf helpers** — `_boardio` (atomic write + flock), `_render` (md/html export), `_metrics` (velocity), `_hook_*` (the opt-in Claude Code hooks).
-   - **Support** — `digest_compact` · `measure_digest` · `regen_index` · `sweep_status` · `port_registry` · `archive_done` · `report` · `health_check` · `log_event` · `install_*` (per-OS autostart + hook wiring).
-   - **Invariant:** 33 modules, all import clean, no cycles, one-directional coupling. The 3 historical smells (oversized files, god-functions, repo↔skill duplication) are CLOSED — don't reintroduce them.
+   **Current architecture (the tree — keep this accurate when modules change):**
+
+   ```
+   WorkBoard/                          repo root (canonical source)
+   ├── install.sh                      one-command installer (--demo / --harvest / --fill)
+   ├── SKILL.md                        the skill body Claude loads
+   ├── VISION.md  README.md  CHANGELOG.md
+   ├── templates/                      shipped assets (copied into a new board)
+   │   ├── board.html                  the live kanban UI (FLIP motion, SSE client, HUD)
+   │   ├── board.json                  empty-board seed
+   │   └── tag-profiles.json           per-profile tag taxonomies
+   ├── scripts/                        ★ the engine — every module = ONE job
+   │   │
+   │   ├── card.*                      ── BRANCH: board CLI + state ──
+   │   │   ├── card.py                 entry / arg-dispatch / server-vs-direct write
+   │   │   ├── card_state.py           load · save · flock · schema · index regen
+   │   │   └── card_commands.py        the cmd_* handlers (add/move/fly/subtask/…)
+   │   │
+   │   ├── serve.*                     ── BRANCH: local HTTP + SSE server ──
+   │   │   ├── serve.py                runtime: handler · routes · SSE · _run_server
+   │   │   └── serve_bootstrap.py      bootstrap a board + discovery→card mapping
+   │   │
+   │   ├── hourly_*                    ── BRANCH: history-extraction pipeline (acyclic) ──
+   │   │   ├── hourly_common.py        shared helpers (bottom of the chain)
+   │   │   ├── hourly_extractor.py     orchestration: bucket → chunk → run
+   │   │   ├── hourly_emit.py          emit ONE card
+   │   │   └── hourly_reconcile.py     post-pass reconciliation sweep
+   │   │
+   │   ├── discover2.*                 ── BRANCH: heuristic harvest ──
+   │   │   ├── discover2.py            entry
+   │   │   ├── discover2_sources.py    jsonl / convo / git / memory readers
+   │   │   ├── discover2_extract.py    signals → tasks
+   │   │   └── discover.py             legacy session-shaped fallback
+   │   │
+   │   ├── _* leaves                   ── LEAVES: utilities, imported BY callers, never import up ──
+   │   │   ├── _boardio.py             atomic write + cross-process flock
+   │   │   ├── _render.py              markdown / html export
+   │   │   ├── _metrics.py             velocity stats
+   │   │   └── _hook_*.py              opt-in Claude Code hooks (find-board / flash / stop-recon)
+   │   │
+   │   └── support                     ── LEAVES: standalone tools ──
+   │       ├── digest_compact.py  measure_digest.py  regen_index.py  sweep_status.py
+   │       ├── port_registry.py   archive_done.py    report.py       health_check.py  log_event.py
+   │       └── install_*.py        per-OS autostart + hook wiring (launchd/systemd/taskscheduler)
+   │
+   ├── docs/                           deep-dive docs (linked from SKILL.md, read on demand)
+   └── dev/                            NOT shipped — sim/test/pipeline (smoke_test, render_session_raw, sim_*)
+   ```
+
+   **How to read the tree:** BRANCHES (`card.* serve.* hourly_* discover2.*`) own a concern; LEAVES (`_*`, support) are depended on, never depend up. Dependency flows **downward only** (branch → leaf), so there are **no cycles**. New work attaches to the branch that owns its concern, or becomes a new leaf — it never rewrites a parent.
+
+   **Invariant:** 33 script modules, all import clean, no cycles, one-directional coupling. The 3 historical smells (oversized files, god-functions, repo↔skill duplication) are CLOSED — don't reintroduce them.
 
    **Extending the architecture (how future work MUST slot in — the rule that keeps it from falling apart):**
    - **Isolate, don't rewrite.** New behavior goes in the module that owns that concern, or a NEW focused module — never by restructuring a parent or rewriting a sibling that already works. A feature should be an *addition* at the right boundary, not a reshuffle of the tree.
