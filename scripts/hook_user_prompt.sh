@@ -84,16 +84,15 @@ fi
 
 cat <<MSG
 <board-steward-protocol>
-A live work board is tracking this project${server_hint}.
+A live work board tracks this project${server_hint}. The board is source of truth, not your memory.
 
-MANDATORY before responding:
-  - If your IMMEDIATE prior assistant turn shipped / deployed / completed / fixed / deferred anything that isn't already on the board, run \`card.py add\` or \`card.py move\` NOW. Don't batch — one update per shipped unit.
-  - If you only investigated or read, do nothing.
+LIVE lifecycle — keep the board in sync as you work, never batch to session end:
+  - Starting a unit of work the user would reference later by # → \`card.py add --column task --title "<verb + noun>" --origin "<their words>"\` then \`card.py fly <n> inprogress\` the moment work begins.
+  - Shipped / fixed / deferred / blocked something not yet reflected → \`card.py fly <n> done --writeup "<commits, files, verification>"\` (or \`blocked --note\`).
+  - Pure question / explain / read-only / a conversational micro-turn → do nothing.
+One update per unit. The user must NEVER have to ask "did you update the board?" — that question is a failure of this protocol.
 
-Why this hook exists: the user must NEVER have to ask "did you update the board?" — that question is a failure of this protocol.
-
-Last card-added event: ${last_card_ts:-none recorded}
-Board: ${board_path:-(server-only)}
+Board: ${board_path:-(server-only)}  ·  Last card event: ${last_card_ts:-none recorded}
 </board-steward-protocol>
 MSG
 
