@@ -25,9 +25,12 @@ _LLM_MODEL = os.environ.get("HOURLY_MODEL", "haiku")
 # MAX_THINKING_TOKENS=0 cuts output_tokens ~13× (5220→392) and api time ~15×
 # (53s→3.5s) with cards fully intact — it was THE haiku-fill bottleneck (measured
 # 2026-05-31, not card verbosity/MCP/chunk-size/parallelism). Every claude -p
-# call below MUST use this env. Override-respecting: honors a caller's own value.
+# call below MUST use this env. FORCED (not setdefault): a stray
+# MAX_THINKING_TOKENS in the user's environment must NOT silently re-enable the
+# ~13× output-token / 15× latency blowup on the fill subprocesses (#293). Escape
+# hatch for power users: BOARD_THINKING_TOKENS overrides the forced 0.
 _LLM_ENV = {**os.environ}
-_LLM_ENV.setdefault("MAX_THINKING_TOKENS", "0")
+_LLM_ENV["MAX_THINKING_TOKENS"] = os.environ.get("BOARD_THINKING_TOKENS", "0")
 # A launcher that isolates CLAUDE_CONFIG_DIR (e.g. install.sh --demo) but still
 # needs `claude -p` to authenticate against the user's REAL Claude login exports
 # the real config dir here. Redirect claude -p ONLY — the rest of the isolation

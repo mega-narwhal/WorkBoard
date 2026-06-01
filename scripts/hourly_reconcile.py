@@ -230,6 +230,23 @@ def _emit_extraction_pending(board: Path, card_py: Path,
         ),
         "chunks": staged,
     }
+    # #293 INLINE TOKEN GUARD — inline funnels EVERY chunk digest through the
+    # main session's context, so a big window can eat much of a small-context /
+    # free tier's budget (haiku has no such cost: chunked + background + Haiku-
+    # priced). Warn loudly with the estimate so the user can cut the window or
+    # switch fills. Estimate = digest chars/4 (→tokens) × 1.4 (prompt overhead).
+    # Threshold overridable via BOARD_INLINE_WARN_TOKENS (default 100k — the
+    # danger zone for a ~200k free-tier context once the live convo is added).
+    total_chars = sum(len(s["digest"]) for s in staged)
+    est_tokens = int(total_chars / 4 * 1.4)
+    warn_at = int(os.environ.get("BOARD_INLINE_WARN_TOKENS", "100000"))
+    if est_tokens > warn_at:
+        print(f"\n  ⚠️  INLINE COST ~{est_tokens:,} tokens across {len(staged)} chunk(s) — "
+              f"read through THIS session's context.\n"
+              f"      On a small-context / free tier this can consume much of your budget.\n"
+              f"      Cheaper: narrow the window (e.g. --harvest-days 1 or 2), or use "
+              f"--fill haiku (chunked, background, ~12× cheaper, no main-context cost).\n",
+              file=sys.stderr)
     try:
         pending_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
         print(f"📋 staged {len(staged)} chunk(s) → {pending_path}\n"
