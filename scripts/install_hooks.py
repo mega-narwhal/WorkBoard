@@ -198,9 +198,12 @@ def main() -> int:
         # legacy alias preserved: SessionStart + UserPromptSubmit
         selected = {"session-start", "user-prompt-submit"}
     elif args.hook == "all":
-        # current recommended combo: SessionStart + PreToolUse + Stop
-        # (digest in / flash on edit / reconcile on sign-off; no per-prompt nag)
-        selected = {"session-start", "pre-tool-use", "stop"}
+        # genuinely ALL four hooks — the complete fresh-install experience:
+        # SessionStart (digest in + daily auto-open) + UserPromptSubmit (#360
+        # per-turn LIVE nudge) + PreToolUse (flash on edit + #102 auto-link) +
+        # Stop (#359 blocking sign-off backstop). install.sh wires this so a
+        # download reflects everything we built, not a subset.
+        selected = {"session-start", "user-prompt-submit", "pre-tool-use", "stop"}
     elif args.hook == "live":
         # LIVE going-forward enforcement (#359/#360): digest in (SessionStart) +
         # per-turn lifecycle nudge (UserPromptSubmit) + blocking sign-off backstop

@@ -209,7 +209,7 @@ fi
 
 # ---- 3. hooks ----------------------------------------------------------------
 if [ "$DO_HOOKS" = "1" ]; then
-  say "wiring Claude Code hooks (SessionStart + PreToolUse)"
+  say "wiring Claude Code hooks (SessionStart + UserPromptSubmit + PreToolUse + Stop)"
   "$PY" "${SCRIPTS}/install_hooks.py" --hook all >/dev/null && ok "hooks installed in ${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/settings.json"
 else
   warn "skipping hooks (--no-hooks)"
