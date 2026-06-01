@@ -324,7 +324,9 @@
     gap: 8px;
     padding: 12px;
     overflow: auto;
-    height: calc(100% - 48px);
+    /* 48px header + a 28px page-background gap so the columns don't run to the
+       very bottom edge of the window (the scroll-viewport ends above it). */
+    height: calc(100% - 48px - 28px);
     align-items: flex-start;
   }
   /* #117 — vertical stack wrapper. One wrapper per stack root; the root
@@ -337,13 +339,6 @@
     flex-shrink: 0;
     max-height: 100%;
   }
-  /* A little breathing room so a tall column doesn't hug the page's bottom
-     edge. Must sit on the .column itself (not the .column-stack wrapper): the
-     wrapper is max-height-capped, but .column-body's vh-based cap lets the
-     column overflow PAST the wrapper, so wrapper padding gets buried mid-column.
-     :last-child keeps it below the bottom column only — no gaps between a
-     stack's columns. */
-  .column-stack > .column:last-child { margin-bottom: 28px; }
   /* Bottom-40% drop-hint: when dragging a column over the lower half of a
      target column, show a dashed bottom edge that says "drop to stack". */
   .column.col-drop-stack-target {
