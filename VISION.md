@@ -151,7 +151,7 @@ If you find yourself responding to a substantive prompt without having read thes
    ```
    WorkBoard/                          repo root (canonical source)
    ├── install.sh                      one-command installer (--demo / --harvest / --fill)
-   ├── SKILL.md                        the skill body Claude loads
+   ├── SKILL.md                        PART 2 — the lean going-forward LIVE protocol (per-turn card→IP→done); loaded every session
    ├── VISION.md  README.md  CHANGELOG.md
    ├── templates/                      shipped assets (copied into a new board)
    │   ├── board.html                  the live kanban UI (FLIP motion, SSE client, HUD)
@@ -192,6 +192,7 @@ If you find yourself responding to a substantive prompt without having read thes
    │       └── install_*.py        per-OS autostart + hook wiring (launchd/systemd/taskscheduler)
    │
    ├── docs/                           deep-dive docs (linked from SKILL.md, read on demand)
+   │   └── BOOTSTRAP.md                PART 1 — one-time bootstrap/install (History Replay, §J inline, hooks, autostart, full schema); read only when first creating a board
    └── dev/                            NOT shipped — sim/test/pipeline (smoke_test, render_session_raw, sim_*)
    ```
 
