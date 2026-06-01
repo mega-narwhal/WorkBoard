@@ -1867,6 +1867,72 @@ document.addEventListener('DOMContentLoaded', () => {
   }, true);
 });
 
+// ===== Edge auto-scroll while dragging (#330) ============================
+// Native HTML5 DnD can't scroll a container mid-drag, so on a trackpad you
+// can't drag a card to a column that's scrolled off-screen — the long Done
+// column especially (card is "very low", you can't reach the drop target).
+// This pans the relevant scroll container when the cursor nears an edge,
+// speed ramping with proximity. Two axes: #board scrolls horizontally
+// (between columns), each .column-body scrolls vertically (within a column).
+// Trello/Linear/Notion all do this; the user just drags toward the edge and
+// the board follows. Self-contained: driven only by document-level drag
+// events, so it leaves the existing per-element drag handlers untouched.
+const _AS = { x: 0, y: 0, active: false, raf: null };
+const AS_EDGE = 60;        // px from an edge where panning starts
+const AS_MAX_SPEED = 18;   // px/frame at the very edge (~1000px/s @60fps)
+
+// dist = px the cursor sits INSIDE the edge zone (0 = on the edge). Closer to
+// the edge → faster. Returns 0 outside the zone so callers can branch on it.
+function _asRamp(dist) {
+  if (dist >= AS_EDGE) return 0;
+  const t = Math.max(0, Math.min(1, (AS_EDGE - dist) / AS_EDGE));
+  return Math.ceil(t * AS_MAX_SPEED);
+}
+function _asStep() {
+  const x = _AS.x, y = _AS.y;
+  // Horizontal pan across the whole board (reach off-screen columns).
+  const board = document.getElementById('board');
+  if (board) {
+    const r = board.getBoundingClientRect();
+    if (x < r.left + AS_EDGE)        board.scrollLeft -= _asRamp(x - r.left);
+    else if (x > r.right - AS_EDGE)  board.scrollLeft += _asRamp(r.right - x);
+  }
+  // Vertical pan within the column the cursor is currently over (reach a card
+  // far down a long column). elementFromPoint resolves the live hover target.
+  const el = document.elementFromPoint(x, y);
+  const body = el && el.closest ? el.closest('.column-body') : null;
+  if (body) {
+    const r = body.getBoundingClientRect();
+    if (y < r.top + AS_EDGE)         body.scrollTop -= _asRamp(y - r.top);
+    else if (y > r.bottom - AS_EDGE) body.scrollTop += _asRamp(r.bottom - y);
+  }
+}
+function _asStart() {
+  if (_AS.active) return;
+  _AS.active = true;
+  const tick = () => {
+    if (!_AS.active) { _AS.raf = null; return; }
+    _asStep();
+    _AS.raf = requestAnimationFrame(tick);
+  };
+  _AS.raf = requestAnimationFrame(tick);
+}
+function _asStop() {
+  _AS.active = false;
+  if (_AS.raf) { cancelAnimationFrame(_AS.raf); _AS.raf = null; }
+  _AS.x = _AS.y = 0;
+}
+// dragover fires continuously during a drag and carries the live pointer
+// coords; track them and keep the rAF loop alive. Passive (read-only) so it
+// never interferes with the drop-target handlers that call preventDefault.
+document.addEventListener('dragover', e => {
+  _AS.x = e.clientX; _AS.y = e.clientY;
+  _asStart();
+}, { passive: true });
+// Any drag termination — successful drop or cancelled drag — stops the loop.
+document.addEventListener('drop', _asStop, true);
+document.addEventListener('dragend', _asStop, true);
+
 // ===== Column stacking schema (#117 — schema only; no render impact yet) =====
 // A column may sit BELOW another column in a vertical stack via the
 // `stackUnder` field. null/missing = top-level column with its own slot in
