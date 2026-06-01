@@ -3710,9 +3710,35 @@ async function renderVelocity() {
   `;
 }
 
+// #345 — render() rebuilds board.innerHTML wholesale, which resets every
+// column's scrollTop (and the board's horizontal scrollLeft) to 0. So any
+// re-render — a poll tick, another card being added, closing a card modal
+// (#297) — would snap you back to the top even if you were 83% down Done.
+// Capture positions (keyed by column id) before the rebuild and restore them
+// after, so a render is visually invisible to where you were.
+function _captureScroll() {
+  const m = { _boardLeft: 0 };
+  const b = document.getElementById('board');
+  if (b) m._boardLeft = b.scrollLeft;
+  document.querySelectorAll('.column[data-col]').forEach(col => {
+    const body = col.querySelector('.column-body');
+    if (body) m[col.dataset.col] = body.scrollTop;
+  });
+  return m;
+}
+function _restoreScroll(m) {
+  if (!m) return;
+  const b = document.getElementById('board');
+  if (b && m._boardLeft) b.scrollLeft = m._boardLeft;
+  document.querySelectorAll('.column[data-col]').forEach(col => {
+    const body = col.querySelector('.column-body');
+    if (body && m[col.dataset.col] != null) body.scrollTop = m[col.dataset.col];
+  });
+}
 function render() {
   if (!state) return;
   closeCardMenu();   // #333 — a rebuild invalidates any open card menu
+  const _scroll = _captureScroll();   // #345 — preserve scroll across the rebuild
   if (_view === 'board') {
     const board = $('#board');
     board.innerHTML = '';
@@ -3768,6 +3794,7 @@ function render() {
   // routine re-render and only fires for genuinely new cards (first load, late
   // open, reconnect-via-poll, inline install before connect).
   playEntrance();
+  _restoreScroll(_scroll);   // #345 — put each column back where the user had it
 }
 
 // ===== #313 first-load entrance animation =====
