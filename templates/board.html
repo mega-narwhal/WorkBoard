@@ -1590,6 +1590,11 @@ let state = null;
 let lastRev = 0;
 let saveTimer = null;
 let suppressPollUntil = 0;
+// #337 — brief window (set on tab refocus) during which entrance/pop animations
+// are suppressed: the board snaps to current truth instead of replaying the
+// SSE backlog a throttled background tab queued up as a re-fly burst.
+let _animSuppressUntil = 0;
+function _animSuppressed() { return Date.now() < _animSuppressUntil; }
 let pollTimer = null;
 let pendingDirty = false;
 let _openCardId = null;        // currently-open modal card
@@ -2752,6 +2757,29 @@ function startPoll() {
   }, 3000);
 }
 
+// #337 — tab refocus. A backgrounded tab is throttled, so live SSE card-added
+// events QUEUE; on return they flush in a burst, each replaying its pop-in →
+// "the whole board re-flies to catch up" (most visible mid-fill). Instead, open
+// a short suppress window and snap straight to canonical truth in one silent
+// re-sync. The queued events then find their cards already in the DOM (add =
+// no-op) or already at their final spot (move = zero FLIP delta), so nothing
+// re-flies — the board just continues where reality is.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  _animSuppressUntil = Date.now() + 1200;   // cover the flush + this re-sync
+  fetch(BOARD_URL, { cache: 'no-store' })
+    .then(r => (r.ok ? r.json() : null))
+    .then(incoming => {
+      if (incoming && (incoming.rev || 0) !== lastRev) {
+        _absorbState(incoming);
+        render();            // playEntrance() self-suppresses via _animSuppressed()
+        tickLastUpdate();
+        setStatus('live');
+      }
+    })
+    .catch(() => { /* transient */ });
+});
+
 // ===== Subtask tree helpers =====
 function countSubtasks(nodes) {
   let total = 0, done = 0;
@@ -3741,6 +3769,13 @@ function playEntrance() {
   const els = Array.from(document.querySelectorAll('.card[data-card-id]'));
   if (!els.length) return;
   const seen = _loadSeen();
+  // #337 — on a tab-refocus re-sync, don't cascade: mark everything seen and
+  // bail, so the board just appears current instead of re-flying to catch up.
+  if (_animSuppressed()) {
+    els.forEach(el => seen.add(el.dataset.cardId));
+    _saveSeen(seen);
+    return;
+  }
   const unseen = els.filter(el => !seen.has(el.dataset.cardId));
   if (unseen.length) {
     // Stagger so cards cascade in; cap total at ~1.2s so a big board (or the
@@ -5117,11 +5152,14 @@ function handleCardAdded({ card }) {
   if (!body) { render(); return; }
 
   const el = renderCardCompact(card);
-  el.classList.add('popping-in');
+  // #337 — suppress the pop during a tab-refocus flush (queued SSE backlog);
+  // the card just appears in place instead of joining a re-fly burst.
+  const animate = !_animSuppressed();
+  if (animate) el.classList.add('popping-in');
   // Done column groups by day-header; easiest: append to body, full render
   // will regroup on next poll. For Ideas/Backlog/InProgress/Blocked: append.
   body.appendChild(el);
-  el.addEventListener('animationend', () => el.classList.remove('popping-in'), { once: true });
+  if (animate) el.addEventListener('animationend', () => el.classList.remove('popping-in'), { once: true });
   markCardSeen(card.id);   // #313 — got .popping-in live; don't re-animate via .entering on a later reconnect/refresh
   refreshColumnCount(card.column);
   // If a brand-new card is born directly into In Progress, treat it as
