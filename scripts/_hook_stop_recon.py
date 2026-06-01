@@ -199,6 +199,27 @@ def main() -> int:
             json.dumps(payload_out, indent=2, ensure_ascii=False))
     except OSError:
         pass
+
+    # BLOCKING backstop (the LIVE 100% guarantee). If this turn did substantive
+    # work but ran no card.py action, refuse to end the turn and tell Claude to
+    # card it NOW. Emitting {"decision":"block","reason":...} on stdout is the
+    # Claude Code Stop-hook contract for "don't stop yet". This can fire at most
+    # ONCE per stop: on the forced continuation Claude Code sets
+    # stop_hook_active=true, which the loop guard above short-circuits to exit 0.
+    # An inprogress-only gap (no edits/ships) is NOT blocking — it just left a
+    # deferred recon_pending.json note above, so a card legitimately in flight
+    # across sessions never traps the user.
+    if uncarded_risk:
+        block_reason = (
+            "Board-steward LIVE backstop: this turn made "
+            f"{act['edits']} file edit(s) / {act['ship_signals']} ship-signal(s) "
+            "but ran NO card.py add/move/fly — the work is un-carded. Before you "
+            "finish, card it now: `card.py add --column task --title \"<verb+noun>\"` "
+            "→ `card.py fly <n> inprogress` → `card.py fly <n> done --writeup "
+            "\"<commits/files/verification>\"`. If this turn was genuinely "
+            "read-only/explanatory, say so in one line and stop again."
+        )
+        print(json.dumps({"decision": "block", "reason": block_reason}))
     return 0
 
 

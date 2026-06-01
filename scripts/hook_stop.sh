@@ -2,12 +2,14 @@
 # board-steward Stop hook for #279 STOP-RECON-HOOK.
 #
 # Fires when the agent finishes responding (session sign-off). Reads the Stop
-# JSON from stdin, hands it to the recon helper which checks whether this
-# session's work got carded + whether anything is still In-Progress, and (only
-# if there's a gap) writes board/recon_pending.json for the NEXT session to
-# surface. The live "never-miss on sign-off" backstop.
+# JSON from stdin, hands it to the recon helper which checks whether this turn's
+# work got carded + whether anything is still In-Progress. It always writes
+# board/recon_pending.json on a gap (deferred backstop), AND — on un-carded work —
+# emits {"decision":"block","reason":...} on stdout to refuse the stop so Claude
+# cards it NOW (the LIVE 100% guarantee). Single-shot via the helper's
+# stop_hook_active loop guard. The live "never-miss on sign-off" backstop.
 #
-# Must be SILENT and never block. Exits 0 always; hard timeout 5s.
+# Hard timeout 5s. Silent (exit 0, no output) unless the helper emits a block.
 
 set +e
 set -u
@@ -24,13 +26,18 @@ PAYLOAD="$(cat)"
 
 # 5s hard timeout (a large session transcript takes a moment to scan); macOS has
 # no `timeout`, so background + kill-on-overrun. Session-end, so no user latency.
-(
-  printf '%s' "${PAYLOAD}" | python3 "${PYHELPER}" &
+# CAPTURE the helper's stdout (NOT >/dev/null): on an un-carded-work gap it emits
+# {"decision":"block","reason":...}, which we must pass through to our own stdout
+# for Claude Code to honor. stderr is still discarded.
+OUT="$(
+  printf '%s' "${PAYLOAD}" | python3 "${PYHELPER}" 2>/dev/null &
   pid=$!
   ( sleep 5 ; kill -9 "${pid}" 2>/dev/null ) &
   watcher=$!
   wait "${pid}" 2>/dev/null
   kill -9 "${watcher}" 2>/dev/null
-) >/dev/null 2>&1
+)"
 
+# Emit the decision JSON (if any) so a block reaches Claude Code; empty = no block.
+[ -n "${OUT}" ] && printf '%s\n' "${OUT}"
 exit 0

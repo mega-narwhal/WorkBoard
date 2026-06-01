@@ -10,9 +10,10 @@ The older UserPromptSubmit hook is still available (--hook user-prompt-submit)
 for users who want per-prompt protocol nudges. `--hook both` installs both.
 
 Usage:
-    install_hooks.py                              # install SessionStart (recommended)
-    install_hooks.py --hook user-prompt-submit    # legacy per-prompt hook
-    install_hooks.py --hook both                  # install both
+    install_hooks.py --hook live                  # RECOMMENDED: SessionStart + UserPromptSubmit + Stop (always-on LIVE enforcement, #359/#360)
+    install_hooks.py                              # install SessionStart only
+    install_hooks.py --hook user-prompt-submit    # per-prompt hook alone
+    install_hooks.py --hook both                  # session-start + user-prompt-submit (legacy)
     install_hooks.py --dry-run
     install_hooks.py --uninstall                  # remove ALL board-steward hooks
     install_hooks.py --status                     # report current state
@@ -172,11 +173,13 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--hook", choices=("session-start", "user-prompt-submit",
-                                       "pre-tool-use", "stop", "both", "all"),
+                                       "pre-tool-use", "stop", "both", "all", "live"),
                     default="session-start",
-                    help="which hook(s) to install. 'both' = session-start + user-prompt-submit "
-                         "(legacy alias). 'all' = session-start + pre-tool-use (#102 auto-link) "
-                         "+ stop (#279 sign-off recon).")
+                    help="which hook(s) to install. 'live' (RECOMMENDED going-forward) = "
+                         "session-start + user-prompt-submit (per-turn lifecycle nudge, #360) "
+                         "+ stop (blocking sign-off backstop, #279) — the always-on LIVE "
+                         "enforcement set. 'both' = session-start + user-prompt-submit (legacy). "
+                         "'all' = session-start + pre-tool-use (#102 auto-link) + stop.")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--uninstall", action="store_true", help="remove ALL board-steward hooks")
     ap.add_argument("--status", action="store_true")
@@ -198,6 +201,11 @@ def main() -> int:
         # current recommended combo: SessionStart + PreToolUse + Stop
         # (digest in / flash on edit / reconcile on sign-off; no per-prompt nag)
         selected = {"session-start", "pre-tool-use", "stop"}
+    elif args.hook == "live":
+        # LIVE going-forward enforcement (#359/#360): digest in (SessionStart) +
+        # per-turn lifecycle nudge (UserPromptSubmit) + blocking sign-off backstop
+        # (Stop) so a turn can't end with un-carded work. The always-on set.
+        selected = {"session-start", "user-prompt-submit", "stop"}
     else:
         selected = {args.hook}
 
