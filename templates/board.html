@@ -322,7 +322,7 @@
   #board {
     display: flex;
     gap: 8px;
-    padding: 12px 12px 28px;
+    padding: 12px;
     overflow: auto;
     height: calc(100% - 48px);
     align-items: flex-start;
@@ -336,6 +336,11 @@
     align-self: flex-start;
     flex-shrink: 0;
     max-height: 100%;
+    /* A little breathing room so a tall column doesn't hug the page's bottom
+       edge. Padding on the wrapper (not the #board scroll container, whose
+       padding-bottom is dropped in the overflow region) — lands after the
+       last column, so it never adds gaps between stacked columns. */
+    padding-bottom: 28px;
   }
   /* Bottom-40% drop-hint: when dragging a column over the lower half of a
      target column, show a dashed bottom edge that says "drop to stack". */
