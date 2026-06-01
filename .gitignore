@@ -24,3 +24,12 @@ telemetry/events.jsonl
 # Conversation-derived training data — private, never commit
 training_data/
 board/_digest_*.txt
+
+# Added by board-steward — local board data may contain secrets
+board/board.json
+board/index.json
+board/extraction_snapshot.json
+board/recon_pending.json
+
+# board server runtime log
+.board-server.log
