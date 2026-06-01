@@ -113,7 +113,7 @@ def _emit_recon_pending(board: Path, candidates: list[dict],
                          banner_num: int | None) -> int:
     """Write recon_pending.json for main Claude to action. Returns 0
     (recon hasn't happened yet — the file is the deliverable). Main Claude
-    reads the file next turn, decides moves, calls card.py move/fly, and
+    reads the file next turn, decides moves, calls card.py fly, and
     deletes the file when done."""
     pending_path = board.parent / "recon_pending.json"
     activity = _build_activity_digest(events, max_chars=12000)
@@ -125,8 +125,8 @@ def _emit_recon_pending(board: Path, candidates: list[dict],
             "You (main Claude) have the full session context. Read this "
             "file, decide which of the listed cards should move based on "
             "the activity log AND your conversation memory, then apply "
-            "moves via `card.py move <num> <col> [--writeup TEXT]` or "
-            "`card.py fly <num> <col> --note TEXT`. Delete this file "
+            "moves via `card.py fly <num> <col> [--writeup TEXT] "
+            "[--note TEXT]`. Delete this file "
             "when done. Stay-by-default — only move when a clear signal "
             "(user said skip/nvm/abandoned/we shipped it / matching commit)."
         ),

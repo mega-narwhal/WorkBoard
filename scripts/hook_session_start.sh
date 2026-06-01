@@ -200,7 +200,7 @@ ${digest}
 ${pending_line}
 ${recon_line}
 
-Protocol: every ship/fix/defer → \`${card_py} add\` or \`${card_py} move\` immediately (no batching). Status queries → \`card.py list\` or digest above, not memory. Detail → \`card.py show <num>\`. Never auto-Read board.json.
+Protocol: every ship/fix/defer → \`${card_py} add\` or \`${card_py} fly\` immediately (no batching). Status queries → \`card.py list\` or digest above, not memory. Detail → \`card.py show <num>\`. Never auto-Read board.json.
 </board-steward-session-start>
 MSG
 

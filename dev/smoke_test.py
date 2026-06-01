@@ -45,7 +45,7 @@ MODULES = [
 ]
 
 SUBCOMMANDS = [
-    "add", "update", "move", "fly", "bug", "improve", "subtask", "link",
+    "add", "update", "fly", "bug", "improve", "subtask", "link",
     "column", "show", "recover", "migrate", "repair-links", "prelaunch-check",
     "list", "digest", "query", "wiki", "metrics", "export", "sim", "auto-ship",
     "sweep-status", "progress",
@@ -240,11 +240,11 @@ def section_lifecycle() -> None:
         steps = [
             ("add", cc("add", "--code", "SMOKE", "--column", "task",
                        "--priority", "mid", "--title", "smoke", "--origin", "x")),
-            ("move", cc("move", "SMOKE", "inprogress")),
+            ("fly", cc("fly", "SMOKE", "inprogress", "--pause-ms", "0")),
             ("subtask", cc("subtask", "add", "SMOKE", "a subtask")),
-            ("move-done", cc("move", "SMOKE", "done", "--writeup", "shipped")),
+            ("fly-done", cc("fly", "SMOKE", "done", "--writeup", "shipped", "--pause-ms", "0")),
             ("bug", cc("bug", "SMOKE", "--reason", "regressed")),
-            ("re-done", cc("move", "SMOKE", "done", "--writeup", "fixed")),
+            ("re-done", cc("fly", "SMOKE", "done", "--writeup", "fixed", "--pause-ms", "0")),
             ("improve", cc("improve", "SMOKE", "add a test")),
             ("show", cc("show", "SMOKE")),
             ("list", cc("list", "--column", "done")),

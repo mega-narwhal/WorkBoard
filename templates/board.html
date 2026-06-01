@@ -2269,7 +2269,7 @@ function commitCardDrag() {
   // First ship (no prior subtasks) → append '☑ initial ship'.
   // Subsequent ship → close ONLY lastTouchedSubtask. No force-auto-check
   // across the tree (Done can sit with open subtasks; that's a deliberate
-  // "shipped 1/5" state). Mirrors card.py cmd_move.
+  // "shipped 1/5" state). Mirrors card.py cmd_fly.
   if (targetCol === 'done') {
     card.subtasks = card.subtasks || [];
     const ts = now();

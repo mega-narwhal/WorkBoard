@@ -15,8 +15,8 @@ walking up the tree):
       --title "Let users self-evolve the skill" \\
       --origin "User asked: ..." --link c-board-v3
 
-    # Move card to Done with a writeup
-    card.py move 66 done --writeup-stdin <<< "Shipped foo. Verified bar."
+    # Fly card to Done with a writeup
+    card.py fly 66 done --writeup-stdin <<< "Shipped foo. Verified bar."
 
     # Update fields
     card.py update 14 --priority critical --add-tag urgent
@@ -36,8 +36,8 @@ walking up the tree):
 
 THE 5 CANONICAL LIFECYCLE TRANSITIONS (see VISION.md §4):
     1. CREATE              card.py add --title "..." --column task --priority mid
-    2. BEGIN               card.py move <ref> inprogress
-    3. SHIP                card.py move <ref> done --writeup "..."
+    2. BEGIN               card.py fly <ref> inprogress
+    3. SHIP                card.py fly <ref> done --writeup "..."
     4. REOPEN-AS-BUG       card.py bug <ref>                (Done → IP + 'bug' tag)
     5. REOPEN-AS-IMPROVE   card.py improve <ref> "..."     (Done → IP + new subtask)
 
@@ -133,16 +133,8 @@ def build_parser():
                     help="Accept tags that aren't in board.json tagTaxonomy")
     pu.set_defaults(fn=cmd_update)
 
-    # move
-    pm = sub.add_parser("move", help="change a card's column")
-    pm.add_argument("ref")
-    pm.add_argument("column")
-    pm.add_argument("--writeup", default=None)
-    pm.add_argument("--writeup-stdin", action="store_true")
-    pm.set_defaults(fn=cmd_move)
-
-    # fly — atomic single-hop with side-effect shortcuts + animation pause
-    pfy = sub.add_parser("fly", help="single-hop column change with --bug/--improve/--note shortcuts + animation pause")
+    # fly — THE column-change verb (move was removed: it jumped, fly animates)
+    pfy = sub.add_parser("fly", help="change a card's column (animated); --bug/--improve/--note shortcuts + animation pause")
     pfy.add_argument("ref")
     pfy.add_argument("column", help="destination column id")
     pfy.add_argument("--bug", metavar="REASON", default=None,
@@ -154,6 +146,8 @@ def build_parser():
     pfy.add_argument("--note", metavar="TEXT", default=None,
                      help="append to notes")
     pfy.add_argument("--writeup", default=None, help="set writeup (typical for done)")
+    pfy.add_argument("--writeup-stdin", action="store_true",
+                     help="read writeup from stdin (e.g. heredoc)")
     pfy.add_argument("--pause-ms", type=int, default=400,
                      help="sleep N ms after save (default 400, matches simulateUserDragMove)")
     pfy.set_defaults(fn=cmd_fly)

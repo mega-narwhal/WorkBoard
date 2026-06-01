@@ -243,57 +243,13 @@ def _record_move(card, old_col, new_col):
     })
 
 
-def cmd_move(args, d, board):
-    c = find_card(d, args.ref)
-    old = c["column"]
-    c["column"] = args.column
-    if args.column == "done":
-        ts = now_iso()
-        c["doneAt"] = c.get("doneAt") or ts
-        # Auto-strip the 'bug' tag on done — regression is fixed.
-        if "bug" in (c.get("tags") or []):
-            c["tags"] = [t for t in c["tags"] if t != "bug"]
-        # #188 — every ship is a SUBTASK in the card's cycle history.
-        # No force-auto-check across the tree (Done can sit with open
-        # subtasks; that's a deliberate "shipped 1/5" state).
-        c.setdefault("subtasks", [])
-        if not c["subtasks"]:
-            # First ship of this card — append a single cycle marker.
-            sid = new_subtask_id(c)
-            c["subtasks"].append({
-                "id": sid, "text": "☑ initial ship",
-                "done": True, "doneAt": ts,
-                "createdAt": ts, "children": [],
-            })
-            c["lastTouchedSubtask"] = sid
-        else:
-            # Subsequent ship — close ONLY the cycle subtask in flight
-            # (lastTouchedSubtask). Sibling subtasks stay in whatever
-            # state the user left them.
-            sid = c.get("lastTouchedSubtask")
-            st = _find_subtask_anywhere(c["subtasks"], sid) if sid else None
-            if st and not st.get("done"):
-                st["done"] = True
-                st["doneAt"] = ts
-    elif args.column != "done" and old == "done":
-        c["doneAt"] = None  # un-done
-    wu = maybe_stdin(args.writeup, args.writeup_stdin)
-    if wu is not None:
-        c["writeup"] = wu
-    c["updatedAt"] = now_iso()
-    _set_active_work(d, c, old, args.column)
-    _record_move(c, old, args.column)
-    rev = atomic_save(board, d)
-    suffix = " + writeup" if wu is not None else ""
-    print(f"→ #{c['num']} {old} → {args.column}{suffix} (rev {rev})")
-
-
 def cmd_fly(args, d, board):
     """FLY transition — atomic single-hop column change with side-effect
     shortcuts and a built-in animation pause so chained flies don't race
     the browser's simulateUserDragMove (~320ms).
 
-    `move` mutates data. `fly` mutates data + asserts the animation contract.
+    The ONLY column-change verb. (`move` was removed — it mutated data with
+    no animation contract, so cards jumped; every transition now flies.)
 
     Side-effect flags (apply BEFORE the hop):
       --bug REASON     → add 'bug' tag + 🐞 fix-bug subtask
@@ -309,42 +265,51 @@ def cmd_fly(args, d, board):
     old = c["column"]
     ts = now_iso()
 
+    # Tolerate Namespaces built by internal callers (sim / auto-ship / recover)
+    # that only set ref/column/writeup — every side-effect flag is optional.
+    note     = getattr(args, "note", None)
+    subtask  = getattr(args, "subtask", None)
+    bug       = getattr(args, "bug", None)
+    improve  = getattr(args, "improve", None)
+    pause_ms = getattr(args, "pause_ms", 0)
+    writeup  = maybe_stdin(getattr(args, "writeup", None),
+                           getattr(args, "writeup_stdin", False))
+
     # Side-effects in order: note, plain subtask, bug, improve.
-    if args.note:
+    if note:
         existing = (c.get("notes") or "").rstrip()
-        c["notes"] = (existing + "\n" + args.note) if existing else args.note
-    if args.subtask:
+        c["notes"] = (existing + "\n" + note) if existing else note
+    if subtask:
         c.setdefault("subtasks", [])
         sid = new_subtask_id(c)
         c["subtasks"].append({
-            "id": sid, "text": args.subtask, "done": False,
+            "id": sid, "text": subtask, "done": False,
             "createdAt": ts, "children": [],
         })
         c["lastTouchedSubtask"] = sid
-    if args.bug:
+    if bug:
         c.setdefault("tags", [])
         if "bug" not in c["tags"]:
             c["tags"].append("bug")
         c.setdefault("subtasks", [])
         sid = new_subtask_id(c)
-        reason = (args.bug or "").strip()
+        reason = (bug or "").strip()
         text = f"🐞 fix bug: {reason}" if reason else "🐞 fix bug"
         c["subtasks"].append({
             "id": sid, "text": text, "done": False,
             "createdAt": ts, "children": [],
         })
         c["lastTouchedSubtask"] = sid
-    if args.improve:
+    if improve:
         c.setdefault("subtasks", [])
         sid = new_subtask_id(c)
         c["subtasks"].append({
-            "id": sid, "text": args.improve, "done": False,
+            "id": sid, "text": improve, "done": False,
             "createdAt": ts, "children": [],
         })
         c["lastTouchedSubtask"] = sid
 
-    # The hop. Mirrors cmd_move's done-semantics so cycle-history (#188) and
-    # bug-tag auto-strip stay consistent across both verbs.
+    # The hop + done-semantics: cycle-history (#188) and bug-tag auto-strip.
     c["column"] = args.column
     if args.column == "done":
         c["doneAt"] = c.get("doneAt") or ts
@@ -368,20 +333,20 @@ def cmd_fly(args, d, board):
     elif old == "done":
         c["doneAt"] = None
 
-    if args.writeup:
-        c["writeup"] = args.writeup
+    if writeup is not None:
+        c["writeup"] = writeup
 
     c["updatedAt"] = now_iso()
     _set_active_work(d, c, old, args.column)
     _record_move(c, old, args.column)
     rev = atomic_save(board, d)
 
-    badge = " 🐞" if args.bug else (" ✨" if args.improve else "")
-    suffix = " + writeup" if args.writeup else ""
+    badge = " 🐞" if bug else (" ✨" if improve else "")
+    suffix = " + writeup" if writeup is not None else ""
     print(f"✈ #{c['num']} {old} → {args.column}{badge}{suffix} (rev {rev})")
 
-    if args.pause_ms > 0:
-        time.sleep(args.pause_ms / 1000.0)
+    if pause_ms > 0:
+        time.sleep(pause_ms / 1000.0)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -600,7 +565,7 @@ def cmd_auto_ship(args, d, board):
         print("(re-run with --apply to actually move)")
         return
 
-    # Apply: mirror the cmd_move done branch.
+    # Apply: the canonical done branch (same as cmd_fly).
     old = c["column"]
     c["column"] = "done"
     ts = now_iso()
@@ -651,20 +616,20 @@ def cmd_sim(args, d, board):
     cmd_add(add_ns, d, board)
     num = d["nextNum"] - 1
 
-    # Step 2 — MOVE to In Progress (5s+ default to watch the pulse).
+    # Step 2 — FLY to In Progress (5s+ default to watch the pulse).
     time.sleep(gap_ip)
     d = load(board)  # reload in case anything else touched the board
-    cmd_move(argparse.Namespace(
+    cmd_fly(argparse.Namespace(
         ref=str(num), column="inprogress",
-        writeup=None, writeup_stdin=False,
+        writeup=None, writeup_stdin=False, pause_ms=0,
     ), d, board)
 
-    # Step 3 — MOVE to Done with auto writeup.
+    # Step 3 — FLY to Done with auto writeup.
     time.sleep(gap_done)
     d = load(board)
-    cmd_move(argparse.Namespace(
+    cmd_fly(argparse.Namespace(
         ref=str(num), column="done",
-        writeup=writeup, writeup_stdin=False,
+        writeup=writeup, writeup_stdin=False, pause_ms=0,
     ), d, board)
 
     # Step 4 (optional) — REOPEN AS BUG: simulate a post-ship regression.
@@ -679,10 +644,10 @@ def cmd_sim(args, d, board):
 
         time.sleep(gap_ip)
         d = load(board)
-        cmd_move(argparse.Namespace(
+        cmd_fly(argparse.Namespace(
             ref=str(num), column="done",
             writeup=f"Bug fixed and reshipped. {writeup}",
-            writeup_stdin=False,
+            writeup_stdin=False, pause_ms=0,
         ), d, board)
 
     print(f"✓ sim complete: #{num}")

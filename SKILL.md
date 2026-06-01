@@ -36,10 +36,10 @@ user asks "did we do X?", reach for `card.py` / the digest, not recall.
 
 When the user gives a substantive task, drive its card through these stages — **no "want me to
 add a card?" prompt, just do it.** Use **`fly`** for every cross-column hop: `card.py fly <num>
-<col>` mutates data AND asserts the animation contract (~320ms move + 400ms pause so chained
-flies don't race the browser). It takes the same side-effect flags as the legacy verbs
-(`--bug`, `--improve`, `--subtask`, `--note`, `--writeup`). `card.py move` is the data-only
-fallback when you explicitly don't want the pause.
+<col>` mutates data AND asserts the animation contract (~320ms glide + 400ms pause so chained
+flies don't race the browser). It takes side-effect flags (`--bug`, `--improve`, `--subtask`,
+`--note`, `--writeup`/`--writeup-stdin`). **`fly` is the ONLY column-change verb** — the old
+`move` was removed because it jumped (mutated data with no animation); a card must never jump.
 
 1. **On receipt** — `card.py add --column task --title "<verb + noun>" --priority <c|m|l> --origin "<user's exact phrasing>"`. Card pops into Task.
 2. **On start** — `card.py fly <num> inprogress` the moment work begins. Coral active-work halo pulses.

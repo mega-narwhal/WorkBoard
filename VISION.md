@@ -76,7 +76,7 @@ Target: **<2KB of context** consumed by the board on a typical session start, vs
 The hardest design constraint, and the one that separates this from every kanban that came before it:
 
 - **Auto-card-creation.** When the user says "I have an idea: X," Claude detects intent and runs `card.py add` — a card pops up in Ideas in real time, animated in over 320ms. No "want me to add this?" prompt. No user typing.
-- **Auto-promotion.** When Claude finishes the task, it runs `card.py move <num> done` with a writeup. Card glides to Done. Hooks fire on the user's next prompt to confirm — no out-of-band "are we good?" check needed.
+- **Auto-promotion.** When Claude finishes the task, it runs `card.py fly <num> done` with a writeup. Card glides to Done. Hooks fire on the user's next prompt to confirm — no out-of-band "are we good?" check needed.
 - **Auto-discovery.** When Claude does work matching an open card's notes (e.g. edits a file referenced by an in-progress card), the hook surfaces the linkage so the card gets updated atomically with the code change.
 - **Self-gating.** Dense-keyword skill description so Claude knows when to engage (`shipped`, `deployed`, `merged`, `done`, `blocked`) and when to skip (`debug this`, `explain X`, `refactor Y` — pure code questions that don't ship). No drift in either direction.
 - **Self-telemetry.** Every Steward invocation logs a JSONL event (frequency, issues, read efficiency, bookend compliance) so the skill _measurably improves itself_ over time — the user runs `report.py --days 14` and sees what's broken.
