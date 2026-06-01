@@ -3400,11 +3400,21 @@ function renderModal(card) {
 }
 
 function openModal(cardId) { _openCardId = cardId; render(); }
-function closeModal() {
-  _openCardId = null;
+function _clearModalOverlay() {
   const o = $('#modal-overlay');
   o.classList.remove('open');
   o.innerHTML = '';
+}
+function closeModal() {
+  const wasOpen = _openCardId !== null;
+  _openCardId = null;
+  _clearModalOverlay();
+  // #297 — modal edits (title via blur, notes/origin via input) only updated
+  // state + scheduleSave, never the board DOM, so they didn't appear until some
+  // later render() (e.g. opening another card). Re-render on close so an edit
+  // shows immediately. The in-render() call site below clears the overlay
+  // directly instead of calling this, so there's no render recursion.
+  if (wasOpen) render();
 }
 
 // ===== Subtask render (used inside modal) =====
@@ -3738,7 +3748,7 @@ function render() {
   if (_openCardId) {
     const card = state.cards.find(c => c.id === _openCardId);
     if (card) renderModal(card);
-    else { _openCardId = null; closeModal(); }
+    else { _openCardId = null; _clearModalOverlay(); }   // #297 — no render() recursion mid-render
   }
 
   // #249 — reapply the In-Progress pulse from state after the DOM is rebuilt
