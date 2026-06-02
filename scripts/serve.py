@@ -904,6 +904,22 @@ def _run_server(board_dir, args):
         args.port = _pr.assign(board_dir, preferred=args.port)
     except Exception as e:  # pragma: no cover — fail open to the requested port
         print(f"warn: port assign failed, using {args.port}: {e}", file=sys.stderr)
+    # Singleton guard (#377): if a live server is ALREADY serving THIS board on
+    # its designated port, don't start a second one — exit cleanly. Keeps "one
+    # server per project" true even when both launchd and a session hook race to
+    # spawn (the prior bug: two WorkBoard servers on 7891 AND 7892). Only the
+    # SAME board short-circuits; a different board on the port falls through to
+    # the walk-forward bind below.
+    try:
+        import urllib.request, json as _json
+        with urllib.request.urlopen(f"http://127.0.0.1:{args.port}/health", timeout=0.5) as _r:
+            _h = _json.load(_r)
+        if str(Path(_h.get("board", "")).resolve()) == str(Path(board_dir).resolve()):
+            print(f"board already served at http://127.0.0.1:{args.port} — "
+                  f"not starting a duplicate", file=sys.stderr)
+            return
+    except Exception:
+        pass
     # Bind the designated port; if a stray process holds it, walk forward and
     # re-designate to whatever binds so we never crash on a busy port.
     httpd, port = None, args.port
