@@ -44,6 +44,18 @@ from pathlib import Path
 EVENTS_FILE = Path.home() / ".agents/skills/board-steward/telemetry/events.jsonl"
 
 
+def write_event(event: dict) -> dict:
+    """Append one telemetry event to EVENTS_FILE and return it (ts auto-filled).
+    The SINGLE writer for the events file — CLI main() and in-process callers
+    (card.py verb counting) both go through here so the path + schema live in
+    one place. Caller is responsible for catching errors if it must not fail."""
+    event.setdefault("ts", datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+    EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with EVENTS_FILE.open("a") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    return event
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--event", help="event JSON on the command line (alternative to stdin)")
@@ -59,11 +71,7 @@ def main():
         print(f"bad JSON: {e}", file=sys.stderr)
         sys.exit(2)
 
-    event.setdefault("ts", datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
-
-    EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with EVENTS_FILE.open("a") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    event = write_event(event)
     print(f"logged event ts={event['ts']} trigger={event.get('trigger','?')}")
 
 

@@ -341,6 +341,35 @@ def build_parser():
 
 
 
+# Classification verbs we count (#382). The open question: does surfacing
+# bug/improve in the UserPromptSubmit hook actually shift work off the generic
+# `add` path onto the correct classifier? We log every use of these so report.py
+# can show the add-vs-bug-vs-improve mix over time and answer it with data.
+_COUNTED_VERBS = ("add", "bug", "improve")
+
+
+def _log_verb_usage(args, board) -> None:
+    """Best-effort: record which classification verb was used, via the shared
+    telemetry writer (NOT a parallel counter file). Silent on any failure — a
+    telemetry hiccup must never break a card write."""
+    cmd = getattr(args, "cmd", None)
+    if cmd not in _COUNTED_VERBS:
+        return
+    try:
+        import log_event
+        ev = {"trigger": "card-verb", "verb": cmd,
+              "project": str(Path(board).parent.resolve())}
+        if cmd == "add":
+            # Distinguish a net-new defect filed as `add --tag bug` from a plain
+            # task — that's the alternative to the reopen-only `bug` verb.
+            tags = getattr(args, "tag", None) or []
+            ev["column"] = getattr(args, "column", None)
+            ev["tagged_bug"] = "bug" in tags
+        log_event.write_event(ev)
+    except Exception:
+        pass
+
+
 def main():
     args = build_parser().parse_args()
     board = find_board(args.board)
@@ -365,6 +394,10 @@ def main():
                 args.fn(args, d, board)
             finally:
                 card_state._HOLDING_LOCK = False
+
+    # Count the classification verb AFTER the write committed (so failed ops
+    # aren't counted). Best-effort — never raises. (#382)
+    _log_verb_usage(args, board)
 
 
 if __name__ == "__main__":

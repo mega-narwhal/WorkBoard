@@ -88,6 +88,7 @@ A live work board tracks this project${server_hint}. The board is source of trut
 LIVE lifecycle — keep the board in sync as you work, never batch to session end:
   - Starting a unit of work the user would reference later by # → \`card.py add --column task --title "<verb + noun>" --origin "<their words>"\` then \`card.py fly <n> inprogress\` the moment work begins.
   - Shipped / fixed / deferred / blocked something not yet reflected → \`card.py fly <n> done --writeup "<commits, files, verification>"\` (or \`blocked --note\`).
+  - It's a DEFECT/regression, not a plain task → file it as a bug: net-new → \`card.py add --column task --tag bug ...\`; reopening a Done card → \`card.py bug <n> --reason "..."\`. An enhancement to already-shipped work → \`card.py improve <n> "<what>"\`. (Don't default everything to a generic task.)
   - Pure question / explain / read-only / a conversational micro-turn → do nothing.
 One update per unit. The user must NEVER have to ask "did you update the board?" — that question is a failure of this protocol.
 

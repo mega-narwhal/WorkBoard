@@ -131,6 +131,31 @@ def render(events, scope_label):
     out.append(f"- Writeups filled: {writes['writeups_filled']}")
     out.append("")
 
+    # === Verb classification (#382) ===
+    # Does surfacing bug/improve in the hook shift work off the generic `add`?
+    # These events are emitted by card.py's _log_verb_usage on every add/bug/
+    # improve. The headline number is the "classified" rate: of all card-
+    # creation/reopen actions, how many used a SPECIFIC verb (bug/improve) or a
+    # tagged add, vs a plain untyped `add`.
+    verb_events = [e for e in events if e.get("trigger") == "card-verb"]
+    if verb_events:
+        verbs = Counter(e.get("verb", "?") for e in verb_events)
+        vtot = len(verb_events)
+        adds = [e for e in verb_events if e.get("verb") == "add"]
+        tagged_bug_adds = sum(1 for e in adds if e.get("tagged_bug"))
+        plain_adds = sum(1 for e in adds
+                         if not e.get("tagged_bug") and (e.get("column") != "ideas"))
+        classified = vtot - plain_adds   # bug/improve verbs + tagged/idea adds
+        out.append("## 🏷️  Verb classification (add vs bug vs improve)")
+        for v, c in verbs.most_common():
+            out.append(f"- `{v}`: {c} ({100.0*c/vtot:.0f}%)")
+        out.append(f"- of `add`s, tagged a bug: {tagged_bug_adds}/{len(adds)}")
+        out.append(f"- **classified rate** (specific verb or tag, not a plain task): "
+                   f"{classified}/{vtot} ({100.0*classified/vtot:.0f}%)")
+        out.append("  _Watch this trend after the hook started naming bug/improve "
+                   "(#382): rising = the nudge is working._")
+        out.append("")
+
     # === Drift ===
     out.append("## 🔍 Drift detection")
     out.append(f"- Total drift flagged: {drift_flagged}")
