@@ -156,6 +156,23 @@ http://127.0.0.1:7891."*); if the project has a `CONTEXT.md`, append the §18 Bo
 **Don't ask "should I scan your history?"** — the skill knows what to do. Only prompt if
 `discover.py` returns 0 sessions AND no MEMORY.md.
 
+### Standing up a board on request (the NL trigger)
+
+When the user *asks* — "create a new workboard", "set up a board", "start tracking this
+project" — treat it as the bootstrap above, don't make them run `install.sh` by hand:
+
+- **For the current project** (`$(pwd)`): run the `serve.py --bootstrap` recipe above.
+- **For a different/second project**: `./install.sh --project <dir>` (full install + bootstrap
+  there), or `serve.py --project <dir> --bootstrap` for just the board.
+
+**Port designation is automatic — never ask the user which port or which board.** Each project
+owns a stable port for life, assigned lowest-free from **7891 upward** and persisted in
+`~/.board-steward/port-assignments.json` (`port_registry.assign()`). WorkBoard keeps 7891, the
+next project gets 7892, and so on — `serve.py` self-corrects at bind time so two projects passing
+the same preferred port can never collide (#374). Claude picks *which* board to open from context
+(the project you're working in); the user can later open another by just asking ("open the
+workboard for &lt;project&gt;"), which resolves that project's designated port and opens it.
+
 ### Default columns on install
 
 The template `board.json` ships with these columns left-to-right: `task`, `backlog`,
