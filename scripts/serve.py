@@ -920,24 +920,25 @@ def _run_server(board_dir, args):
             return
     except Exception:
         pass
-    # Bind the designated port; if a stray process holds it, walk forward and
-    # re-designate to whatever binds so we never crash on a busy port.
-    httpd, port = None, args.port
-    for _try in range(8):
+    # Bind the DESIGNATED port and only that port. ThreadingHTTPServer sets
+    # SO_REUSEADDR, so a TIME_WAIT left by our own just-exited server clears —
+    # retry briefly to ride it out. We deliberately do NOT walk to a different
+    # port: the designation is the contract (a 2nd server for this board already
+    # exited via the singleton guard above), so silently drifting to another port
+    # would just recreate the duplicate-board mess this fix exists to kill (#377).
+    # If the port is genuinely held by something else, fail loudly — launchd retries.
+    httpd, last_err = None, None
+    for _try in range(10):
         try:
-            httpd = ThreadingHTTPServer((args.host, port), BoardHandler)
+            httpd = ThreadingHTTPServer((args.host, args.port), BoardHandler)
             break
-        except OSError:
-            port += 1
-    if httpd is None:  # exhausted — let the final bind raise loudly
-        httpd = ThreadingHTTPServer((args.host, port), BoardHandler)
-    if port != args.port:
-        args.port = port
-        try:
-            import port_registry as _pr
-            _pr.set_port(board_dir, port)  # persist what actually bound
-        except Exception:
-            pass
+        except OSError as e:
+            last_err = e
+            time.sleep(0.3)
+    if httpd is None:
+        print(f"error: could not bind {args.host}:{args.port} ({last_err}) — "
+              f"another process holds this board's designated port", file=sys.stderr)
+        sys.exit(1)
     url = f"http://{args.host}:{args.port}"
     # #107 — register port BEFORE serve_forever so card.py / hooks resolve us
     # O(1) instead of probing 7891-7900. Best-effort; if the registry write
