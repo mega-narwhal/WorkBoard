@@ -800,6 +800,14 @@ def _resolve_board_dir(args):
                     title_override=args.title,
                     share=args.share)
     print(f"bootstrapped new board at {board_dir} (profile={args.profile})", file=sys.stderr)
+    # Lock in this board's designated port BEFORE the fill-stream starts, so a
+    # fresh 2nd board (whose caller passed the same 7891) streams its cards to
+    # its OWN server, not whoever already owns 7891 (#374).
+    try:
+        import port_registry as _pr
+        args.port = _pr.assign(board_dir, preferred=args.port)
+    except Exception:
+        pass
     # Stream cards from prior Claude sessions in a background thread so the
     # user watches their history fill in. Opt out with --no-discover.
     if not args.no_discover:
@@ -886,7 +894,34 @@ def _run_server(board_dir, args):
     BoardHandler.board_dir = board_dir
     BoardHandler.auth_token = args.auth_token or None
     _load_initial_cache(board_dir)
-    httpd = ThreadingHTTPServer((args.host, args.port), BoardHandler)
+    # Resolve THIS board's designated port (#374). Idempotent + sticky: the
+    # board keeps the same port across restarts, and a second project whose
+    # caller also passed 7891 gets bumped to its own designation instead of
+    # colliding. args.port is the *preferred* port; assign() honours it only if
+    # free, else hands back this board's owned port.
+    try:
+        import port_registry as _pr
+        args.port = _pr.assign(board_dir, preferred=args.port)
+    except Exception as e:  # pragma: no cover — fail open to the requested port
+        print(f"warn: port assign failed, using {args.port}: {e}", file=sys.stderr)
+    # Bind the designated port; if a stray process holds it, walk forward and
+    # re-designate to whatever binds so we never crash on a busy port.
+    httpd, port = None, args.port
+    for _try in range(8):
+        try:
+            httpd = ThreadingHTTPServer((args.host, port), BoardHandler)
+            break
+        except OSError:
+            port += 1
+    if httpd is None:  # exhausted — let the final bind raise loudly
+        httpd = ThreadingHTTPServer((args.host, port), BoardHandler)
+    if port != args.port:
+        args.port = port
+        try:
+            import port_registry as _pr
+            _pr.set_port(board_dir, port)  # persist what actually bound
+        except Exception:
+            pass
     url = f"http://{args.host}:{args.port}"
     # #107 — register port BEFORE serve_forever so card.py / hooks resolve us
     # O(1) instead of probing 7891-7900. Best-effort; if the registry write
