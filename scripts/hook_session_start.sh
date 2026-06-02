@@ -38,8 +38,73 @@ if [ -z "${board_path}" ]; then
   fi
 fi
 
-# Stay silent for non-board projects.
-[ -z "${board_path}" ] && exit 0
+# ── First-run auto-bootstrap (#onboarding) ────────────────────────────────────
+# No board found by walk-up. On a FRESH plugin install (no global onboarded
+# marker yet) we bootstrap ONE board in the current project, so the very first
+# session after `claude plugin install` opens a live, self-filling board instead
+# of the silent "huh, now what?" dead-end. The /plugin path only wires hooks —
+# it never ran install.sh's bootstrap+autostart+open — so we do it here.
+# Fires AT MOST ONCE (the marker) and NEVER in $HOME / "/" (too broad — we'd
+# litter a board in a non-project dir). After that first board, additional boards
+# are explicit (serve.py --bootstrap, or just ask Claude). Opt out with
+# BOARD_NO_AUTO_BOOTSTRAP=1 (CI/headless/demo).
+onboard_marker="${HOME}/.board-steward/.onboarded"
+if [ -z "${board_path}" ]; then
+  # Already onboarded once, or opted out → preserve the original silent exit.
+  if [ -f "${onboard_marker}" ] || [ "${BOARD_NO_AUTO_BOOTSTRAP:-0}" = "1" ]; then
+    exit 0
+  fi
+
+  # Resolve the project root: git top-level if we're in a repo, else CWD.
+  proj_root="$(cd "${PWD}" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)"
+  [ -z "${proj_root}" ] && proj_root="${PWD}"
+
+  # Refuse $HOME / filesystem root. Drop a one-time hint instead, then stay quiet.
+  if [ "${proj_root}" = "${HOME}" ] || [ "${proj_root}" = "/" ]; then
+    hint_marker="${HOME}/.board-steward/.home-hint-shown"
+    if [ ! -f "${hint_marker}" ]; then
+      mkdir -p "${HOME}/.board-steward" 2>/dev/null
+      : > "${hint_marker}"
+      cat <<'HINT'
+<board-steward-session-start>
+WorkBoard is installed, but this session started in your home directory — not a
+project. To create your first board, cd into a project folder and start Claude
+there (it bootstraps automatically), or just ask: "set up a board for this project".
+</board-steward-session-start>
+HINT
+    fi
+    exit 0
+  fi
+
+  # Bootstrap: spawn serve.py --bootstrap (creates board/ + mines history into a
+  # one-by-one fly-in fill), install login autostart so it survives reboots, and
+  # mark onboarded so this never re-fires. The browser auto-opens via the shared
+  # block below once /health reports the server live.
+  hook_dir="$(dirname "$0")"
+  serve_py="${hook_dir}/serve.py"
+  board_dir="${proj_root}/board"
+  want_port="$(python3 -c "import sys; sys.path.insert(0, sys.argv[2]); import port_registry as pr; print(pr.assign(sys.argv[1]))" "${board_dir}" "${hook_dir}" 2>/dev/null || echo 7891)"
+  if [ -f "${serve_py}" ]; then
+    nohup python3 "${serve_py}" --project "${proj_root}" --port "${want_port}" --bootstrap \
+      >"${proj_root}/.board-server.log" 2>&1 </dev/null &
+    disown 2>/dev/null || true
+    # Wait for the server to bind + write board.json (bootstrap_board is sync).
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+      curl -s --max-time 0.3 "http://127.0.0.1:${want_port}/health" >/dev/null 2>&1 && break
+      sleep 0.4
+    done
+    # Survive reboots (the gap that killed the server today). Non-fatal.
+    python3 "${hook_dir}/install_autostart.py" --project "${proj_root}" --port "${want_port}" \
+      >/dev/null 2>&1 || true
+    # Mark onboarded so we never auto-create a second board.
+    mkdir -p "${HOME}/.board-steward" 2>/dev/null
+    : > "${onboard_marker}"
+    # Hand off to the shared digest + auto-open path below.
+    board_path="${board_dir}/board.json"
+  fi
+  # If bootstrap didn't produce a board.json, revert to the original silence.
+  [ -f "${board_path}" ] || exit 0
+fi
 
 project_dir="$(dirname "$(dirname "${board_path}")")"
 board_dir="$(dirname "${board_path}")"
