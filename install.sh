@@ -97,6 +97,14 @@ if [ "$DEMO" = "1" ]; then
   # so without this every call exits 1 → 0 cards. _LLM_ENV (hourly_common) reads
   # this and overrides CLAUDE_CONFIG_DIR for claude -p only. Empty → uses ~/.claude.
   export BOARD_REAL_CLAUDE_CONFIG_DIR="${ORIG_CLAUDE_CONFIG_DIR}"
+  # Isolate the PORT REGISTRY too (#381). Without this the demo writes its temp
+  # board dir into the REAL ~/.board-steward/*.json; the temp dir then lingers in
+  # /tmp after teardown so it's never GC'd (Path.exists() stays true) and it
+  # permanently hogs a port. Pointing both registry files into DEMO_HOME keeps
+  # the real registry pristine AND gives the demo a clean slate, so its preferred
+  # port is always free → serve.py binds exactly what install.sh expects.
+  export BOARD_ASSIGNMENTS="${DEMO_HOME}/port-assignments.json"
+  export BOARD_REGISTRY="${DEMO_HOME}/port-registry.json"
   # Temp project so board/ is created in throwaway space (never pollutes a real
   # dir). This gives the clean "empty start" new-user experience. To see the
   # "watch your board fill from history" moment instead, add --harvest <a real
@@ -168,6 +176,16 @@ else
 fi
 
 # ---- 2. bootstrap board + server --------------------------------------------
+# Resolve THIS board's sticky designated port from the registry BEFORE we launch
+# or health-check (#381). port_registry bumps the preferred port when it's
+# already designated to another project (multi-project, or a leftover demo);
+# serve.py binds whatever the registry returns, so install.sh must learn that
+# SAME port now — otherwise it polls the wrong one and falsely reports "server
+# did not come up." assign() is idempotent + sticky, so serve.py's own assign()
+# returns this exact value. Board dir / scripts / port passed as argv so a
+# project path with spaces (e.g. "Edu Platform") can't break the quoting.
+RESOLVED_PORT="$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[2]); import port_registry as p; print(p.assign(sys.argv[1], preferred=int(sys.argv[3])))' "${PROJECT}/board" "${SCRIPTS}" "${PORT}" 2>/dev/null || true)"
+if printf '%s' "$RESOLVED_PORT" | grep -Eq '^[0-9]+$'; then PORT="$RESOLVED_PORT"; fi
 say "bootstrapping board in ${PROJECT} (port ${PORT})"
 # Stop any stale server on this exact port first (demo re-runs).
 if lsof -ti "tcp:${PORT}" >/dev/null 2>&1; then
