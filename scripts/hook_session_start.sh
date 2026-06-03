@@ -71,7 +71,7 @@ if [ -z "${board_path}" ]; then
   if [ "${proj_root}" = "${HOME}" ] || [ "${proj_root}" = "/" ]; then
     hook_dir="$(dirname "$0")"
     projects="$(BOARD_NO_AUTO_OPEN=1 python3 "${hook_dir}/discover2.py" \
-                  --list-projects --top 5 --days 30 --format lines 2>/dev/null)"
+                  --list-projects --top 5 --days 3 --format lines 2>/dev/null)"
     if [ -n "${projects}" ]; then
       cat <<EOF
 <board-steward-session-start>

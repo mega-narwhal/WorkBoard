@@ -28,8 +28,9 @@ INSTALL (one time)
 NEXT SESSION START  (hook_session_start.sh)
   • board found by cwd-walk?  → render it (digest + idempotent open). Done.
   • else, in $HOME / "/" and NOT yet .onboarded:
-      1. run  discover2.py --list-projects --top 5 --days 30 --format lines
+      1. run  discover2.py --list-projects --top 5 --days 3 --format lines
          - content-based (session cwds), NOT a filesystem walk
+         - 3-day window: cheap on every $HOME session, surfaces what's active now
          - ranked by SUBSTANCE (sessions·10 + edits·2 + prompts + recency·15)
          - child cwds FOLDED into nearest tracked ancestor (no git-walk)
          - $HOME / Desktop / /tmp subtrees excluded
@@ -108,7 +109,7 @@ trying to draw it itself.
 
 ```bash
 # enumerate is clean (no subdirs / $HOME / tmp; score + more present)
-python3 scripts/discover2.py --list-projects --top 5 --days 30
+python3 scripts/discover2.py --list-projects --top 5 --days 3
 
 # legacy still runs from its archived home
 python3 scripts/discover2.py --legacy --project ~/Desktop/WorkBoard --days 1
