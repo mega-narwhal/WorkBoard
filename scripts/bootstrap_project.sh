@@ -84,7 +84,7 @@ try:
 except Exception: print(0,0)" 2>/dev/null || echo "0 0")"
   mins="${emin%% *}"; chunks="${emin##* }"
   if [ "${mins:-0}" != "0" ]; then
-    echo "FLY_ESTIMATE: ~${mins} min to fill (${chunks} chunks of history). Grab a coffee and let it finish before heavy work — starting new edits while cards fly in can interleave with the fill and muddle the board. You CAN keep working (nothing breaks), but it's cleaner to let it settle first."
+    echo "FLY_ESTIMATE: Estimated time to finish: ~${mins} min. Recommended action: let the cards finish filling so you can see your pending actions."
   fi
 fi
 

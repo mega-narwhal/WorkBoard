@@ -96,10 +96,11 @@ That assigns the project's port, mines its history into a one-by-one fly-in,
 opens the browser, and marks onboarding done. Do NOT pick for them.
 
 When you announce the board, RELAY the `FLY_ESTIMATE:` line from that script's
-output to the user verbatim (it's the calculated "~N min to fill, grab a coffee"
-message). If asked what happens when they work while cards fly: nothing breaks —
-the board keeps a server lock so writes serialize — but new edits can interleave
-with the backfill and muddle ordering, so it's cleaner to let the fill settle.
+output to the user verbatim (it's the calculated "estimated time to finish +
+recommended action" message — short and sweet, don't pad it). If asked what
+happens when they work while cards fly: nothing breaks — the board keeps a server
+lock so writes serialize — but new edits can interleave with the backfill and
+muddle ordering, so it's cleaner to let the fill settle.
 </board-steward-session-start>
 EOF
     else
