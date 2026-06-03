@@ -215,48 +215,139 @@ def _human_ago(ts: datetime, now: datetime) -> str:
     return f"{int(secs // 86400)}d ago"
 
 
-def list_projects(since: datetime | None) -> list[dict]:
+# cwds that are never a "project" — we don't offer a board for the home dir,
+# the filesystem root, or the bare Desktop (those are launch dirs, not work).
+_NON_PROJECT_DIRS = {
+    str(Path.home()),
+    str(Path.home() / "Desktop"),
+    "/",
+}
+# Whole subtrees that are scratch / demo / sandbox, never a real project (the
+# /tmp demo runs from --demo were polluting the picker). Prefix match.
+_NON_PROJECT_PREFIXES = ("/tmp", "/private/tmp", "/var/folders")
+
+
+def _is_non_project(cwd: str) -> bool:
+    if cwd in _NON_PROJECT_DIRS:
+        return True
+    return any(cwd == p or cwd.startswith(p.rstrip("/") + "/")
+               for p in _NON_PROJECT_PREFIXES)
+
+
+def _substance_score(n_sessions: int, n_prompts: int, n_edits: int,
+                     last_ts: datetime, now: datetime) -> float:
+    """Rank a project by how much REAL work happened there, recency-weighted
+    (#375). Deliberately transparent (emitted in the record — VISION §4 'no
+    hidden magic'): sessions are the strongest 'this is a recurring project'
+    signal, edits show depth, prompts show engagement, and recency breaks ties
+    toward what was touched lately. A one-off junk session (1 session, a couple
+    prompts, no edits, stale) scores near zero and sinks below the top-5."""
+    days = (now - last_ts).total_seconds() / 86400.0
+    recency = 1.0 / (1.0 + max(0.0, days))      # 1.0 today → 0.5 at 1d → decays
+    return round(n_sessions * 10 + n_edits * 2 + n_prompts * 1 + recency * 15, 2)
+
+
+def list_projects(since: datetime | None,
+                  include_home: bool = False) -> list[dict]:
     """Enumerate the project working-dirs the user actually worked in, ranked by
-    recency (#375). Uses the SAME convo/session signal the task extractor uses —
-    the `cwd` recorded on every harvested session turn (harvest_jsonl +
-    harvest_history) — NOT a filesystem walk of $HOME and NOT git-root resolution
-    (deliberately simple, per the agreed design). Historical session cwds are
-    meaningful even when the installer's launch-cwd is $HOME: the user cd's into
-    a real repo to work, so that repo's path is what each turn records.
+    SUBSTANCE (#375), not bare recency. Uses the SAME signal the task extractor
+    uses — the `cwd` recorded on every harvested session turn (harvest_jsonl +
+    harvest_history) — NOT a filesystem walk of $HOME and NOT git-root
+    resolution. Historical session cwds are meaningful even when the installer's
+    launch-cwd is $HOME: the user cd's into a real repo to work, so that repo's
+    path is what each turn records.
 
     A 'project' here is a distinct cwd. Subdir cwds of one repo may appear as
     separate entries — acceptable for a single-pick list; resolving them to a
-    common root is the explicitly-deferred git-walk we chose not to build."""
+    common root is the explicitly-deferred git-walk we chose not to build.
+    $HOME / Desktop / "/" are excluded (launch dirs, not work) unless
+    include_home. Returns ALL matching projects sorted best-first; callers slice
+    the top-N for the picker."""
     events = harvest_jsonl(since)
     seen = {(e.get("meta") or {}).get("sessionId") for e in events}
     events.extend(harvest_history(since, exclude_sessions=seen))  # gap-fill
     now = datetime.now(timezone.utc)
     agg: dict[str, dict] = {}
     for e in events:
-        if e["kind"] != "user_prompt":
+        kind = e["kind"]
+        if kind not in ("user_prompt", "asst_msg"):
             continue
         cwd = (e.get("meta") or {}).get("cwd") or ""
         if not cwd:
             continue
         a = agg.get(cwd)
         if a is None:
-            a = {"cwd": cwd, "n_prompts": 0, "sessions": set(), "last_ts": e["ts"]}
+            a = {"cwd": cwd, "n_prompts": 0, "n_edits": 0,
+                 "sessions": set(), "last_ts": e["ts"]}
             agg[cwd] = a
-        a["n_prompts"] += 1
+        if kind == "user_prompt":
+            a["n_prompts"] += 1
+        elif e.get("files"):        # asst turn that touched files = real work
+            a["n_edits"] += 1
         sid = (e.get("meta") or {}).get("sessionId")
         if sid:
             a["sessions"].add(sid)
         if e["ts"] > a["last_ts"]:
             a["last_ts"] = e["ts"]
-    rows = sorted(agg.values(), key=lambda r: r["last_ts"], reverse=True)
-    return [{
-        "project": r["cwd"],
-        "name": Path(r["cwd"]).name or r["cwd"],
-        "last_activity": r["last_ts"].isoformat(),
-        "ago": _human_ago(r["last_ts"], now),
-        "n_prompts": r["n_prompts"],
-        "n_sessions": len(r["sessions"]),
-    } for r in rows]
+
+    # Drop non-project launch dirs FIRST so they can't become a fold target
+    # (else WorkBoard would fold into ~/Desktop).
+    if not include_home:
+        for k in [k for k in agg if _is_non_project(k)]:
+            del agg[k]
+
+    # Fold child cwds into their nearest tracked ancestor (#375 picker de-noise):
+    # you cd into subdirs of one repo, so WorkBoard/scripts should count toward
+    # WorkBoard — not list as a separate "project". Pure path-nesting, NOT a
+    # git-walk. Sessions are UNION-merged (a session spanning parent+child must
+    # not double-count); prompts/edits sum; last_ts takes the max.
+    keys = list(agg.keys())
+
+    def _nearest_ancestor(c: str) -> str | None:
+        best = None
+        for other in keys:
+            if other != c and c.startswith(other.rstrip("/") + "/"):
+                if best is None or len(other) > len(best):
+                    best = other
+        return best
+
+    root_of: dict[str, str] = {}
+    for c in keys:
+        cur, guard = c, 0
+        while guard < 64:
+            p = _nearest_ancestor(cur)
+            if p is None:
+                break
+            cur, guard = p, guard + 1
+        root_of[c] = cur
+    for c in keys:
+        r = root_of[c]
+        if r == c or r not in agg or c not in agg:
+            continue
+        src, dst = agg[c], agg[r]
+        dst["n_prompts"] += src["n_prompts"]
+        dst["n_edits"] += src["n_edits"]
+        dst["sessions"] |= src["sessions"]
+        if src["last_ts"] > dst["last_ts"]:
+            dst["last_ts"] = src["last_ts"]
+        del agg[c]
+
+    rows = []
+    for r in agg.values():
+        score = _substance_score(len(r["sessions"]), r["n_prompts"],
+                                 r["n_edits"], r["last_ts"], now)
+        rows.append({
+            "project": r["cwd"],
+            "name": Path(r["cwd"]).name or r["cwd"],
+            "last_activity": r["last_ts"].isoformat(),
+            "ago": _human_ago(r["last_ts"], now),
+            "n_prompts": r["n_prompts"],
+            "n_edits": r["n_edits"],
+            "n_sessions": len(r["sessions"]),
+            "score": score,
+        })
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    return rows
 
 
 # ---------- main ----------
@@ -282,6 +373,10 @@ def main():
                     help="#375: enumerate distinct project cwds from session "
                          "history (ranked by recency) instead of extracting "
                          "tasks. For the install-time project picker.")
+    ap.add_argument("--top", type=int, default=5,
+                    help="--list-projects: show only the top-N most SUBSTANTIAL "
+                         "projects (default 5; 0 = all). The remaining count is "
+                         "reported as 'more' so the picker can offer to expand.")
     ap.add_argument("--format", choices=("json", "lines"), default="json",
                     help="--list-projects output: json (default) or tab-"
                          "separated 'path<TAB>label' lines for shell pickers.")
@@ -293,20 +388,30 @@ def main():
 
     if args.list_projects:
         rows = list_projects(since)
+        total = len(rows)
+        shown = rows[: args.top] if args.top and args.top > 0 else rows
+        more = max(0, total - len(shown))
         if args.format == "lines":
-            for r in rows:
-                label = (f"{r['project']}  "
-                         f"({r['ago']}, {r['n_prompts']} prompt"
-                         f"{'s' if r['n_prompts'] != 1 else ''})")
+            for r in shown:
+                label = (f"{r['name']} — {r['project']}  "
+                         f"({r['ago']}, {r['n_sessions']} session"
+                         f"{'s' if r['n_sessions'] != 1 else ''}, "
+                         f"{r['n_edits']} edits)")
                 sys.stdout.write(f"{r['project']}\t{label}\n")
+            if more > 0:
+                sys.stdout.write(f"\t… {more} more not shown "
+                                 f"(re-run with --top 0 for all)\n")
         else:
-            json.dump({"projects": rows}, sys.stdout, indent=2,
-                      ensure_ascii=False, default=str)
+            json.dump({"projects": shown, "total": total,
+                       "shown": len(shown), "more": more},
+                      sys.stdout, indent=2, ensure_ascii=False, default=str)
             sys.stdout.write("\n")
         return
 
     if args.legacy:
-        legacy = Path(__file__).resolve().parent / "discover.py"
+        # discover.py was archived to dev/ (#deadweight cleanup); still runnable
+        # via this off-by-default flag for anyone who wants the old session shape.
+        legacy = Path(__file__).resolve().parent.parent / "dev" / "discover.py"
         os.execvp(sys.executable, [sys.executable, str(legacy),
                                    "--project", str(args.project),
                                    "--days", str(args.days)])

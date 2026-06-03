@@ -333,7 +333,10 @@ def _stream_discovered_cards(project_root: Path, board_dir: Path,
     harvest_root mines history from a different dir than the board lives in
     (isolated sim/--demo); defaults to the board's own project."""
     script_dir = Path(__file__).resolve().parent
-    discover_py = script_dir / ("discover.py" if legacy else "discover2.py")
+    # discover2.py is the live engine; the legacy session-shaped discover.py was
+    # archived to dev/ (it's reachable only via the off-by-default --legacy flag).
+    discover_py = (script_dir.parent / "dev" / "discover.py") if legacy \
+        else (script_dir / "discover2.py")
     card_py = script_dir / "card.py"
     if not discover_py.exists() or not card_py.exists():
         return

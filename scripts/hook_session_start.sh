@@ -59,17 +59,49 @@ if [ -z "${board_path}" ]; then
   proj_root="$(cd "${PWD}" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)"
   [ -z "${proj_root}" ] && proj_root="${PWD}"
 
-  # Refuse $HOME / filesystem root. Drop a one-time hint instead, then stay quiet.
+  # Launched from $HOME / "/" (the usual case — users start Claude in a terminal
+  # at home, not inside a repo). We do NOT litter a board here. Instead we
+  # ENUMERATE the projects the user actually worked in (from session history,
+  # content-based — never a filesystem walk) and HAND OFF to Claude to draw a
+  # picker. The user picks ONE; Claude runs bootstrap_project.sh for it. This
+  # re-offers every session until the first board exists (the onboard_marker
+  # check above exits before here once one does) — so it's never a one-shot miss
+  # (the old .home-hint-shown gate is gone; that's what made the offer vanish on
+  # the 2nd session). Opt out with BOARD_NO_AUTO_BOOTSTRAP=1.
   if [ "${proj_root}" = "${HOME}" ] || [ "${proj_root}" = "/" ]; then
-    hint_marker="${HOME}/.board-steward/.home-hint-shown"
-    if [ ! -f "${hint_marker}" ]; then
-      mkdir -p "${HOME}/.board-steward" 2>/dev/null
-      : > "${hint_marker}"
+    hook_dir="$(dirname "$0")"
+    projects="$(BOARD_NO_AUTO_OPEN=1 python3 "${hook_dir}/discover2.py" \
+                  --list-projects --top 5 --days 30 --format lines 2>/dev/null)"
+    if [ -n "${projects}" ]; then
+      cat <<EOF
+<board-steward-session-start>
+WorkBoard is installed and this session started in your home directory. The user
+has NOT created their first board yet. From their Claude session history, these
+are the projects they've actually worked in (most substantial first; tab =
+path<TAB>label):
+
+${projects}
+
+ACTION (do this now, don't wait to be asked): call AskUserQuestion to ask which
+ONE project should get a WorkBoard. Make each listed project an option (label =
+the project name, description = the "(ago, N sessions, N edits)" detail). Exactly
+one board on first run — they can add more later by asking "open a new workboard
+for <project>". If their project isn't listed, they can type its path.
+
+When they pick a project at PATH, create + open the board by running:
+
+  bash "${hook_dir}/bootstrap_project.sh" "PATH"
+
+That assigns the project's port, mines its history into a one-by-one fly-in,
+opens the browser, and marks onboarding done. Do NOT pick for them.
+</board-steward-session-start>
+EOF
+    else
       cat <<'HINT'
 <board-steward-session-start>
-WorkBoard is installed, but this session started in your home directory — not a
-project. To create your first board, cd into a project folder and start Claude
-there (it bootstraps automatically), or just ask: "set up a board for this project".
+WorkBoard is installed, but this session started in your home directory and no
+prior project history was found to enumerate. To create your first board, cd into
+a project folder and start Claude there, or ask: "set up a board for <path>".
 </board-steward-session-start>
 HINT
     fi
