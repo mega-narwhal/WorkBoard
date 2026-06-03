@@ -161,16 +161,31 @@ def _flatten_events(project: Path, days: int,
     return out
 
 
+# Ancestors of (nearly) every project — $HOME, ~/Desktop, the FS roots. A
+# session run from one of these must NOT count as "in" a project below it, or
+# every home session leaks into every board (the Edu-on-WorkBoard bug #508).
+_BROAD_ROOTS = {Path.home(), Path.home() / "Desktop", Path("/"), Path("/Users")}
+
+
 def _cwd_in_project(event: dict, project: Path) -> bool:
     cwd = (event.get("meta") or {}).get("cwd") or ""
     if not cwd:
-        return True   # no cwd info = keep
+        return True   # no cwd info = keep (memory/plans/convo carry none)
     try:
         cp = Path(cwd).resolve()
         pp = project.resolve()
-        return cp == pp or pp in cp.parents or cp in pp.parents
     except OSError:
         return False
+    if cp == pp:
+        return True
+    if pp in cp.parents:
+        return True   # cwd is a subdir of the project (e.g. WorkBoard/scripts)
+    # cwd is an ANCESTOR of the project (session run from a parent dir): keep
+    # only when that parent is itself a real project, never a broad root —
+    # otherwise $HOME/Desktop leak into every board (#508).
+    if cp in pp.parents and cp not in _BROAD_ROOTS:
+        return True
+    return False
 
 
 def _anchor_offset_days(project: Path) -> int:
@@ -307,9 +322,12 @@ def _filter_events(events: list[dict], project: Path,
     """Apply project-scope, date-pin and tier-boundary filters in order.
     Returns the filtered events, or None if a filter emptied them (the
     caller then returns — matching the original early-return behavior)."""
-    # Filter to project scope: drop jsonl events whose cwd is unrelated.
-    scoped = [e for e in events if e["kind"] != "user_prompt"
-              or _cwd_in_project(e, project)]
+    # Filter to project scope: drop ANY cwd-bearing event whose cwd is unrelated
+    # — not just user_prompt. asst_msg work-turns also carry cwd, and skipping
+    # them here is exactly how another project's work (Edu) leaked onto this
+    # board (#508). Events with no cwd (memory/plans/convo) are kept by
+    # _cwd_in_project's empty-cwd rule.
+    scoped = [e for e in events if _cwd_in_project(e, project)]
     # #285 never-empty first-run seed: a brand-new repo has ZERO in-project
     # user prompts, so project-scoping strips all conversation signal and the
     # board comes up blank on day one — silently breaking VISION's "see your
