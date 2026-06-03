@@ -50,10 +50,42 @@ fi
 # BOARD_NO_AUTO_BOOTSTRAP=1 (CI/headless/demo).
 onboard_marker="${HOME}/.board-steward/.onboarded"
 if [ -z "${board_path}" ]; then
-  # Already onboarded once, or opted out → preserve the original silent exit.
-  if [ -f "${onboard_marker}" ] || [ "${BOARD_NO_AUTO_BOOTSTRAP:-0}" = "1" ]; then
+  # Opted out → preserve the original silent exit (CI/headless/demo).
+  if [ "${BOARD_NO_AUTO_BOOTSTRAP:-0}" = "1" ]; then
     exit 0
   fi
+
+  # Already onboarded but the CWD-walk + finder found no board (the usual
+  # "launched claude in $HOME" case). DON'T silently exit — that's the bug that
+  # let Claude freelance a generic greeting instead of opening the board. The
+  # board IS the home screen: resolve the user's REGISTERED board from the sticky
+  # port-assignments map and fall through to the shared block below, which probes
+  # its server, auto-opens the browser iff sseClients==0 (compulsory open at
+  # SessionStart = at launch, without re-popping a tab already viewing), and
+  # injects the digest. Multi-board tie-break = most-recently-updated board.json
+  # (only WorkBoard exists today; Edu/HFTAgents would compete here later).
+  if [ -f "${onboard_marker}" ]; then
+    hook_dir="$(dirname "$0")"
+    board_path="$(python3 -c "
+import sys; sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+import port_registry as pr
+best = None
+for d in pr.assignments():
+    bj = Path(d) / 'board.json'
+    if bj.exists():
+        m = bj.stat().st_mtime
+        if best is None or m > best[0]:
+            best = (m, str(bj))
+print(best[1] if best else '')
+" "${hook_dir}" 2>/dev/null)"
+    # No registered board with a live board.json → nothing to open; stay silent.
+    [ -n "${board_path}" ] && [ -f "${board_path}" ] || exit 0
+    # Fall through to the shared probe/open/digest block below.
+  fi
+fi
+
+if [ -z "${board_path}" ]; then
 
   # Resolve the project root: git top-level if we're in a repo, else CWD.
   proj_root="$(cd "${PWD}" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)"
