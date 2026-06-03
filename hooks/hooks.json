@@ -31,6 +31,15 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_pre_tool_use.sh"
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_subagent_spawn.sh"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -40,6 +49,17 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_stop.sh"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_subagent_stop.sh"
           }
         ]
       }
