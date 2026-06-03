@@ -3897,21 +3897,26 @@ function sortColumnsNewestFirst() {
   // newest-first sort makes every column newest-first. Tie-break on num desc.
   state.cards.sort((a, b) => _cardSortTs(b) - _cardSortTs(a) || (b.num || 0) - (a.num || 0));
 }
-// Record every card's current top (FIRST in FLIP), keyed by stable card id.
-function _captureCardTops() {
-  const m = new Map();
+function reshuffleOnceAfterFill() {
+  if (!state || _view !== 'board') return;
+  let key = 'wb:reshuffled';
+  try { key = _reshuffleKey(); if (localStorage.getItem(key)) return; } catch (_) {}
+  // FIRST — record each card's current top before we reorder.
+  const first = new Map();
   document.querySelectorAll('.card[data-card-id]').forEach(el => {
-    m.set(el.dataset.cardId, el.getBoundingClientRect().top);
+    first.set(el.dataset.cardId, el.getBoundingClientRect().top);
   });
-  return m;
-}
-// INVERT + PLAY against a captured-tops map: each mover jumps back to its old
-// spot (lifted a hair), then releases to rest, staggered so the column cascades.
-function _flipPlay(first) {
+  // Mutate → persist → rebuild in sorted order (LAST).
+  sortColumnsNewestFirst();
+  scheduleSave();
+  render();
+  try { localStorage.setItem(key, '1'); } catch (_) {}   // one-shot, forever
+  // Skip the animation (but keep the sort) when it can't be seen or shouldn't run.
   const reduce = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)
                  || document.hidden;
-  if (reduce) return;                         // sort already applied; just don't animate
+  if (reduce) return;
   const els = Array.from(document.querySelectorAll('.card[data-card-id]'));
+  // INVERT — jump each mover back to its old spot instantly (lifted a hair).
   els.forEach(el => {
     const f = first.get(el.dataset.cardId);
     if (f == null) return;
@@ -3921,6 +3926,7 @@ function _flipPlay(first) {
     el.style.transform = 'translateY(' + dy + 'px) scale(1.05)';
   });
   void document.body.offsetWidth;             // force one reflow so INVERT sticks
+  // PLAY — release to rest, staggered so the column cascades into order.
   let i = 0;
   els.forEach(el => {
     if (!el.style.transform) return;          // only the movers
@@ -3937,42 +3943,6 @@ function _flipPlay(first) {
     });
   });
 }
-function reshuffleOnceAfterFill() {
-  if (!state || _view !== 'board') return;
-  let key = 'wb:reshuffled';
-  try { key = _reshuffleKey(); if (localStorage.getItem(key)) return; } catch (_) {}
-  const first = _captureCardTops();
-  sortColumnsNewestFirst();                   // all columns, newest-first
-  scheduleSave();
-  render();
-  try { localStorage.setItem(key, '1'); } catch (_) {}   // one-shot, forever
-  _flipPlay(first);
-}
-// Reshuffle ONE column newest-first, in place — used for on-demand testing
-// (window.wbReshuffle) and available for a future per-column sort control. Only
-// that column's cards move; everything else stays put.
-function reshuffleColumn(colId) {
-  if (!state || _view !== 'board' || !colId || !Array.isArray(state.cards)) return;
-  const first = _captureCardTops();
-  // Sort only this column's cards among their own existing array slots, so other
-  // columns' positions are untouched (render filters per column, preserving order).
-  const slots = [], sub = [];
-  state.cards.forEach((c, i) => { if (c.column === colId) { slots.push(i); sub.push(c); } });
-  if (sub.length < 2) return;
-  sub.sort((a, b) => _cardSortTs(b) - _cardSortTs(a) || (b.num || 0) - (a.num || 0));
-  slots.forEach((pos, k) => { state.cards[pos] = sub[k]; });
-  scheduleSave();
-  render();
-  _flipPlay(first);
-}
-// Console/test hook: wbReshuffle('done') reshuffles one column; wbReshuffle()
-// clears the one-shot guard and reshuffles all (re-runnable). Harmless global.
-window.wbReshuffle = function (col) {
-  if (col) { reshuffleColumn(col); return 'reshuffled column: ' + col; }
-  try { localStorage.removeItem(_reshuffleKey()); } catch (_) {}
-  reshuffleOnceAfterFill();
-  return 'reshuffled all columns';
-};
 
 // ===== Tag colour + taxonomy lookup =====
 // Single source of truth for "what colour is this tag" used by card chips,
