@@ -337,6 +337,12 @@ def list_projects(since: datetime | None,
 
     rows = []
     for r in agg.values():
+        # Drop drive-by dirs: 0 edits AND a single session = you cd'd in once and
+        # never touched a file (backup dirs, stray inspections). NOT the substance
+        # threshold-gate we declined — every real project has edits, so none are
+        # hidden; this only removes zero-work noise that floats into a small top-5.
+        if r["n_edits"] == 0 and len(r["sessions"]) <= 1:
+            continue
         score = _substance_score(len(r["sessions"]), r["n_prompts"],
                                  r["n_edits"], r["last_ts"], now)
         rows.append({
