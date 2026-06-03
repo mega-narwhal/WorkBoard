@@ -718,8 +718,13 @@ def _build_arg_parser():
                     help="Override auto-detected project name in the board title")
     ap.add_argument("--no-discover", action="store_true",
                     help="On bootstrap, do NOT mine prior Claude sessions into cards (default: do)")
-    ap.add_argument("--discover-days", type=int, default=7,
-                    help="Discover sessions touched in the last N days (default 7)")
+    ap.add_argument("--discover-days", type=int, default=2,
+                    help="FLY-IN window: how many days of work to mine into "
+                         "cards on bootstrap (default 2). NOT the picker — the "
+                         "first-run project picker enumerates separately via "
+                         "discover2 --list-projects --days 3 in the hook. The "
+                         "tier-fly anchors this window on the project's LAST "
+                         "session, so an idle gap doesn't empty it.")
     ap.add_argument("--discover-max", type=int, default=20,
                     help="Cap how many tasks become cards on bootstrap (default 20, discover mode only)")
     ap.add_argument("--bootstrap-mode", choices=["haiku"], default="haiku",

@@ -173,6 +173,58 @@ def _cwd_in_project(event: dict, project: Path) -> bool:
         return False
 
 
+def _anchor_offset_days(project: Path) -> int:
+    """Days between now and the project's LAST session (0 = worked today).
+
+    The fly-in window must END at the last session, not at `now` — otherwise an
+    idle gap (e.g. didn't work for 2 days) empties a 2-day window and nothing
+    flies in. We read ~/.claude/history.jsonl (the cheap all-projects prompt
+    chronicle: one record per typed prompt with {project=cwd, timestamp=ms}),
+    take the newest record whose cwd matches this project (same nesting rule as
+    _cwd_in_project), and return whole days since. Returns 0 (anchor = now =
+    legacy behavior) if history is missing/pruned for this project."""
+    hist = Path.home() / ".claude" / "history.jsonl"
+    if not hist.exists():
+        return 0
+    try:
+        pp = project.resolve()
+    except OSError:
+        return 0
+    newest_ms = 0
+    try:
+        with hist.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                cwd = o.get("project") or ""
+                raw = o.get("timestamp")
+                if not cwd or not raw:
+                    continue
+                try:
+                    cp = Path(cwd).resolve()
+                except OSError:
+                    continue
+                if not (cp == pp or pp in cp.parents or cp in pp.parents):
+                    continue
+                try:
+                    ms = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if ms > newest_ms:
+                    newest_ms = ms
+    except OSError:
+        return 0
+    if not newest_ms:
+        return 0
+    last = datetime.fromtimestamp(newest_ms / 1000.0, tz=timezone.utc)
+    return max(0, (datetime.now(timezone.utc) - last).days)
+
+
 def _snapshot_path(board: Path) -> Path:
     return board.parent / "extraction_snapshot.json"
 
@@ -554,15 +606,28 @@ def run(project: Path, board: Path, port: int, days: int,
     # one 'solo' pass. Both tiers FORCE --show-lifecycle so they actually FLY
     # (the harvest path used to add cards flat = a pop, not a fly).
     if tier_fly and mode == "haiku":
+        # Anchor the whole fly-in on the project's LAST session, not on `now`.
+        # off = days since last work (0 = worked today). Shifting both the
+        # window length AND the tier boundary by `off` slides the window back so
+        # it covers the `days` days of ACTUAL work ending at the last session.
+        # Example: last session 5d ago, days=2 → tier-1 [now-6,now-5] (most
+        # recent work day) + tier-2 [now-7,now-6] (older day) = work over the
+        # 7d-ago→5d-ago span. off=0 reduces to the legacy now-anchored windows.
+        off = _anchor_offset_days(project)
+        if off:
+            print(f"  anchor: last session ~{off}d ago → fly window slides to "
+                  f"cover {days}d of work ending then (not an empty recent gap)",
+                  file=sys.stderr)
         if days > 1:
-            _run_window(project, board, card_py, days=1, end_days_ago=0,
+            _run_window(project, board, card_py, days=off + 1, end_days_ago=off,
                         show_lifecycle=True, pace_s=pace_s, phase="replay",
                         seed_if_empty=seed_if_empty, **common)
-            _run_window(project, board, card_py, days=days, end_days_ago=1,
+            _run_window(project, board, card_py, days=off + days,
+                        end_days_ago=off + 1,
                         show_lifecycle=True, pace_s=max(pace_s / 5, 0.0),
                         phase="speedup", seed_if_empty=False, **common)
         else:
-            _run_window(project, board, card_py, days=1, end_days_ago=0,
+            _run_window(project, board, card_py, days=off + 1, end_days_ago=off,
                         show_lifecycle=True, pace_s=pace_s, phase="solo",
                         seed_if_empty=seed_if_empty, **common)
         return
