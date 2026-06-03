@@ -69,6 +69,25 @@ python3 "${hook_dir}/install_autostart.py" --project "${proj_root}" --port "${wa
 mkdir -p "${HOME}/.board-steward" 2>/dev/null
 : > "${HOME}/.board-steward/.onboarded"
 
+# Upfront fill estimate → a coffee message the caller relays to the USER. Only
+# on a FRESH bootstrap (open-not-recreate has no fill running). Cheap: harvest +
+# bucketize only, no haiku. Printed as a FLY_ESTIMATE: line so the announcing
+# Claude can relay it; the resolved port stays the final stdout line.
+if [ -n "${bootstrap_flag}" ]; then
+  est="$(python3 "${hook_dir}/hourly_extractor.py" --project "${proj_root}" \
+    --board "${board_dir}/board.json" --days 2 --bucket-min 30 --chunk-size 2 \
+    --workers 8 --estimate-only 2>/dev/null)"
+  emin="$(printf '%s' "${est}" | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin); m=d.get('eta_min',0)
+    print(max(1,round(m)) if m and m>0.5 else (1 if d.get('chunks') else 0), d.get('chunks',0))
+except Exception: print(0,0)" 2>/dev/null || echo "0 0")"
+  mins="${emin%% *}"; chunks="${emin##* }"
+  if [ "${mins:-0}" != "0" ]; then
+    echo "FLY_ESTIMATE: ~${mins} min to fill (${chunks} chunks of history). Grab a coffee and let it finish before heavy work — starting new edits while cards fly in can interleave with the fill and muddle the board. You CAN keep working (nothing breaks), but it's cleaner to let it settle first."
+  fi
+fi
+
 # Open the board — REQUIRED for the Haiku fly-in (it's gated on a live viewer).
 # Only if nothing is already viewing it (sseClients==0), mirroring the hook.
 if [ "${BOARD_NO_AUTO_OPEN:-0}" != "1" ]; then

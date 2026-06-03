@@ -695,6 +695,39 @@ def run(project: Path, board: Path, port: int, days: int,
                 seed_if_empty=seed_if_empty, **common)
 
 
+# Calibrated wall-time of one haiku extraction call (chunk), thinking OFF
+# (MAX_THINKING_TOKENS=0). Measured ~5–7s/call; 6 is the planning midpoint. Used
+# only for the upfront "≈N min to fill" estimate shown to the user at bootstrap.
+_SEC_PER_CHUNK = 6.0
+
+
+def estimate_fill(project: Path, days: int, bucket_min: int, chunk_size: int,
+                  workers: int, sources: set | None) -> dict:
+    """Cheap pre-flight estimate of the fly-in: harvest + bucketize ONLY (no
+    haiku), so we can tell the user "≈N min to fill, grab a coffee" upfront.
+
+    Mirrors the tier-fly window: anchors on the project's last session (offset),
+    covering `days` days of work ending there — the combined span of tier-1 +
+    tier-2 is one window [now-(off+days), now-off], so a single bucketize gives
+    the total chunk count. eta = ceil(chunks/workers) * _SEC_PER_CHUNK."""
+    import math
+    off = _anchor_offset_days(project)
+    full_days = off + max(days, 1)
+    events = _flatten_events(project, full_days, sources=sources)
+    chunks = 0
+    buckets = 0
+    if events:
+        scoped = _filter_events(events, project, None, off, seed_if_empty=False)
+        if scoped:
+            sorted_buckets, _b, chunk_list = _bucketize(
+                scoped, bucket_min, True, 0, chunk_size)
+            buckets = len(sorted_buckets)
+            chunks = len(chunk_list)
+    eta_sec = int(math.ceil(chunks / max(workers, 1)) * _SEC_PER_CHUNK) if chunks else 0
+    return {"offset_days": off, "buckets": buckets, "chunks": chunks,
+            "eta_sec": eta_sec, "eta_min": round(eta_sec / 60.0, 1)}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", type=Path, required=True)
@@ -754,7 +787,19 @@ def main():
                          "adopter), seed the first fill from recent cross-project "
                          "history so the board isn't blank on day one. Off by "
                          "default (strict project scope); bootstrap turns it on.")
+    ap.add_argument("--estimate-only", action="store_true",
+                    help="don't extract — harvest+bucketize only and print a "
+                         "JSON fill estimate {chunks,eta_sec,eta_min} so the "
+                         "caller can tell the user '≈N min to fill'. No haiku.")
     args = ap.parse_args()
+    if args.estimate_only:
+        est = estimate_fill(
+            args.project.resolve(), args.days, args.bucket_min,
+            args.chunk_size, args.workers,
+            ({s.strip() for s in args.sources.split(",") if s.strip()}
+             if args.sources else None))
+        print(json.dumps(est))
+        return
     os.environ["BOARD_SERVER"] = f"http://127.0.0.1:{args.port}"
     run(args.project.resolve(), args.board.resolve(), args.port,
         args.days, args.show_lifecycle, args.pace, args.max_buckets,
