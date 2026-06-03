@@ -95,12 +95,23 @@ When they pick a project at PATH, create + open the board by running:
 That assigns the project's port, mines its history into a one-by-one fly-in,
 opens the browser, and marks onboarding done. Do NOT pick for them.
 
-When you announce the board, RELAY the `FLY_ESTIMATE:` line from that script's
-output to the user verbatim (it's the calculated "estimated time to finish +
-recommended action" message — short and sweet, don't pad it). If asked what
-happens when they work while cards fly: nothing breaks — the board keeps a server
-lock so writes serialize — but new edits can interleave with the backfill and
-muddle ordering, so it's cleaner to let the fill settle.
+When you announce the board, use THIS exact shape — relay verbatim, don't pad:
+
+1. One line: the board is live + its port (http://127.0.0.1:<port>).
+2. The FLY_ESTIMATE: line from the script's output, verbatim (the calculated
+   "estimated time to finish + recommended action" message — short and sweet).
+3. Then this block, exactly as written:
+
+A few things you can do from here:
+- Add more boards later by asking "open a new workboard for <project>" (e.g. Edu Platform or HFTAgents).
+- The board survives sessions — a digest gets auto-injected at each session start so it's never forgotten.
+- Just talk naturally as you work ("shipped X", "fixed Y", "what's left?") and cards move themselves.
+
+What would you like to work on?
+
+If asked what happens when they work while cards fly: nothing breaks — the board
+keeps a server lock so writes serialize — but new edits can interleave with the
+backfill and muddle ordering, so it's cleaner to let the fill settle.
 </board-steward-session-start>
 EOF
     else
