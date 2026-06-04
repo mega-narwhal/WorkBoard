@@ -248,13 +248,18 @@ If you find yourself responding to a substantive prompt without having read thes
    │       └── install_*.py        per-OS autostart + hook wiring (launchd/systemd/taskscheduler)
    │
    ├── docs/                           deep-dive docs (linked from SKILL.md, read on demand)
-   │   └── BOOTSTRAP.md                PART 1 — one-time bootstrap/install (History Replay, §J inline, hooks, autostart, full schema); read only when first creating a board
+   │   ├── BOOTSTRAP.md                PART 1 — one-time bootstrap/install (History Replay, §J inline, hooks, autostart, full schema); read only when first creating a board
+   │   └── ARCH_REDESIGN_V2.md         the v2 re-architecture record (multi-board + reconciliation) — what/why/files/commits/tests for reuse
    └── dev/                            NOT shipped — sim/test/pipeline (smoke_test, render_session_raw, sim_*)
    ```
 
    **How to read the tree:** BRANCHES (`card.* serve.* hourly_* discover2.*`) own a concern; LEAVES (`_*`, support) are depended on, never depend up. Dependency flows **downward only** (branch → leaf), so there are **no cycles**. New work attaches to the branch that owns its concern, or becomes a new leaf — it never rewrites a parent.
 
    **Invariant:** 33 script modules, all import clean, no cycles, one-directional coupling. The 3 historical smells (oversized files, god-functions, repo↔skill duplication) are CLOSED — don't reintroduce them.
+
+   **Redesign history (read before a big change so you reuse, not re-derive):**
+   - **v1** (≈May 30–31, #307/#308) — internal cleanliness: file-size split, god-function kill, repo↔plugin de-dup. (The "godfunc" redesign.)
+   - **v2** (2026-06-04) — capabilities: **multi-board** (one board per project) + **reconciliation** (keep the board factually correct at Bootstrap + SessionStart) + launch-hardening. Full record: **`docs/ARCH_REDESIGN_V2.md`**. Regression-tested by the **`/e2e`** skill (`~/.claude/skills/e2e/`).
 
    **Extending the architecture (how future work MUST slot in — the rule that keeps it from falling apart):**
    - **Isolate, don't rewrite.** New behavior goes in the module that owns that concern, or a NEW focused module — never by restructuring a parent or rewriting a sibling that already works. A feature should be an *addition* at the right boundary, not a reshuffle of the tree.
