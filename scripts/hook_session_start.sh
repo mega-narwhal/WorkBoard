@@ -205,6 +205,12 @@ HINT
     : > "${onboard_marker}"
     # Hand off to the shared digest + auto-open path below.
     board_path="${board_dir}/board.json"
+    # Don't ALSO run the SessionStart recon this turn: the bootstrap fill is
+    # still streaming cards in the background, and its own end-of-fill
+    # reconcile_sweep already covers the freshly-mined history. A second
+    # concurrent recon would race the fill's card.py writes (lost-update on the
+    # full-replace POST) for no added signal. Resumed sessions still reconcile.
+    just_bootstrapped=1
   fi
   # If bootstrap didn't produce a board.json, revert to the original silence.
   [ -f "${board_path}" ] || exit 0
@@ -265,7 +271,7 @@ fi
 # CLAUDECODE is UNSET so reconcile_sweep takes the cheap Haiku path, not the
 # prose recon_pending path (which is reserved for the in-session main agent).
 # Opt out with BOARD_NO_RECON=1 (CI/headless/demo).
-if [ "${BOARD_NO_RECON:-0}" != "1" ] && [ -f "${board_path}" ]; then
+if [ "${just_bootstrapped:-0}" != "1" ] && [ "${BOARD_NO_RECON:-0}" != "1" ] && [ -f "${board_path}" ]; then
   extractor="$(dirname "$0")/hourly_extractor.py"
   if [ -f "${extractor}" ]; then
     env -u CLAUDECODE nohup python3 "${extractor}" \
