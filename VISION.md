@@ -83,7 +83,7 @@ The hardest design constraint, and the one that separates this from every kanban
 
 ## Non-goals
 
-- **Not a multi-user team tool.** No accounts, no permissions, no real-time collab between humans. This is the agent-and-one-human board. Teams use Linear.
+- **Not a multi-_user_ team tool.** No accounts, no permissions, no real-time collab between humans. This is the agent-and-one-human board. Teams use Linear. (Multi-_board_ — one board per project for the SAME human — IS supported; see "Multiple boards" below. "Multi-board" ≠ "multi-user".)
 - **Not a cloud product.** Everything is local files + localhost HTTP. The user owns their data; no signup; no telemetry leaves the machine.
 - **Not a project-management tool.** No Gantt charts, no resource allocation, no sprint planning. The board reflects the work, it doesn't direct it.
 
@@ -106,6 +106,30 @@ Within 5 seconds, three things happen with **zero user input**:
 The user did not type a single thing into the kanban. They glanced at it once and knew the full state of the work.
 
 **That is the bar.** Anything less is just another kanban.
+
+---
+
+## Multiple boards (one per project)
+
+The original design assumed **one board per machine**. It now supports **many boards at once — one per project** — for the same single human. This is not multi-user; it's one person who works across several repos and wants each to have its own living board.
+
+The workflow has **two parts**:
+
+### Step 1 — REPEAT HISTORY (one-time bootstrap per board)
+
+When a project gets its first board, `serve.py --bootstrap` (via `bootstrap_project.sh` or the first-run picker) mines that project's prior Claude session history and seeds the board with cards inferred from it — so the board opens already showing the project's recent work, animated in. Each project bootstraps independently; bootstrapping a second project never touches the first.
+
+### Step 2 — LIVE (going forward, multi-board)
+
+Every board is **isolated and self-routing**:
+
+- **Sticky per-project ports.** `port_registry.assign(board_dir)` gives each project a deterministic port (7891 upward) that survives restarts. Two projects can never collide. The server has **no hardcoded port default** — the registry assigns it.
+- **Routing by location.** `card.py add/fly/show` and the hooks resolve *which* board to talk to by walking up from the cwd / edited file for `board/board.json`, then looking up that board's port in the registry (probe only as a fallback). A card filed from inside project A lands on A's board, never B's.
+- **`$HOME` disambiguation = last-active, not mtime.** When Claude opens in `$HOME` (no project in cwd) and several boards exist, the SessionStart hook reopens the **last-active board** — the one whose cards the human last mutated, or the one they just bootstrapped — via `port_registry.get_active()` / `set_active()` (`~/.board-steward/last-active`). It does *not* guess by newest `board.json` file mtime (that picked the wrong board when two boards were touched the same session). Falls back to mtime only when no active pointer exists yet.
+
+`port_registry.py` is the single owner of all cross-board state in `~/.board-steward/`: the liveness registry, the sticky port-assignment map, and the last-active pointer.
+
+# Pending: no UI for switching between boards from within one board's HTML view (today you open each board's own URL/port). # Pending: no "list all my boards" command surfacing every registered board + its port in one place.
 
 ---
 
@@ -188,7 +212,9 @@ If you find yourself responding to a substantive prompt without having read thes
    │   │
    │   └── support                     ── LEAVES: standalone tools ──
    │       ├── digest_compact.py  measure_digest.py  regen_index.py  sweep_status.py
-   │       ├── port_registry.py   archive_done.py    report.py       health_check.py  log_event.py
+   │       ├── port_registry.py   ── owns ALL cross-board state in ~/.board-steward/:
+   │       │                         liveness registry + sticky port-assignments + last-active pointer
+   │       ├── archive_done.py    report.py       health_check.py  log_event.py
    │       └── install_*.py        per-OS autostart + hook wiring (launchd/systemd/taskscheduler)
    │
    ├── docs/                           deep-dive docs (linked from SKILL.md, read on demand)
