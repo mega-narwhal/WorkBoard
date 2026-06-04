@@ -23,8 +23,17 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+# Make the sibling port_registry importable whether this is run as a script
+# (sys.path[0] = its dir) or invoked with an absolute path from the hook.
+_scripts_dir = str(Path(__file__).resolve().parent)
+if _scripts_dir not in sys.path:
+    sys.path.insert(0, _scripts_dir)
 
-PORTS = (7891, 7892, 7893, 7894, 7895)
+
+# Fallback probe window when the registry has no live entry for this board.
+# The registry (port_registry.lookup/assign) is the primary resolver — a board
+# can sit anywhere in 7891-7999, so a fixed 5-port tuple would miss board #6+.
+PROBE_LO, PROBE_HI = 7891, 7900
 PING_TIMEOUT_S = 0.3
 MAX_HOOK_BUDGET_S = 0.8  # total wall time we'll spend before bailing
 
@@ -77,21 +86,37 @@ def matching_cards(board_path: Path, file_abs: str) -> list[dict]:
     return hits
 
 
+def _port_owns_board(port: int, target: str) -> bool:
+    """True iff the server on `port` answers /health naming `target` board dir."""
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health",
+            timeout=PING_TIMEOUT_S,
+        ) as resp:
+            health = json.load(resp)
+        return str(Path(health.get("board") or "").resolve()) == target
+    except Exception:
+        return False
+
+
 def live_port_for(board_path: Path) -> int | None:
-    """Pick the live local port whose /health response names this board's dir.
-    Falls back to scanning all PORTS in order."""
+    """Resolve the live local port serving this board.
+
+    Registry-first (handles any board in 7891-7999, not just the first five):
+    look up the board's designated port and verify via /health. Only if that
+    misses do we fall back to probing PROBE_LO..PROBE_HI — the safety net for an
+    unregistered ad-hoc server. Mirrors card_state._resolve_server_url."""
     target = str(board_path.parent.resolve())
-    for port in PORTS:
-        try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/health",
-                timeout=PING_TIMEOUT_S,
-            ) as resp:
-                health = json.load(resp)
-            if str(Path(health.get("board") or "").resolve()) == target:
-                return port
-        except Exception:
-            continue
+    try:
+        import port_registry
+        cached = port_registry.lookup(board_path.parent)
+        if cached and _port_owns_board(cached, target):
+            return cached
+    except Exception:
+        pass  # registry unavailable → probe fallback
+    for port in range(PROBE_LO, PROBE_HI + 1):
+        if _port_owns_board(port, target):
+            return port
     return None
 
 
