@@ -304,6 +304,11 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
     # Autonomous path: subprocess Haiku.
     print(f"▶ reconciliation sweep: {len(candidates)} non-done card(s)…",
           file=sys.stderr)
+    # Live HUD line so the user knows WHY cards are about to move (#recon-hud) —
+    # shown on both the bootstrap fill HUD and a SessionStart recon.
+    _emit_progress(card_py, board, 0, 1,
+                   "🔄 Reconciling — catching the board up so nothing shipped or important is missed",
+                   "reconcile")
     if banner_num:
         _banner_update_text(card_py, board, banner_num,
                             f"🔍 reconciling {len(candidates)} cards…")
@@ -311,6 +316,8 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
     moves = _llm_reconcile(candidates, events)
     if not moves:
         print("  recon: 0 moves", file=sys.stderr)
+        _emit_progress(card_py, board, 1, 1,
+                       "✓ Reconciled — board already matches reality", "reconcile")
         return 0
 
     n_moved = 0
@@ -342,6 +349,8 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
             print(f"  recon: #{num} → {target}  ({reason[:60]})",
                   file=sys.stderr)
     print(f"  recon: {n_moved} card(s) moved", file=sys.stderr)
+    _emit_progress(card_py, board, 1, 1,
+                   f"✓ Reconciled — {n_moved} card(s) brought up to date", "reconcile")
     return n_moved
 
 

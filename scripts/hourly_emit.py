@@ -205,5 +205,5 @@ def emit_card(card_py: Path, board: Path, card: dict,
 
 __all__ = [
     "_banner_update_text", "_banner_create", "_banner_update", "_banner_finish",
-    "_card_add", "_card_fly", "_replay_transitions", "emit_card",
+    "_emit_progress", "_card_add", "_card_fly", "_replay_transitions", "emit_card",
 ]
