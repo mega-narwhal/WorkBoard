@@ -253,6 +253,25 @@ if [ -n "${server_health}" ]; then
   "$(dirname "$0")/board_autoopen.sh" "${server_port}" "${project_dir}" >/dev/null 2>&1 || true
 fi
 
+# Smart reconciliation (SessionStart, #recon): bring the board to truth BEFORE
+# the user starts — move shipped In-Progress cards → done, surface mandatory
+# points, demote skipped/stale → backlog — via an autonomous Haiku pass. Runs
+# DETACHED so the digest below stays instant; moves animate on the live board
+# over SSE. Self-gating (no Haiku call unless there are non-done cards AND new
+# project activity since the last recon), so a quick re-open costs nothing.
+# CLAUDECODE is UNSET so reconcile_sweep takes the cheap Haiku path, not the
+# prose recon_pending path (which is reserved for the in-session main agent).
+# Opt out with BOARD_NO_RECON=1 (CI/headless/demo).
+if [ "${BOARD_NO_RECON:-0}" != "1" ] && [ -f "${board_path}" ]; then
+  extractor="$(dirname "$0")/hourly_extractor.py"
+  if [ -f "${extractor}" ]; then
+    env -u CLAUDECODE nohup python3 "${extractor}" \
+      --project "${project_dir}" --board "${board_path}" --reconcile-only \
+      >"${project_dir}/.board-recon.log" 2>&1 </dev/null &
+    disown 2>/dev/null || true
+  fi
+fi
+
 # Build digest: counts by column + last shipped card (with relative time).
 digest="$(python3 - "${board_path}" <<'PY' 2>/dev/null
 import json, sys
