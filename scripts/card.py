@@ -347,6 +347,27 @@ def build_parser():
 # can show the add-vs-bug-vs-improve mix over time and answer it with data.
 _COUNTED_VERBS = ("add", "bug", "improve")
 
+# Commands that only READ the board — they must not move the "last-active board"
+# pointer (a background `card.py show --board X` shouldn't make X the board the
+# SessionStart hook reopens at $HOME). Everything else is a mutation and signals
+# "the human is working on this board".
+_READ_ONLY_CMDS = frozenset({
+    "show", "list", "digest", "query", "metrics", "export", "wiki",
+    "progress", "sweep-status", "prelaunch-check", "recover",
+})
+
+
+def _mark_active(args, board) -> None:
+    """Record the mutated board as last-active so SessionStart reopens it at
+    $HOME (replaces the mtime tie-break). Best-effort — never breaks a write."""
+    if getattr(args, "cmd", None) in _READ_ONLY_CMDS:
+        return
+    try:
+        import port_registry
+        port_registry.set_active(Path(board).parent)
+    except Exception:
+        pass
+
 
 def _log_verb_usage(args, board) -> None:
     """Best-effort: record which classification verb was used, via the shared
@@ -398,6 +419,9 @@ def main():
     # Count the classification verb AFTER the write committed (so failed ops
     # aren't counted). Best-effort — never raises. (#382)
     _log_verb_usage(args, board)
+    # Record this board as last-active (mutations only) so the SessionStart hook
+    # reopens the board the human is actually working on. Best-effort. (#mb)
+    _mark_active(args, board)
 
 
 if __name__ == "__main__":

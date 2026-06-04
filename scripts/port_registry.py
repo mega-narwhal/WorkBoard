@@ -20,6 +20,7 @@ from pathlib import Path
 
 REGISTRY_ENV = "BOARD_REGISTRY"
 ASSIGN_ENV = "BOARD_ASSIGNMENTS"
+ACTIVE_ENV = "BOARD_ACTIVE"
 
 # Port window for auto-designation. 7891 onwards, lowest free first — 7891 is
 # assumed least-used, and each project then claims the next gap.
@@ -33,6 +34,12 @@ DEFAULT_PATH = Path.home() / ".board-steward" / "port-registry.json"
 # This survives the server dying (a project keeps its port across restarts);
 # the registry tracks who's live right now, this tracks who OWNS which port.
 ASSIGN_PATH = Path.home() / ".board-steward" / "port-assignments.json"
+# The single board the human last INTERACTED with (a card mutation, a serve, a
+# bootstrap). Used by the SessionStart hook to disambiguate when Claude opens at
+# $HOME with no cwd board and several boards exist: reopen the one in active
+# use, not whichever board.json happens to have the newest file mtime (#mb —
+# mtime picked the wrong board when two boards were edited the same session).
+ACTIVE_PATH = Path.home() / ".board-steward" / "last-active"
 
 
 def registry_path() -> Path:
@@ -47,6 +54,13 @@ def assignments_path() -> Path:
     if env:
         return Path(env).expanduser()
     return ASSIGN_PATH
+
+
+def active_path() -> Path:
+    env = os.environ.get(ACTIVE_ENV)
+    if env:
+        return Path(env).expanduser()
+    return ACTIVE_PATH
 
 
 def _atomic_write_json(p: Path, data: dict) -> None:
@@ -178,6 +192,40 @@ def set_port(board_dir: str | os.PathLike, port: int) -> None:
     a = {k: v for k, v in assignments().items() if Path(k).exists()}
     a[key] = int(port)
     _atomic_write_json(assignments_path(), a)
+
+
+def set_active(board_dir: str | os.PathLike) -> None:
+    """Record `board_dir` as the board the human last interacted with.
+
+    Best-effort and never raises — a failed write here must never break the
+    card mutation / serve / bootstrap that triggered it. The file holds one
+    line: the resolved absolute board dir."""
+    try:
+        key = str(Path(board_dir).resolve())
+        p = active_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(key + "\n")
+        os.replace(tmp, p)
+    except OSError:
+        pass
+
+
+def get_active() -> str | None:
+    """Return the last-active board dir, or None if unset / gone from disk.
+
+    Self-heals: if the recorded board has since been deleted, returns None so
+    the caller falls back (e.g. to mtime) rather than pointing at a dead dir."""
+    try:
+        p = active_path()
+        if not p.exists():
+            return None
+        val = p.read_text().strip()
+    except OSError:
+        return None
+    if not val or not Path(val).exists():
+        return None
+    return val
 
 
 def _now_iso() -> str:

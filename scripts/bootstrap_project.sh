@@ -69,6 +69,11 @@ python3 "${hook_dir}/install_autostart.py" --project "${proj_root}" --port "${wa
 mkdir -p "${HOME}/.board-steward" 2>/dev/null
 : > "${HOME}/.board-steward/.onboarded"
 
+# Explicit create = strong "human is working on THIS board" signal → make it the
+# last-active board so the next $HOME session reopens it (not an mtime guess).
+python3 -c "import sys; sys.path.insert(0, sys.argv[2]); import port_registry as pr; pr.set_active(sys.argv[1])" \
+  "${board_dir}" "${hook_dir}" 2>/dev/null || true
+
 # Upfront fill estimate → a coffee message the caller relays to the USER. Only
 # on a FRESH bootstrap (open-not-recreate has no fill running). Cheap: harvest +
 # bucketize only, no haiku. Printed as a FLY_ESTIMATE: line so the announcing

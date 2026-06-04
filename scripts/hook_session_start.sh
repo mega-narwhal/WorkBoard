@@ -62,14 +62,23 @@ if [ -z "${board_path}" ]; then
   # port-assignments map and fall through to the shared block below, which probes
   # its server, auto-opens the browser iff sseClients==0 (compulsory open at
   # SessionStart = at launch, without re-popping a tab already viewing), and
-  # injects the digest. Multi-board tie-break = most-recently-updated board.json
-  # (only WorkBoard exists today; Edu/HFTAgents would compete here later).
+  # injects the digest. Multi-board disambiguation: reopen the LAST-ACTIVE board
+  # (the one whose cards the human last mutated / the board they just bootstrapped
+  # — port_registry.get_active()), NOT whichever board.json has the newest file
+  # mtime. mtime picked the wrong board when two boards were touched the same
+  # session (#mb). Fall back to most-recently-updated board.json only when no
+  # active pointer exists yet (e.g. first session after an upgrade).
   if [ -f "${onboard_marker}" ]; then
     hook_dir="$(dirname "$0")"
     board_path="$(python3 -c "
 import sys; sys.path.insert(0, sys.argv[1])
 from pathlib import Path
 import port_registry as pr
+active = pr.get_active()
+if active:
+    bj = Path(active) / 'board.json'
+    if bj.exists():
+        print(str(bj)); raise SystemExit
 best = None
 for d in pr.assignments():
     bj = Path(d) / 'board.json'
