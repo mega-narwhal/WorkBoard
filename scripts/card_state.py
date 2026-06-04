@@ -21,8 +21,6 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REGEN_SCRIPT = SKILL_DIR / "scripts" / "regen_index.py"
-# Default fallback if no server is found by path-match. Override via BOARD_SERVER.
-DEFAULT_SERVER_URL = "http://127.0.0.1:7891"
 
 # Ensure scripts/ is importable for the sibling _boardio helper even when this
 # module is imported rather than run (its dir is sys.path[0] only when run).
@@ -413,5 +411,5 @@ __all__ = [
     "find_card", "now_iso", "maybe_stdin", "slugify", "_taxonomy_names",
     "_check_tags", "_detect_urgency", "_ensure_super_urgent_col",
     "_ensure_ideas_col", "_log_auto_urgent", "find_subtask", "new_subtask_id",
-    "SKILL_DIR", "REGEN_SCRIPT", "DEFAULT_SERVER_URL", "_boardio",
+    "SKILL_DIR", "REGEN_SCRIPT", "_boardio",
 ]

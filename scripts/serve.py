@@ -698,7 +698,12 @@ def _load_initial_cache(board_dir: Path) -> None:
 
 def _build_arg_parser():
     ap = argparse.ArgumentParser(description="board-steward local server")
-    ap.add_argument("--port", type=int, default=int(os.environ.get("BOARD_PORT", "7891")))
+    # No hardcoded default: when neither --port nor $BOARD_PORT is given, leave it
+    # None so port_registry.assign() picks this board's sticky designation (or the
+    # lowest free port). Defaulting every server to 7891 was the multi-board smell
+    # — assign() already resolves it, but the literal made it look like a collision.
+    ap.add_argument("--port", type=int,
+                    default=(int(os.environ["BOARD_PORT"]) if os.environ.get("BOARD_PORT") else None))
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--project", type=Path, default=None,
                     help="Project root (default: cwd; walks up looking for board/)")
@@ -813,7 +818,8 @@ def _resolve_board_dir(args):
         import port_registry as _pr
         args.port = _pr.assign(board_dir, preferred=args.port)
     except Exception:
-        pass
+        if args.port is None:  # registry unavailable + no explicit port → safe default
+            args.port = 7891
     # Stream cards from prior Claude sessions in a background thread so the
     # user watches their history fill in. Opt out with --no-discover.
     if not args.no_discover:
@@ -909,6 +915,8 @@ def _run_server(board_dir, args):
         import port_registry as _pr
         args.port = _pr.assign(board_dir, preferred=args.port)
     except Exception as e:  # pragma: no cover — fail open to the requested port
+        if args.port is None:  # registry unavailable + no explicit port → safe default
+            args.port = 7891
         print(f"warn: port assign failed, using {args.port}: {e}", file=sys.stderr)
     # Singleton guard (#377): if a live server is ALREADY serving THIS board on
     # its designated port, don't start a second one — exit cleanly. Keeps "one
