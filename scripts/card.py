@@ -353,8 +353,12 @@ _COUNTED_VERBS = ("add", "bug", "improve")
 # "the human is working on this board".
 _READ_ONLY_CMDS = frozenset({
     "show", "list", "digest", "query", "metrics", "export", "wiki",
-    "progress", "sweep-status", "prelaunch-check", "recover",
+    "progress", "sweep-status", "prelaunch-check",
 })
+# Note: `recover` is NOT read-only — `recover --apply` restores a backup
+# (atomic_save), the strongest "I'm working on this board" signal there is, so
+# it must update last-active. The list-only `recover` (no --apply) harmlessly
+# marks active too, which is fine.
 
 
 def _mark_active(args, board) -> None:
