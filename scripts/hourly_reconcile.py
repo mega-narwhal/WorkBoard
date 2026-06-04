@@ -259,27 +259,39 @@ def _emit_extraction_pending(board: Path, card_py: Path,
 
 
 def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
-                     banner_num: int | None = None) -> int:
-    """Post-extraction LLM sweep on non-done cards. Asks LLM if any should
-    move based on the activity log. Applies moves. Returns count moved.
+                     banner_num: int | None = None,
+                     only_discovered: bool = True) -> int:
+    """LLM sweep on non-done cards. Asks LLM if any should move based on the
+    activity log. Applies moves. Returns count moved.
+
+    `only_discovered` (default True) restricts candidates to bootstrap-mined
+    cards (tagged 'discovered') — the right scope for the post-extraction
+    bootstrap sweep, which must not molest the user's hand-made cards while it
+    fills the board. The SessionStart recon passes only_discovered=False to
+    reconcile EVERY non-done card (the live In-Progress cards from the last
+    session — created by `card.py add`, so untagged — are exactly what needs
+    IP→done / →mandatory truth-making).
 
     When CLAUDECODE=1 (we're running inside an active Claude Code session),
     skip the Haiku subprocess entirely. Main Claude already has the full
     conversation in context — write a recon_pending.json that main Claude
     actions next turn. Saves a 60-90s LLM call + tokens, and lets recon
-    use the richer session context the script doesn't have."""
+    use the richer session context the script doesn't have. (The autonomous
+    background spawns — bootstrap + SessionStart — unset CLAUDECODE so they
+    take the Haiku path, not this one.)"""
     try:
         with board.open("r") as f:
             state = json.load(f)
     except (OSError, json.JSONDecodeError):
         return 0
 
-    # Non-done, non-banner cards from columns we want to reconcile.
+    # Non-done, non-banner cards from columns we want to reconcile. When
+    # only_discovered, restrict to bootstrap-mined cards (see docstring).
     candidates = [
         c for c in state.get("cards", [])
         if c.get("column") in ("task", "backlog", "inprogress", "notes")
         and "banner" not in (c.get("tags") or [])
-        and "discovered" in (c.get("tags") or [])
+        and (not only_discovered or "discovered" in (c.get("tags") or []))
     ]
     if not candidates:
         return 0
