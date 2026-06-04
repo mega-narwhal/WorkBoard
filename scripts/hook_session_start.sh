@@ -114,9 +114,15 @@ path<TAB>label):
 
 ${projects}
 
-ACTION (do this now, don't wait to be asked): call AskUserQuestion to ask which
-ONE project should get a WorkBoard. Make each listed project an option (label =
-the project name, description = the "(ago, N sessions, N edits)" detail). Exactly
+ACTION (do this now, don't wait to be asked): call AskUserQuestion. Use THIS
+question text verbatim (the main question bolded, the parenthetical in normal
+weight):
+
+  **Which project should get your first WorkBoard?** (You can add more later by asking to open a board for another project.)
+
+Header: "Project". Make each listed project an option: label = the project name,
+description = the FULL PATH + the "(ago, N sessions, N edits)" detail (e.g.
+"/Users/malco/Desktop/WorkBoard — 12m ago, 638 sessions, 500 edits"). Exactly
 one board on first run — they can add more later by asking "open a new workboard
 for <project>". If their project isn't listed, they can type its path.
 
@@ -135,9 +141,9 @@ When you announce the board, use THIS exact shape — relay verbatim, don't pad:
 3. Then this block, exactly as written:
 
 You're all set. A few things to know:
-- Add another board anytime — just say "open a new workboard for <project>".
-- It remembers. Close the tab, come back tomorrow — your board picks up right where you left off.
-- Just work normally. Say things like "shipped X", "fixed Y", or "what's left?" and the cards move themselves.
+- **Add another board anytime** — just say "open a new workboard for <project>".
+- **It remembers.** Close the tab, come back tomorrow — your board picks up right where you left off.
+- **Just work normally.** Say things like "shipped X", "fixed Y", or "what's left?" and the cards move themselves.
 
 What would you like to work on?
 
