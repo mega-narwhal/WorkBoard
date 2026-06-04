@@ -427,9 +427,11 @@ class BoardHandler(BaseHTTPRequestHandler):
 
     def _handle_index(self):
         """GET / or /board.html — serve the board UI."""
-        html_path = self.board_dir / "board.html"
-        if not html_path.exists():
-            html_path = TEMPLATE_HTML
+        # board.html is shared application CODE (versioned with the plugin), not
+        # per-board data — always serve the single source of truth so UI fixes
+        # reach every board with no stale per-board copy to drift (#72). Only
+        # board.json (the cards) is per-board data living in board_dir.
+        html_path = TEMPLATE_HTML
         # On a ?t= hit, hand back a cookie so subsequent board.json / SSE /
         # POST requests from this browser authenticate automatically — no
         # board.html changes needed.

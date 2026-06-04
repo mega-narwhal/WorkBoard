@@ -120,9 +120,9 @@ def bootstrap_board(board_dir: Path, profile: str = "software",
         data["title"] = f"WorkBoard — {project_name}"
         data["tagTaxonomy"] = _load_tag_profile(profile)
         target_json.write_text(json.dumps(data, indent=2))
-    target_html = board_dir / "board.html"
-    if not target_html.exists() and TEMPLATE_HTML.exists():
-        target_html.write_text(TEMPLATE_HTML.read_text())
+    # NOTE: we intentionally do NOT copy board.html into the board dir (#72).
+    # It's shared app code served straight from TEMPLATE_HTML by serve.py, so a
+    # per-board copy would only fork and go stale. Only board.json is per-board.
     if not share:
         status = _ensure_gitignore(board_dir.parent)
         if status:
