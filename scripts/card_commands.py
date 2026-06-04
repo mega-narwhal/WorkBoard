@@ -62,6 +62,19 @@ def cmd_add(args, d, board):
     created = getattr(args, "created_at", None) or now
     tags = _check_tags(args.tag or [], d, getattr(args, "force", False))
 
+    # Provenance (#385): a --created-at means this card was BACKFILLED from mined
+    # history (bootstrap/hourly harvest), not live work — i.e. a "discovered"
+    # card. The reconciliation sweep (hourly_reconcile.reconcile_sweep) only
+    # considers cards tagged 'discovered', so WITHOUT this stamp a freshly
+    # bootstrapped board is invisible to recon and stale IP cards never get
+    # reconciled. Stamp it at the single emit chokepoint (not in per-path Haiku/
+    # inline prompts that can forget). Live cards have no --created-at, so they
+    # stay untagged and recon never auto-moves user-authored work — preserving
+    # the tag's original safety purpose. Appended directly (bypasses taxonomy
+    # validation) since 'discovered' is a provenance marker, not a taxonomy tag.
+    if getattr(args, "created_at", None) and "discovered" not in tags:
+        tags = tags + ["discovered"]
+
     # Auto-urgent (#85): detect urgency keywords in title+origin and route to
     # the SUPER URGENT column with critical priority. --urgent forces; --no-auto-urgent skips.
     auto_urgent_kw = None
