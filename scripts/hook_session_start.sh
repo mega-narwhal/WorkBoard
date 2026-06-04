@@ -232,16 +232,12 @@ fi
 # additional / different project's board, the user just asks. board.html SSE
 # auto-reconnects, so a connected tab keeps sseClients>0 across server restarts.
 # Honours BOARD_NO_AUTO_OPEN=1 for headless/CI/cron.
-sse_clients="$(echo "${server_health}" | python3 -c "import sys,json
-try: print(int(json.load(sys.stdin).get('sseClients',0)))
-except Exception: print(0)" 2>/dev/null || echo 0)"
-if [ -n "${server_health}" ] && [ "${sse_clients:-0}" -eq 0 ] && [ "${BOARD_NO_AUTO_OPEN:-0}" != "1" ]; then
-  rm -f "${project_dir}"/board/.opened-* 2>/dev/null   # sweep stale #367 stamps
-  url="http://127.0.0.1:${server_port}"
-  if command -v open >/dev/null 2>&1; then open "${url}" >/dev/null 2>&1 &
-  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "${url}" >/dev/null 2>&1 &
-  fi
-  disown 2>/dev/null || true
+# #73 — open iff the board isn't already VISIBLE IN CHROME (a real tab), not the
+# stale sseClients proxy that wrongly counted a backgrounded/closed connection as
+# "open". Delegated to board_autoopen.sh (Chrome-tab check → sseClients fallback
+# → opens in Chrome; honours BOARD_NO_AUTO_OPEN).
+if [ -n "${server_health}" ]; then
+  "$(dirname "$0")/board_autoopen.sh" "${server_port}" "${project_dir}" >/dev/null 2>&1 || true
 fi
 
 # Build digest: counts by column + last shipped card (with relative time).

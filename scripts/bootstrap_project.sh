@@ -89,19 +89,8 @@ except Exception: print(0,0)" 2>/dev/null || echo "0 0")"
 fi
 
 # Open the board — REQUIRED for the Haiku fly-in (it's gated on a live viewer).
-# Only if nothing is already viewing it (sseClients==0), mirroring the hook.
-if [ "${BOARD_NO_AUTO_OPEN:-0}" != "1" ]; then
-  health="$(curl -s --max-time 0.3 "http://127.0.0.1:${want_port}/health" 2>/dev/null)"
-  sse="$(echo "${health}" | python3 -c "import sys,json
-try: print(int(json.load(sys.stdin).get('sseClients',0)))
-except Exception: print(0)" 2>/dev/null || echo 0)"
-  if [ "${sse:-0}" -eq 0 ]; then
-    url="http://127.0.0.1:${want_port}"
-    if command -v open >/dev/null 2>&1; then open "${url}" >/dev/null 2>&1 &
-    elif command -v xdg-open >/dev/null 2>&1; then xdg-open "${url}" >/dev/null 2>&1 &
-    fi
-    disown 2>/dev/null || true
-  fi
-fi
+# Open iff it isn't already visible in Chrome (#73), mirroring the hook — same
+# board_autoopen.sh (Chrome-tab check → sseClients fallback → opens in Chrome).
+"$(dirname "$0")/board_autoopen.sh" "${want_port}" "${proj_root}" >/dev/null 2>&1 || true
 
 echo "${want_port}"
