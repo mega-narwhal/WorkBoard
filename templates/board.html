@@ -5066,7 +5066,7 @@ function renderColumn(col, cards) {
     h = document.createElement('div'); h.id = 'load-hud';
     h.innerHTML =
       '<div id="load-hud-head"><span class="lh-dot"></span>'+
-      '<span>HISTORY REPLAY ░ <span id="lh-mode">inline extraction</span></span></div>'+
+      '<span>BOARD SYNC ░ <span id="lh-mode">inline extraction</span></span></div>'+
       '<div id="load-hud-body">'+
         '<div class="lh-status"><b>▶ EXTRACTING<span class="lh-cur">▋</span></b>'+
           '<span class="lh-count"><span id="lh-done">0</span>/<span id="lh-total">0</span></span></div>'+
@@ -5096,10 +5096,11 @@ function renderColumn(col, cards) {
   // phase so the header no longer wrongly says "inline" during a haiku fill.
   function _lhHeader(phase){
     switch (phase) {
-      case 'replay':  return 'replaying last 24h';
-      case 'speedup': return 'speeding up ▸▸ backfill';
-      case 'solo':    return 'replaying history';
-      default:        return 'inline extraction';
+      case 'replay':    return 'replaying last 24h';
+      case 'speedup':   return 'speeding up ▸▸ backfill';
+      case 'solo':      return 'replaying history';
+      case 'reconcile': return 'reconciling';
+      default:          return 'inline extraction';
     }
   }
   const HUD = {
@@ -5114,7 +5115,10 @@ function renderColumn(col, cards) {
       h.querySelector('#lh-pct').textContent = pct+'%';
       const mode = h.querySelector('#lh-mode'); if (mode) mode.textContent = _lhHeader(phase);
       const sb = h.querySelector('.lh-status b');
-      if (sb) sb.innerHTML = (phase === 'speedup' ? '▶ SPEEDING UP' : '▶ EXTRACTING') + '<span class="lh-cur">▋</span>';
+      const verb = phase === 'speedup' ? '▶ SPEEDING UP'
+                 : phase === 'reconcile' ? '▶ RECONCILING'
+                 : '▶ EXTRACTING';
+      if (sb) sb.innerHTML = verb + '<span class="lh-cur">▋</span>';
       if (label) { h.querySelector('#lh-window').textContent = label; h.querySelector('#lh-tail').textContent = '✓ '+label; }
       return HUD;
     },
