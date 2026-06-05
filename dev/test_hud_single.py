@@ -37,8 +37,10 @@ def _hud(page):
       if (!h) return {present:false};
       const q = s => (h.querySelector(s)||{}).textContent || '';
       const cs = getComputedStyle(h);
+      const vis = s => { const e = h.querySelector(s); return !!e && getComputedStyle(e).display !== 'none'; };
       return {present:true, display: h.style.display, visible: cs.display !== 'none',
               done: q('#lh-done'), total: q('#lh-total'), pct: q('#lh-pct'),
+              countVisible: vis('.lh-count'), pctVisible: vis('.lh-pct'),
               mode: q('#lh-mode'), status: q('.lh-status b'),
               window: q('#lh-window')};
     }""")
@@ -162,12 +164,19 @@ def main():
             rec0 = emit({"done": 0, "total": 1, "phase": "reconcile",
                          "label": "checking nothing's missed…"})
             check(rec0["visible"], "HUD visible during reconcile")
+            # reconcile has no meaningful item count → the N/M + % must be HIDDEN
+            # (was a stale 8/8 lag then a meaningless 1/1).
+            check(not last_sp["countVisible"], "count hidden the instant we enter reconcile (no stale N/N)")
+            check(not rec0["countVisible"] and not rec0["pctVisible"],
+                  "no N/M and no % shown during reconcile sweep")
             shot("3_reconcile")
             check(completes["n"] == 0, "still no COMPLETE during reconcile start")
 
             rec1 = emit({"done": 1, "total": 1, "phase": "reconcile", "final": True,
                          "label": "✓ 3 card(s) brought up to date"}, settle=250)
             shot("4_complete")
+            check(not rec1["countVisible"] and not rec1["pctVisible"],
+                  "reconcile completes number-free (no 1/1 on ✓ COMPLETE)")
             check("COMPLETE" in (rec1.get("status") or ""), "shows ✓ COMPLETE on final")
             check(completes["n"] == 1, f"COMPLETE appeared exactly once (saw {completes['n']})")
             check(not ever_hidden["v"], "HUD NEVER hid mid-flow (single coherent HUD)")

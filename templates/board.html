@@ -1538,6 +1538,12 @@
   @keyframes lh-pulse{50%{opacity:0.35;}}
   #load-hud.lh-done .lh-fill{background:linear-gradient(90deg,#0f0,#7dff7d);}
   #load-hud.lh-done #load-hud-head{color:#0f0;}
+  /* Reconcile has no meaningful item count (it's a single LLM sweep, not N chunks)
+     — so during the 'reconcile' phase hide the N/M counter + the % readout. They
+     only ever showed a stale '8/8' lag then a meaningless '1/1'. The bar + the
+     blinking ▶ RECONCILING status still convey "working". */
+  #load-hud.lh-recon .lh-count,
+  #load-hud.lh-recon .lh-pct{display:none;}
 </style>
 </head>
 <body>
@@ -5106,6 +5112,7 @@ function renderColumn(col, cards) {
     hide(){ const h = el(); h.style.display = 'none'; return HUD; },
     update(done, total, label, phase){
       const h = el(); h.classList.remove('lh-done'); h.style.display = '';
+      h.classList.toggle('lh-recon', phase === 'reconcile');  // hide N/M + % during the sweep
       // #327 single-HUD: 1-based "current item". `done` is chunks COMPLETED, so
       // the one in flight is done+1 → the readout starts at 1/N (not 0/N) and
       // reaches N/N at the last chunk (fixes the "ends at 6/7, never 7/7" bug).
@@ -5130,6 +5137,7 @@ function renderColumn(col, cards) {
     // ONE HUD flowing through its stages — only done() (the `final` emit) ends it.
     handoff(label, nextPhase){
       const h = el(); h.classList.remove('lh-done'); h.style.display = '';
+      h.classList.toggle('lh-recon', nextPhase === 'reconcile');  // kill the stale N/N the instant we enter reconcile
       const total = h.querySelector('#lh-total').textContent;
       if (total) h.querySelector('#lh-done').textContent =
         String(total).padStart(String(total).length, '0');   // show N/N, not N-1/N
@@ -5143,8 +5151,9 @@ function renderColumn(col, cards) {
       if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; }
       return HUD;
     },
-    done(label){
+    done(label, phase){
       const h = el(); h.classList.add('lh-done'); h.style.display = '';
+      h.classList.toggle('lh-recon', phase === 'reconcile');  // reconcile completes number-free too
       const total = h.querySelector('#lh-total').textContent;
       if (total) h.querySelector('#lh-done').textContent = total;   // show N/N, not N-1/N
       h.querySelector('#lh-fill').style.transform = 'scaleX(1)';
@@ -5678,7 +5687,7 @@ function startSSE() {
       // "done>=total" — a stage hitting 100% (replay/speedup/solo) is NOT the end,
       // it hands off to the next stage on the SAME HUD (no flash/disappear/race).
       if (d.final) {
-        BoardLoadHUD.done(d.label);
+        BoardLoadHUD.done(d.label, d.phase);
         // #101 — fill fully done; let the last card writes apply, then run the
         // one-time newest-on-top sort across all columns (self-guards to once).
         setTimeout(sortAllColumnsOnceAfterFill, 600);
@@ -5689,7 +5698,7 @@ function startSSE() {
         else if (d.phase === 'speedup' || d.phase === 'solo') BoardLoadHUD.handoff(d.label, 'reconcile');
         else {
           // inline ('') / unknown terminal with no reconcile to follow — complete.
-          BoardLoadHUD.done(d.label);
+          BoardLoadHUD.done(d.label, d.phase);
           setTimeout(sortAllColumnsOnceAfterFill, 600);
         }
       } else BoardLoadHUD.update(d.done || 0, d.total || 0, d.label || '', d.phase || '');
