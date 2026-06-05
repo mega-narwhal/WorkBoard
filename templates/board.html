@@ -1554,7 +1554,7 @@
     <span class="status" id="status" title="Connection status"><span class="dot"></span></span>
   </span>
   <span class="sp"></span>
-  <button id="reset-cols-btn" class="header-pill" style="display:none" title="Restore default column order: Task → Backlog → In Progress → Done → Notes, then others by recency">↺ Reset columns</button>
+  <button id="reset-cols-btn" class="header-pill" style="display:none" title="Restore default layout: Task · Notes+Ideas · Backlog · In Progress · Mandatory+Discarded · Done (with stacks), then extras by recency">↺ Reset columns</button>
   <button id="tags-btn" class="header-pill" style="display:none" title="Show all tags used on this board">🏷 Tags <span id="tags-count">0</span></button>
   <span class="view-toggle" id="view-toggle" style="display:none">
     <button data-view="board" class="active">Board</button>
@@ -3586,24 +3586,37 @@ function enterApp() {
 async function resetColumnsToDefault() {
   if (!state) return;
   if (!(await miniConfirm('Reset column order?', {
-    sub: 'Reorders columns to: Task → Backlog → In Progress → Done → Notes, then the rest by latest activity. Also flattens any stacked columns back into a row. No cards or columns are deleted — ' + undoHint() + ' to undo.',
+    sub: 'Reorders columns to: Task · Notes+Ideas · Backlog · In Progress · Mandatory+Discarded · Done (Ideas stacked under Notes, Discarded under Mandatory), then any extra columns by latest activity. No cards or columns are deleted — ' + undoHint() + ' to undo.',
     okText: 'Reset',
     okClass: 'primary',
   }))) return;
   pushUndo();
-  const cols = state.columns.map(c => ({ ...c, stackUnder: null }));
-  const matchers = [
-    c => c.id === 'task' || /^task$/i.test(c.name || ''),
-    c => c.id === 'backlog' || /^backlog$/i.test(c.name || ''),
-    c => c.id === 'inprogress' || /^in\s*progress$/i.test(c.name || ''),
-    c => c.id === 'done' || /^done$/i.test(c.name || ''),
-    c => /^notes$/i.test(c.name || ''),
+  // #103 — restore the canonical bootstrap layout (matches templates/board.json #94):
+  // Task · Notes(+Ideas) · Backlog · In Progress · Mandatory(+Discarded) · Done.
+  // Stacks are RE-CREATED (Ideas under Notes, Discarded under Mandatory), not flattened.
+  // Extra/custom columns follow, ordered by latest activity.
+  const SPEC = [
+    { key:'task',       stack:null,        match:c => c.id==='task'       || /^task$/i.test(c.name||'') },
+    { key:'notes',      stack:null,        match:c => c.id==='notes'      || /notes$/i.test(c.name||'') },
+    { key:'ideas',      stack:'notes',     match:c => c.id==='ideas'      || /ideas$/i.test(c.name||'') },
+    { key:'backlog',    stack:null,        match:c => c.id==='backlog'    || /^backlog$/i.test(c.name||'') },
+    { key:'inprogress', stack:null,        match:c => c.id==='inprogress' || /^in\s*progress$/i.test(c.name||'') },
+    { key:'mandatory',  stack:null,        match:c => c.id==='mandatory'  || /mandatory$/i.test(c.name||'') },
+    { key:'discarded',  stack:'mandatory', match:c => c.id==='discarded'  || /^discarded$/i.test(c.name||'') },
+    { key:'done',       stack:null,        match:c => c.id==='done'       || /^done$/i.test(c.name||'') },
   ];
-  const pinned = [];
+  const cols = state.columns.map(c => ({ ...c, stackUnder: null }));
   const remaining = cols.slice();
-  for (const m of matchers) {
-    const i = remaining.findIndex(m);
-    if (i >= 0) pinned.push(...remaining.splice(i, 1));
+  const matched = {};
+  const pinned = [];
+  for (const spec of SPEC) {
+    const i = remaining.findIndex(spec.match);
+    if (i >= 0) { const col = remaining.splice(i, 1)[0]; matched[spec.key] = col; pinned.push(col); }
+  }
+  for (const spec of SPEC) {            // re-create the stacks (parent must be present)
+    if (spec.stack && matched[spec.key] && matched[spec.stack]) {
+      matched[spec.key].stackUnder = matched[spec.stack].id;
+    }
   }
   const recency = new Map();
   for (const c of remaining) {
