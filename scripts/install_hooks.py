@@ -38,6 +38,7 @@ HOOK_VARIANTS = {
     "session-start":      ("SessionStart",      "hook_session_start.sh"),
     "user-prompt-submit": ("UserPromptSubmit",  "hook_user_prompt.sh"),
     "pre-tool-use":       ("PreToolUse",        "hook_pre_tool_use.sh"),
+    "card-before-edit":   ("PreToolUse",        "hook_card_before_edit.sh"),
     "stop":               ("Stop",              "hook_stop.sh"),
 }
 ALL_VARIANTS = tuple(HOOK_VARIANTS.keys())
@@ -191,14 +192,17 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--hook", choices=("session-start", "user-prompt-submit",
-                                       "pre-tool-use", "stop", "both", "all", "live"),
+                                       "pre-tool-use", "card-before-edit", "stop",
+                                       "both", "all", "live"),
                     default="session-start",
                     help="which hook(s) to install. 'all' and 'live' are the SAME "
                          "complete set (RECOMMENDED) = session-start (digest + daily "
                          "auto-open) + user-prompt-submit (per-turn LIVE nudge #360) + "
-                         "pre-tool-use (flash + #102 auto-link) + stop (blocking sign-off "
-                         "backstop #279/#359). 'both' = session-start + user-prompt-submit "
-                         "only (legacy 2-hook alias). Or pass a single hook name.")
+                         "pre-tool-use (flash + #102 auto-link) + card-before-edit "
+                         "(#75 non-blocking 'declare a card before editing' WARN) + stop "
+                         "(blocking sign-off backstop #279/#359). 'both' = session-start + "
+                         "user-prompt-submit only (legacy 2-hook alias). Or pass a single "
+                         "hook name.")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--uninstall", action="store_true", help="remove ALL board-steward hooks")
     ap.add_argument("--status", action="store_true")
@@ -223,7 +227,8 @@ def main() -> int:
         # UserPromptSubmit (#360 per-turn LIVE nudge) + PreToolUse (flash on edit
         # + #102 auto-link) + Stop (#359 blocking sign-off backstop). install.sh
         # wires this so a download reflects everything, not a subset.
-        selected = {"session-start", "user-prompt-submit", "pre-tool-use", "stop"}
+        selected = {"session-start", "user-prompt-submit", "pre-tool-use",
+                    "card-before-edit", "stop"}
     else:
         selected = {args.hook}
 

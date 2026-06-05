@@ -21,7 +21,7 @@ behaves exactly like a brand-new user: no stale server holding a port, no
 1. **Servers + ports** — kills every listener on the board port range (7891–7999) and stray `serve.py --project` processes.
 2. **Autostart** — boots out + deletes the launchd agent (`com.boardsteward.*`).
 3. **`~/.board-steward/`** — the port registry **and** the `.onboarded` marker (this is what re-arms the first-run picker).
-4. **board.json(s)** — plus runtime sidecars (`index.json`, `.spawn.lock`, `recon_pending.json`, `extraction_*.json`, `.opened-*`, `.subagent_queue.jsonl`) for every registered board + the default repo board.
+4. **board.json(s)** — plus runtime sidecars (`index.json`, `.spawn.lock`, `recon_pending.json`, `extraction_*.json`, `.opened-*`, `.subagent_queue.jsonl`, `.stop_recon_state.json`, `.card_before_edit_state.json`) for every registered board + the default repo board.
 5. **Plugin** — `claude plugin uninstall board-steward@workboard` (skip with `--no-plugin`).
 6. **Plugin cache** — `~/.claude/plugins/cache/*/board-steward` (skip with `--no-plugin`). Uninstall alone leaves the cache, and installs key by **version** — so a same-version reinstall replays **stale** cached code. Clearing it makes a plain reinstall pull **fresh repo code** with no manual version bump.
 

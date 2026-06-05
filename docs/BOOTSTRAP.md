@@ -25,17 +25,27 @@ python3 scripts/health_check.py --json
 ```
 
 `--hook all` (identical to `--hook live` — same canonical set, no ambiguity, #369) wires
-**all four** hooks into `~/.claude/settings.json` (path honors `$CLAUDE_CONFIG_DIR`):
+**all five** hooks into `~/.claude/settings.json` (path honors `$CLAUDE_CONFIG_DIR`):
 
 | Hook | Event | What it does |
 |---|---|---|
 | `hook_session_start.sh` | `SessionStart` | Injects the ~150-token board digest into context at session boot, and auto-opens the board in the browser on the first session each day (#367). |
 | `hook_user_prompt.sh` | `UserPromptSubmit` | On every user message, injects the per-turn LIVE lifecycle protocol (#360). Cwd-walks for `board/board.json` — silent in non-board projects. |
 | `hook_pre_tool_use.sh` | `PreToolUse` | On a file edit, flashes the matching card border coral and auto-links file→card (#102, §I below). |
-| `hook_stop.sh` → `_hook_stop_recon.py` | `Stop` | **Blocking backstop (#279).** When a turn did substantive work (ship-signal OR ≥3 edits) but ran zero `card.py` calls, it emits `{"decision":"block","reason":...}` to refuse the stop so Claude cards it NOW. Single-shot via the `stop_hook_active` loop guard (blocks at most once, then proceeds). Also writes `board/recon_pending.json` as a deferred fallback. Silent for read-only turns / non-board projects / already-carded work. |
+| `hook_card_before_edit.sh` → `_hook_card_before_edit.py` | `PreToolUse` | **Non-blocking 'declare up front' WARN (#75).** On a file edit inside a board project with NO In-Progress card, injects a `hookSpecificOutput.additionalContext` reminder to `card.py add` → `fly inprogress` first (law #1). **Never blocks** the edit; silent when a card is already In-Progress, when editing board state files, in non-board projects, or within 60s of its last nudge (debounced). |
+| `hook_stop.sh` → `_hook_stop_recon.py` | `Stop` | **Blocking backstop (#279) + batched-not-live detector (#74).** When a turn did substantive work (ship-signal OR ≥3 edits) but ran zero `card.py` calls, it emits `{"decision":"block","reason":...}` to refuse the stop so Claude cards it NOW (single-shot via the `stop_hook_active` loop guard). It also surfaces (non-blocking) any card that reached Done this session with no in-flight dwell — the batched add→done smell. Writes `board/recon_pending.json` as a deferred fallback. Silent for read-only turns / non-board projects / already-carded work. |
 
 Other selectors: `--hook both` = session-start + user-prompt-submit only (legacy 2-hook alias);
-a single hook name (`session-start` / `user-prompt-submit` / `pre-tool-use` / `stop`) installs just that one.
+a single hook name (`session-start` / `user-prompt-submit` / `pre-tool-use` / `card-before-edit` / `stop`)
+installs just that one.
+
+**Uninstalling.** `--uninstall` removes **all** board-steward hooks (including `card-before-edit` and
+the batched detector) from `settings.json`; `--status` shows which are wired. To drop **only** the
+`card-before-edit` warn while keeping the rest, re-run the installer with the set minus it — i.e.
+`--hook` selection is exact-desired-state, so run each remaining hook you want, or hand-remove that one
+`PreToolUse` group from `settings.json`. When installed as a plugin, `claude plugin uninstall
+board-steward@workboard` removes every hook (via `hooks/hooks.json`) in one shot. `/clean-slate` wipes
+all of the above plus the per-board state sidecars (`.stop_recon_state.json`, `.card_before_edit_state.json`).
 
 The installer is **safe**: auto-backs up `settings.json` to `.bak-<ts>` before any write,
 refuses malformed JSON, resolves the hook command path via `__file__` (no hardcoded

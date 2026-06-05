@@ -74,7 +74,8 @@ printf '%s\n' "$BOARD_DIRS" | while read -r bd; do
   [ -d "$bd" ] || continue
   run rm -f "$bd/board.json" "$bd/index.json" "$bd/.spawn.lock" \
            "$bd/recon_pending.json" "$bd/extraction_pending.json" \
-           "$bd/extraction_snapshot.json" "$bd/.subagent_queue.jsonl"
+           "$bd/extraction_snapshot.json" "$bd/.subagent_queue.jsonl" \
+           "$bd/.stop_recon_state.json" "$bd/.card_before_edit_state.json"
   run "rm -f '$bd'/.opened-* 2>/dev/null || true"
 done
 
