@@ -674,10 +674,16 @@ def _extract_haiku(project: Path, board: Path, card_py: Path,
                    bucket_min: int, workers: int, chunk_size: int,
                    days: int, date_filter: str | None,
                    show_lifecycle: bool, pace_s: float,
-                   reconcile: bool, phase: str = "") -> None:
+                   reconcile: bool, phase: str = "",
+                   will_reconcile: bool = False) -> None:
     """HAIKU mode: parallel per-chunk extraction → emit cards as chunks finish,
     snapshot the result, then reconcile. The autonomous (costs-Haiku) path.
-    phase (#327) tags the HUD: 'replay' (tier-1) / 'speedup' (tier-2) / 'solo'."""
+    phase (#327) tags the HUD: 'replay' (tier-1) / 'speedup' (tier-2) / 'solo'.
+
+    `will_reconcile` (#recon-handoff): True when a reconcile sweep runs AFTER
+    this window (the tier-fly path runs recon outside the window, so this window
+    is told `reconcile=False` yet must NOT flash '✓ COMPLETE' — it has to hand
+    off to the reconcile stage on the same HUD)."""
     t0 = time.monotonic()
     # Progress banner: a single 'notes' card the user can watch update live.
     banner_num = _banner_create(card_py, board, len(chunks), phase)
@@ -728,11 +734,14 @@ def _extract_haiku(project: Path, board: Path, card_py: Path,
                 handoff = (f"day-1 replayed in {time.monotonic() - t0:.0f}s "
                            f"· speeding up ▸▸ backfilling older history")
             # #327 single-HUD: the LAST chunk completes the HUD ONLY when nothing
-            # follows — i.e. no reconcile sweep AND this isn't the 'replay' tier
+            # follows — i.e. no reconcile sweep (neither in-window `reconcile` nor
+            # an after-window `will_reconcile`) AND this isn't the 'replay' tier
             # (replay always hands off to 'speedup'). Otherwise it hands off and
-            # the HUD stays visible for the next stage (no flash/disappear).
+            # the HUD stays visible for the next stage (no flash/disappear). Without
+            # `will_reconcile` the tier-fly speedup/solo tier wrongly flashed '✓
+            # COMPLETE' before the end-of-replay reconcile re-showed the HUD.
             is_final = (completed == len(chunks) and not reconcile
-                        and phase != "replay")
+                        and not will_reconcile and phase != "replay")
             _banner_update(card_py, board, banner_num,
                            completed, len(chunks), n_cards,
                            phase=phase, label_override=handoff, final=is_final)
@@ -767,10 +776,14 @@ def _run_window(project: Path, board: Path, card_py: Path, *,
                 pace_s: float, phase: str, seed_if_empty: bool,
                 sources, date_filter, bucket_min: int, recent_first: bool,
                 max_buckets: int, chunk_size: int, workers: int,
-                reconcile: bool, mode: str) -> None:
+                reconcile: bool, mode: str,
+                will_reconcile: bool = False) -> None:
     """Extract ONE history window: events → filter → bucketize → emit. The
     reusable unit behind BOTH the single-pass fill and the #327 two-tier fly,
-    so tiering has one source of truth (no duplicate orchestration in bash)."""
+    so tiering has one source of truth (no duplicate orchestration in bash).
+
+    `will_reconcile` is forwarded to `_extract_haiku` so the LAST tier of a
+    tier-fly hands off to the reconcile stage instead of flashing '✓ COMPLETE'."""
     events = _flatten_events(project, days, sources=sources)
     if not events:
         print(f"no events to extract (phase={phase or '-'})", file=sys.stderr)
@@ -793,7 +806,8 @@ def _run_window(project: Path, board: Path, card_py: Path, *,
         return
     _extract_haiku(project, board, card_py, buckets, chunks, sorted_buckets,
                    events, bucket_min, workers, chunk_size, days, date_filter,
-                   show_lifecycle, pace_s, reconcile, phase=phase)
+                   show_lifecycle, pace_s, reconcile, phase=phase,
+                   will_reconcile=will_reconcile)
 
 
 def run(project: Path, board: Path, port: int, days: int,
@@ -860,18 +874,21 @@ def run(project: Path, board: Path, port: int, days: int,
                         end_days_ago=off + 1,
                         show_lifecycle=True, pace_s=max(pace_s / 5, 0.0),
                         phase="speedup", seed_if_empty=False,
-                        reconcile=False, **common)
+                        reconcile=False, will_reconcile=reconcile, **common)
         else:
             _run_window(project, board, card_py, days=off + 1, end_days_ago=off,
                         show_lifecycle=True, pace_s=pace_s, phase="solo",
-                        seed_if_empty=seed_if_empty, reconcile=False, **common)
+                        seed_if_empty=seed_if_empty, reconcile=False,
+                        will_reconcile=reconcile, **common)
 
-        # Replay of the past N days is COMPLETE → flip the gate, then reconcile
-        # EXACTLY ONCE against the whole replay span (not just the last tier's
-        # older slice — so an In-Progress→Done that shipped on the most recent
-        # day is still caught). This is the literal `if completed_card_replay:
-        # reconcile` the user asked for.
-        _mark_replay_complete(board)
+        # Replay of the past N days is COMPLETE → reconcile EXACTLY ONCE against
+        # the whole replay span (not just the last tier's older slice — so an
+        # In-Progress→Done that shipped on the most recent day is still caught).
+        # Order matters: reconcile FIRST, flip the gate AFTER. The replay gate
+        # (_replay_complete) must stay CLOSED for the duration of this sweep so a
+        # SessionStart `--reconcile-only` pass firing in this ~10s window stands
+        # down instead of racing it (the "reconcile twice / cards shuffle then
+        # 'N up to date' again" bug). recon_lock is the belt; this is the braces.
         if reconcile:
             events = _flatten_events(project, off + days, sources=sources)
             events = _filter_events(events, project, date_filter, off) or []
@@ -879,6 +896,7 @@ def run(project: Path, board: Path, port: int, days: int,
                 n_moved = reconcile_sweep(card_py, board, events)
                 print(f"✓ end-of-replay reconcile: moved {n_moved} card(s)",
                       file=sys.stderr)
+        _mark_replay_complete(board)
         return
 
     # Single pass — inline staging, or an explicit non-tier haiku run.

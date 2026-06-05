@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hourly_common import *  # noqa: E402,F401,F403  (build_digest, _CLAUDE_BIN, _LLM_MODEL)
 from hourly_emit import *     # noqa: E402,F401,F403  (_banner_update)
+import _boardio  # noqa: E402  (recon_lock — serialize concurrent reconcile passes)
 
 
 # ---------- post-extraction reconciliation sweep ----------
@@ -301,62 +302,72 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
         return _emit_recon_pending(board, candidates, events,
                                     card_py, banner_num)
 
-    # Autonomous path: subprocess Haiku.
-    print(f"▶ reconciliation sweep: {len(candidates)} non-done card(s)…",
-          file=sys.stderr)
-    # Live HUD line so the user knows WHY cards are about to move (#recon-hud) —
-    # shown on both the bootstrap fill HUD and a SessionStart recon.
-    # Short enough to fit the ~330px HUD window line (the old 62-char copy was
-    # cut off mid-sentence). Present-tense ACTION — the sweep is still running, so
-    # it can't yet claim an outcome ("nothing missed" is the result, shown on the
-    # ✓ final line below). Header already says "reconciling"; this is the why.
-    _emit_progress(card_py, board, 0, 1,
-                   "checking nothing's missed…", "reconcile")
-    if banner_num:
-        _banner_update_text(card_py, board, banner_num,
-                            f"🔍 reconciling {len(candidates)} cards…")
-
-    moves = _llm_reconcile(candidates, events)
-    if not moves:
-        print("  recon: 0 moves", file=sys.stderr)
-        _emit_progress(card_py, board, 1, 1,
-                       "✓ already up to date — nothing to move", "reconcile",
-                       final=True)
-        return 0
-
-    n_moved = 0
-    for m in moves:
-        num = m.get("num")
-        target = m.get("target")
-        reason = (m.get("reason") or "")[:160]
-        if not isinstance(num, int) or target not in (
-                "task", "backlog", "inprogress", "done", "mandatory"):
-            continue
-        # Find current column
-        cur = next((c for c in candidates if c["num"] == num), None)
-        if not cur:
-            continue
-        if cur["column"] == target:
-            continue
-        args = [sys.executable, str(card_py), "--board", str(board),
-                "fly", str(num), target, "--pause-ms", "150"]
-        if target == "done":
-            args += ["--writeup", f"Recon: {reason}"]
-        else:
-            args += ["--note", f"Recon → {target}: {reason}"]
-        try:
-            out = subprocess.run(args, capture_output=True, text=True, timeout=8)
-        except subprocess.SubprocessError:
-            continue
-        if out.returncode == 0:
-            n_moved += 1
-            print(f"  recon: #{num} → {target}  ({reason[:60]})",
+    # Autonomous path: subprocess Haiku. Serialize per board — a SECOND concurrent
+    # reconcile (e.g. the bootstrap end-of-replay sweep + a SessionStart recon-only
+    # firing in the same window) is what produced the "✓ already up to date" then
+    # cards-shuffle then "N brought up to date", twice. recon_lock bails (no wait)
+    # if another pass already holds it; the in-flight pass already covers it.
+    with _boardio.recon_lock(board) as got_lock:
+        if not got_lock:
+            print("  recon: another reconcile is already running — skip",
                   file=sys.stderr)
-    print(f"  recon: {n_moved} card(s) moved", file=sys.stderr)
-    _emit_progress(card_py, board, 1, 1,
-                   f"✓ {n_moved} card(s) brought up to date", "reconcile",
-                   final=True)
-    return n_moved
+            return 0
+
+        print(f"▶ reconciliation sweep: {len(candidates)} non-done card(s)…",
+              file=sys.stderr)
+        # Live HUD line so the user knows WHY cards are about to move (#recon-hud) —
+        # shown on both the bootstrap fill HUD and a SessionStart recon.
+        # Short enough to fit the ~330px HUD window line (the old 62-char copy was
+        # cut off mid-sentence). Present-tense ACTION — the sweep is still running, so
+        # it can't yet claim an outcome ("nothing missed" is the result, shown on the
+        # ✓ final line below). Header already says "reconciling"; this is the why.
+        _emit_progress(card_py, board, 0, 1,
+                       "checking nothing's missed…", "reconcile")
+        if banner_num:
+            _banner_update_text(card_py, board, banner_num,
+                                f"🔍 reconciling {len(candidates)} cards…")
+
+        moves = _llm_reconcile(candidates, events)
+        if not moves:
+            print("  recon: 0 moves", file=sys.stderr)
+            _emit_progress(card_py, board, 1, 1,
+                           "✓ already up to date — nothing to move", "reconcile",
+                           final=True)
+            return 0
+
+        n_moved = 0
+        for m in moves:
+            num = m.get("num")
+            target = m.get("target")
+            reason = (m.get("reason") or "")[:160]
+            if not isinstance(num, int) or target not in (
+                    "task", "backlog", "inprogress", "done", "mandatory"):
+                continue
+            # Find current column
+            cur = next((c for c in candidates if c["num"] == num), None)
+            if not cur:
+                continue
+            if cur["column"] == target:
+                continue
+            args = [sys.executable, str(card_py), "--board", str(board),
+                    "fly", str(num), target, "--pause-ms", "150"]
+            if target == "done":
+                args += ["--writeup", f"Recon: {reason}"]
+            else:
+                args += ["--note", f"Recon → {target}: {reason}"]
+            try:
+                out = subprocess.run(args, capture_output=True, text=True, timeout=8)
+            except subprocess.SubprocessError:
+                continue
+            if out.returncode == 0:
+                n_moved += 1
+                print(f"  recon: #{num} → {target}  ({reason[:60]})",
+                      file=sys.stderr)
+        print(f"  recon: {n_moved} card(s) moved", file=sys.stderr)
+        _emit_progress(card_py, board, 1, 1,
+                       f"✓ {n_moved} card(s) brought up to date", "reconcile",
+                       final=True)
+        return n_moved
 
 
 

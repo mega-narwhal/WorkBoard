@@ -85,6 +85,47 @@ def board_lock(target, timeout: float = 5.0):
             f.close()
 
 
+RECON_LOCK_NAME = ".recon.lock"
+
+
+@contextlib.contextmanager
+def recon_lock(board):
+    """Non-blocking exclusive lock keyed on ``<board_dir>/.recon.lock``.
+
+    Distinct from ``board_lock`` (which waits-then-proceeds so a write is never
+    dropped). Reconcile is the opposite: a SECOND concurrent reconcile must NOT
+    run — two passes racing is what made cards shuffle twice and emit conflicting
+    "already up to date" / "N brought up to date" lines. So this yields True only
+    if the lock was free, False if another reconcile already holds it (no wait).
+    Callers that get False simply skip — the in-flight pass already covers it.
+    """
+    lock_path = Path(board).parent / RECON_LOCK_NAME
+    f = None
+    acquired = False
+    try:
+        f = open(lock_path, "a+")
+        try:
+            if _HAVE_FCNTL:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            elif msvcrt is not None:
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            acquired = True
+        except OSError:
+            acquired = False
+        yield acquired
+    finally:
+        if f is not None:
+            if acquired:
+                try:
+                    if _HAVE_FCNTL:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    elif msvcrt is not None:
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            f.close()
+
+
 def write_backup(board_path, data: bytes, keep: int = BACKUP_KEEP) -> None:
     """Snapshot a just-committed board to ``<board_dir>/.backups/board-<rev>.json``
     and prune to the newest ``keep`` revs.
