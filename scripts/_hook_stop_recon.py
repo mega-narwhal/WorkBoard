@@ -83,6 +83,42 @@ def _bash_cmd(o: dict) -> str:
     return "\n".join(cmds)
 
 
+def _in_scope_edits(o: dict, project_root) -> int:
+    """Count edit/write tool_use blocks in this assistant message whose target
+    file is INSIDE project_root (#78). Edits to files OUTSIDE the board's
+    project — e.g. ~/.claude memory files, another repo, scratch notes — are not
+    board work, so they must not push a turn over the un-carded threshold (the
+    false-positive that blocked turns doing only memory/doc edits). When
+    project_root is None, or a path can't be determined, the edit counts
+    (conservative — never under-count real project work)."""
+    msg = o.get("message") or {}
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return 0
+    n = 0
+    for blk in content:
+        if not (isinstance(blk, dict) and blk.get("type") == "tool_use"):
+            continue
+        if str(blk.get("name", "")).lower() not in EDIT_TOOLS:
+            continue
+        if project_root is None:
+            n += 1
+            continue
+        inp = blk.get("input") or {}
+        fp = inp.get("file_path") or inp.get("notebook_path") or ""
+        if not fp:
+            n += 1                       # unknown path → count (conservative)
+            continue
+        try:
+            rp = Path(fp).resolve()
+            in_scope = rp == project_root or project_root in rp.parents
+        except Exception:
+            in_scope = True              # unparseable → count (conservative)
+        if in_scope:
+            n += 1
+    return n
+
+
 def _is_real_user(o: dict) -> bool:
     """True for a genuine user PROMPT, not a tool_result. Claude Code records
     tool results ALSO as type=='user', so naively resetting the per-turn window
@@ -103,8 +139,16 @@ def _is_real_user(o: dict) -> bool:
     return False
 
 
-def scan_transcript(path: Path) -> dict:
-    """Tally this session's activity from its own transcript jsonl."""
+def scan_transcript(path: Path, project_root=None) -> dict:
+    """Tally this session's activity from its own transcript jsonl. Edits are
+    scoped to project_root (#78): edits to files outside the board's project
+    don't count toward the un-carded-work threshold."""
+    pr = None
+    if project_root is not None:
+        try:
+            pr = Path(project_root).resolve()
+        except Exception:
+            pr = None
     edits = 0
     ship_signals = 0
     card_actions = 0
@@ -132,11 +176,7 @@ def scan_transcript(path: Path) -> dict:
                         ship_signals = 0
                         card_actions = 0
                 elif tp == "assistant":
-                    names = _tool_name(o)
-                    if names:
-                        for n in names.split():
-                            if n in EDIT_TOOLS:
-                                edits += 1
+                    edits += _in_scope_edits(o, pr)
                     bash = _bash_cmd(o).lower()
                     if bash:
                         if any(w in bash for w in SHIP_RE_WORDS):
@@ -218,7 +258,10 @@ def main() -> int:
     if board_path is None:
         return 0
 
-    act = scan_transcript(Path(transcript)) if transcript else {
+    # Scope edit-counting to THIS board's project root (#78) so edits to files
+    # outside it (memory, other repos) don't trip the un-carded backstop.
+    project_root = board_path.parent.parent
+    act = scan_transcript(Path(transcript), project_root) if transcript else {
         "edits": 0, "ship_signals": 0, "card_actions": 0, "user_turns": 0}
 
     board = load_board(board_path)
@@ -257,10 +300,16 @@ def main() -> int:
     # so we never false-block before the baseline exists.
     carded = rev_advanced or act["card_actions"] > 0 or prev_rev is None
 
-    # Findings — windowed to THIS turn (act) + state-based carding.
+    # Findings — windowed to THIS turn (act) + state-based carding. An existing
+    # In-Progress card means the unit IS declared live (#78): the cross-turn
+    # pattern (fly inprogress in turn N, edit in N+1, fly done in N+2) left the
+    # card in flight, so the edit-heavy middle turn must NOT block. Genuine
+    # misses (project edits, no card.py, no rev bump, AND nothing in flight)
+    # still block. The deferred In-Progress reminder below still fires.
     uncarded_risk = (
         (act["ship_signals"] > 0 or act["edits"] >= EDIT_THRESHOLD)
         and not carded
+        and not inprogress
     )
     # Nothing worth surfacing → stay silent (don't nag on a read-only session).
     if not uncarded_risk and not inprogress and not batched:
