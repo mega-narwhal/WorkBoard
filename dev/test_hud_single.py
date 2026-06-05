@@ -205,10 +205,10 @@ def main():
             check(completes["n"] == 1, f"COMPLETE appeared exactly once (saw {completes['n']})")
             check(not ever_hidden["v"], "HUD NEVER hid mid-flow (single coherent HUD)")
 
-            # ---- auto-hide after final (6s) ----
-            page.wait_for_timeout(6500)
+            # ---- auto-hide after final (3.25s) ----
+            page.wait_for_timeout(3800)
             after = _hud(page)
-            check(not after["visible"], "HUD auto-hides ~6s after final")
+            check(not after["visible"], "HUD auto-hides ~3.25s after final")
 
             br.close()
     finally:

@@ -5192,9 +5192,11 @@ function renderColumn(col, cards) {
       h.querySelector('#lh-pct').textContent = '100%';
       h.querySelector('.lh-status b').innerHTML = '✓ COMPLETE';
       h.querySelector('#lh-window').textContent = label || 'extraction + sweep done';
-      // auto-fade the completed HUD so it doesn't linger over the filled board
+      // auto-fade the completed HUD so it doesn't linger over the filled board.
+      // 3.25s — brisk success-toast dwell (within Material's ~2–4s snackbar range);
+      // long enough to read "✓ COMPLETE — N up to date", short enough not to linger.
       if (_hideTimer) clearTimeout(_hideTimer);
-      _hideTimer = setTimeout(() => { try { el().style.display = 'none'; } catch (e) {} }, 6000);
+      _hideTimer = setTimeout(() => { try { el().style.display = 'none'; } catch (e) {} }, 3250);
       return HUD;
     }
   };
