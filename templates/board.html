@@ -1533,6 +1533,8 @@
   @keyframes lh-pulse{50%{opacity:0.35;}}
   #load-hud.lh-done .lh-fill{background:linear-gradient(90deg,#0f0,#7dff7d);}
   #load-hud.lh-done #load-hud-head{color:#0f0;}
+  /* #119 drag HUD — kept in code (still logs) but hidden from view per request. */
+  #drag-hud{display:none!important;}
   /* Reconcile uses a plain determinate fill: EMPTY at start (0/1) → FULL on
      completion (the bar still drains-then-fills as its own phase). Numbers are
      hidden (just the bar) via the .lh-recon rule below. */

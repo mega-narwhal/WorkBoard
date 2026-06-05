@@ -8,26 +8,8 @@
   "columns": [
     {
       "id": "task",
-      "name": "📥 Task",
+      "name": "Task",
       "kind": "todo",
-      "stackUnder": null
-    },
-    {
-      "id": "backlog",
-      "name": "Backlog",
-      "kind": "todo",
-      "stackUnder": null
-    },
-    {
-      "id": "inprogress",
-      "name": "In Progress",
-      "kind": "active",
-      "stackUnder": null
-    },
-    {
-      "id": "done",
-      "name": "Done",
-      "kind": "done",
       "stackUnder": null
     },
     {
@@ -43,6 +25,18 @@
       "stackUnder": "notes"
     },
     {
+      "id": "backlog",
+      "name": "Backlog",
+      "kind": "todo",
+      "stackUnder": null
+    },
+    {
+      "id": "inprogress",
+      "name": "In Progress",
+      "kind": "active",
+      "stackUnder": null
+    },
+    {
       "id": "mandatory",
       "name": "📌 MANDATORY",
       "kind": "todo",
@@ -52,6 +46,12 @@
       "id": "discarded",
       "name": "Discarded",
       "kind": "custom",
+      "stackUnder": "mandatory"
+    },
+    {
+      "id": "done",
+      "name": "Done",
+      "kind": "done",
       "stackUnder": null
     }
   ],
