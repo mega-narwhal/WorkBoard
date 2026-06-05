@@ -3583,14 +3583,42 @@ function enterApp() {
 // Done → Notes (matched by id OR case-insensitive name so it works across
 // boards with migrated column ids), then remaining columns by latest card
 // activity desc (empty columns last). Clears stackUnder. One undo entry.
+// #105 — conform a legacy 'mandatory' column to the canonical 'super-urgent' (post
+// #104 unify): rename it in place (and move its cards), or if a super-urgent column
+// already exists, merge the mandatory cards into it and drop the legacy column. Cards
+// are moved, never deleted. Idempotent (no-op once a board is already canonical).
+function _conformLegacyColumns() {
+  if (!state || !Array.isArray(state.columns)) return;
+  const isMandatory = c => c.id === 'mandatory' || /mandatory$/i.test(c.name || '');
+  const legacy = state.columns.filter(c => c.id !== 'super-urgent' && isMandatory(c));
+  if (!legacy.length) return;
+  let su = state.columns.find(c => c.id === 'super-urgent');
+  const drop = new Set();
+  for (const c of legacy) {
+    const oldId = c.id;
+    (state.cards || []).forEach(card => { if (card.column === oldId) card.column = 'super-urgent'; });
+    if (!su) {                       // rename this one in place → become super-urgent
+      c.id = 'super-urgent';
+      c.name = '🚨 SUPER URGENT';
+      su = c;
+    } else {                         // a super-urgent already exists → drop the legacy col
+      drop.add(oldId);
+    }
+  }
+  if (drop.size) state.columns = state.columns.filter(c => !drop.has(c.id));
+  // any column stacked under the dropped legacy id now points at super-urgent
+  state.columns.forEach(c => { if (c.stackUnder && drop.has(c.stackUnder)) c.stackUnder = 'super-urgent'; });
+}
+
 async function resetColumnsToDefault() {
   if (!state) return;
   if (!(await miniConfirm('Reset column order?', {
-    sub: 'Reorders columns to: Task · Notes+Ideas · Backlog · In Progress · Mandatory+Discarded · Done (Ideas stacked under Notes, Discarded under Mandatory), then any extra columns by latest activity. No cards or columns are deleted — ' + undoHint() + ' to undo.',
+    sub: 'Reorders to: Task · Notes+Ideas · Backlog · In Progress · 🚨 Super-Urgent+Discarded · Done (Ideas under Notes, Discarded under Super-Urgent), then extra columns by recency. A legacy Mandatory column is upgraded to 🚨 Super-Urgent (its cards move with it). No cards deleted — ' + undoHint() + ' to undo.',
     okText: 'Reset',
     okClass: 'primary',
   }))) return;
   pushUndo();
+  _conformLegacyColumns();   // #105 — upgrade a legacy 'mandatory' column → 'super-urgent' first
   // #103 — restore the canonical bootstrap layout (matches templates/board.json #94):
   // Task · Notes(+Ideas) · Backlog · In Progress · Mandatory(+Discarded) · Done.
   // Stacks are RE-CREATED (Ideas under Notes, Discarded under Mandatory), not flattened.
