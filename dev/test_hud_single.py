@@ -122,8 +122,8 @@ def main():
             check(first["visible"], "HUD visible at start")
             no_tail = page.evaluate("() => !document.getElementById('lh-tail')")
             check(no_tail, "no #lh-tail line (lean HUD — bottom no.3 removed)")
-            check(first["done"].lstrip("0") == "1" or first["done"] == "1",
-                  f"starts 1-based (got {first['done']}/{first['total']}, want 1/{REP})")
+            check(first["done"] == "0",
+                  f"starts at TRUE progress 0/{REP} (got {first['done']}/{first['total']})")
 
             SS = Path(os.path.expanduser("~/Desktop/ss"))
             SS.mkdir(parents=True, exist_ok=True)
@@ -140,8 +140,15 @@ def main():
                     last_rep = emit({"done": REP, "total": REP, "phase": "replay",
                                      "label": "day-1 replayed in 6s · speeding up ▸▸"})
                 else:
-                    last_rep = emit({"done": done, "total": REP, "phase": "replay",
-                                     "label": f"{done * 3} card(s) emitted so far"})
+                    st = emit({"done": done, "total": REP, "phase": "replay",
+                               "label": f"{done * 3} card(s) emitted so far"})
+                    last_rep = st
+                    # REGRESSION GUARD (#76): with N-1 chunks done the HUD must read
+                    # N-1/N — NOT a premature N/N (the 1-based bump that made a slow
+                    # last chunk look like a "stall at 9/9").
+                    if done == REP - 1:
+                        check(st["done"] == str(REP - 1),
+                              f"{REP-1} of {REP} done shows {REP-1}/{REP}, not premature {REP}/{REP} (got {st['done']}/{st['total']})")
             check(last_rep["done"] == str(REP) and last_rep["total"] == str(REP),
                   f"replay ends at {REP}/{REP} (got {last_rep['done']}/{last_rep['total']})")
             check(last_rep["visible"], "HUD still visible after replay (handoff, no hide)")
@@ -215,7 +222,7 @@ def main():
         print("\n".join(failures))
         print(f"\nFAILED {len(failures)} check(s)")
         sys.exit(1)
-    print(f"\n✓ ALL {len(log)} checks passed — single coherent HUD, 1-based, no race")
+    print(f"\n✓ ALL {len(log)} checks passed — single coherent HUD, true-progress, no race")
 
 
 if __name__ == "__main__":

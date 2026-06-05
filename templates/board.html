@@ -5117,11 +5117,12 @@ function renderColumn(col, cards) {
       const h = el(); h.classList.remove('lh-done'); h.style.display = '';
       const isRecon = phase === 'reconcile';
       h.classList.toggle('lh-recon', isRecon);  // hide N/M & % during reconcile (just the bar)
-      // Extraction is 1-based ("current item" in flight = done+1 → starts 1/N,
-      // reaches N/N at the last chunk). Reconcile is a plain 0→1 fill instead:
-      // raw `done` so it shows an EMPTY bar at the start (0/1) and only fills on
-      // completion — not the 1-based bump that snapped it straight to full.
-      const cur = isRecon ? done : (total ? Math.min(done + 1, total) : 0);
+      // TRUE progress: show chunks actually COMPLETED (raw done), never done+1.
+      // The old 1-based bump reached N/N when only N-1 chunks were done — so a slow
+      // last chunk (e.g. a recursive retry) looked like a "stall at 9/9". The bar
+      // now reads k/N while chunk N is still running, and only snaps to N/N via the
+      // terminal handoff()/done() the instant it truly finishes (→ instant speedup).
+      const cur = total ? Math.min(done, total) : 0;
       const pct = total ? Math.round(cur/total*100) : 0;
       h.querySelector('#lh-done').textContent = String(cur).padStart(String(total||0).length, '0');
       h.querySelector('#lh-total').textContent = total;
