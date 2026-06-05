@@ -4974,9 +4974,17 @@ function renderColumn(col, cards) {
   if (col.id === 'done') {
     // Group by doneAt LOCAL date (not UTC) so a SGT-evening done event
     // doesn't get binned under the previous UTC day.
+    // EXCEPTION (#90): bootstrap-mined cards carry the existing 'discovered' tag
+    // and their doneAt is the replay moment (= now), not when the work shipped —
+    // so they'd all bunch under "today". For those, key off createdAt (the
+    // historical bucket time) instead. Live cards (no 'discovered') keep doneAt,
+    // preserving the "shipped on <day>" grouping. No new tag — reuses 'discovered'.
+    const doneSortTs = c => (c.tags && c.tags.includes('discovered'))
+      ? (c.createdAt || c.doneAt || c.updatedAt)
+      : (c.doneAt || c.updatedAt || c.createdAt);
     const groups = {};
     cards.forEach(c => {
-      const src = c.doneAt || c.updatedAt || c.createdAt;
+      const src = doneSortTs(c);
       const day = src ? localYmd(src) : 'unknown';
       (groups[day] = groups[day] || []).push(c);
     });
@@ -4994,8 +5002,8 @@ function renderColumn(col, cards) {
       // #89 BOARD-DONE-LIFO — within each day group, order latest-resolved
       // first so the most recently shipped card sits at the top of its day.
       const sorted = groups[day].slice().sort((a, b) => {
-        const ta = a.doneAt || a.updatedAt || a.createdAt || '';
-        const tb = b.doneAt || b.updatedAt || b.createdAt || '';
+        const ta = doneSortTs(a) || '';
+        const tb = doneSortTs(b) || '';
         return tb.localeCompare(ta); // desc — ISO strings compare lexicographically
       });
       sorted.forEach(card => body.appendChild(renderCardCompact(card)));
