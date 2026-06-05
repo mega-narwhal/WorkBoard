@@ -36,6 +36,7 @@ Silent-fail, exit 0 always. Never blocks the subagent.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -47,9 +48,71 @@ SKIP_TYPES = {"explore", "plan"}
 
 QUEUE_NAME = ".subagent_queue.jsonl"
 NUM_RE = re.compile(r"#(\d+)")
+SID_RE = re.compile(r"subtask \+ (\S+):")   # parse new subtask id from card.py
 # Conservative, explicit-only bug markers in the subagent's OWN output.
 BUG_MARKERS = ("bug:", "regression:", "traceback (most recent call last)")
 EDIT_TOOLS = {"edit", "write", "multiedit", "notebookedit"}
+
+# --- Subagent card-tracking MODE dial (#79) ---------------------------------
+# Controls WHERE a subagent's work lands, so internal tooling agents don't
+# pollute the board with top-level cards while genuine agent-to-agent product
+# work still maps richly. Resolved per board: env override → board.settings →
+# default. The three modes:
+#   off      — no subagent tracking at all (total silence).
+#   subtask  — (DEFAULT, = option 1c) the subagent's work becomes a SUBTASK of
+#              the active In-Progress card; if there's no active card, NOTHING is
+#              created (an internal helper with nothing to attach to is noise).
+#   collab   — (= option 1b opt-in, for agent-to-agent product builds) the
+#              subagent gets its OWN child card linked to an epic
+#              (board.settings.subagentEpic), mirroring the agent tree.
+VALID_MODES = {"off", "subtask", "collab"}
+DEFAULT_MODE = "subtask"
+
+
+def resolve_mode(board: Path) -> str:
+    env = (os.environ.get("BOARD_SUBAGENT_CARDS") or "").strip().lower()
+    if env in VALID_MODES:
+        return env
+    try:
+        d = json.loads(board.read_text(errors="replace"))
+        m = ((d.get("settings") or {}).get("subagentCards") or "").strip().lower()
+        if m in VALID_MODES:
+            return m
+    except Exception:
+        pass
+    return DEFAULT_MODE
+
+
+def _board_dict(board: Path) -> dict:
+    try:
+        return json.loads(board.read_text(errors="replace"))
+    except Exception:
+        return {}
+
+
+def active_card_num(board: Path) -> str | None:
+    """The card the work is currently flowing into = the active IP pulse.
+    Prefer board.activeWorkId (a card id); fall back to the most-recently-updated
+    inprogress card. None if nothing is in flight."""
+    d = _board_dict(board)
+    cards = d.get("cards") or []
+    awid = d.get("activeWorkId")
+    if awid:
+        for c in cards:
+            if c.get("id") == awid:
+                return str(c.get("num"))
+    ip = [c for c in cards
+          if c.get("column") == "inprogress" and not c.get("doneAt")]
+    if not ip:
+        return None
+    ip.sort(key=lambda c: c.get("updatedAt") or "", reverse=True)
+    return str(ip[0].get("num"))
+
+
+def epic_num(board: Path) -> str | None:
+    """The collab-mode epic card the orchestrator stashed (settings.subagentEpic)."""
+    n = (_board_dict(board).get("settings") or {}).get("subagentEpic")
+    return str(n) if n else None
 
 
 def find_board(start: Path) -> Path | None:
@@ -129,17 +192,42 @@ def do_spawn(payload: dict) -> None:
     if board is None:
         return
 
+    mode = resolve_mode(board)
+    if mode == "off":
+        return                            # no tracking; stop is also a no-op
+
     # Read-only recon -> don't card, but keep FIFO aligned with a skip marker.
     if stype.lower() in SKIP_TYPES:
         queue_push(board, {"skip": True, "type": stype, "desc": desc, "ts": _now()})
         return
 
-    out = run_card(board, [
-        "add", "--column", "task",
-        "--title", f"{desc}",
-        "--tag", "subagent", "--tag", stype,
-        "--origin", f"[subagent:{stype}] {prompt}",
-    ])
+    if mode == "subtask":
+        # (1c) Attach to the active In-Progress card as a subtask. No active card
+        # => nothing to attach to => create NOTHING (internal helper = noise).
+        parent = active_card_num(board)
+        if parent is None:
+            queue_push(board, {"skip": True, "type": stype, "desc": desc,
+                               "ts": _now(), "note": "no-active-card"})
+            return
+        out = run_card(board, ["subtask", "add", parent,
+                               f"[subagent:{stype}] {desc}"])
+        ms = SID_RE.search(out)
+        if not ms:
+            queue_push(board, {"skip": True, "type": stype, "desc": desc,
+                               "ts": _now(), "note": "subtask-add-failed"})
+            return
+        queue_push(board, {"parent": parent, "sid": ms.group(1),
+                           "type": stype, "desc": desc, "ts": _now()})
+        return
+
+    # mode == "collab": own child card, linked to the epic if one is set.
+    add_args = ["add", "--column", "task", "--title", f"{desc}",
+                "--tag", "subagent", "--tag", stype,
+                "--origin", f"[subagent:{stype}] {prompt}"]
+    epic = epic_num(board)
+    if epic:
+        add_args += ["--link", epic]
+    out = run_card(board, add_args)
     m = NUM_RE.search(out)
     if not m:
         # Card add failed — record a skip marker so the matching stop is a no-op
@@ -149,7 +237,8 @@ def do_spawn(payload: dict) -> None:
         return
     num = m.group(1)
     run_card(board, ["fly", num, "inprogress", "--pause-ms", "120"])
-    queue_push(board, {"card": num, "type": stype, "desc": desc, "ts": _now()})
+    queue_push(board, {"card": num, "type": stype, "desc": desc,
+                       "ts": _now(), "epic": epic})
 
 
 # ---- stop (SubagentStop) ---------------------------------------------------
@@ -205,11 +294,20 @@ def do_stop(payload: dict) -> None:
     board = find_board(Path(cwd))
     if board is None:
         return
+    if resolve_mode(board) == "off":
+        return                            # spawn pushed nothing; nothing to pop
     entry = queue_pop(board)
     if entry is None or entry.get("skip"):
-        # No working card to close (read-only subagent, add-failure, or an
-        # orphaned stop). Silent — never invent a card.
+        # No working card to close (read-only subagent, add-failure, no active
+        # card in subtask mode, or an orphaned stop). Silent — never invent one.
         return
+
+    # subtask mode (1c): just close the subtask under its parent card. No
+    # writeup card-fly; the subtask checkbox is the live signal.
+    if entry.get("sid"):
+        run_card(board, ["subtask", "done", entry["parent"], entry["sid"]])
+        return
+
     num = entry.get("card")
     if not num:
         return
