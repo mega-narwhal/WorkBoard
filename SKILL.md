@@ -29,6 +29,15 @@ user asks "did we do X?", reach for `card.py` / the digest, not recall.
 > → file. Part of an existing card's life? → `subtask` / `fly`, don't open new. Clarifying intent
 > before any work? → no card yet. Micro-turn ("yes", "rerun", "open the board")? → no card.
 
+> **Granularity — a top-level card is for USER-named work, not your mechanics.** One card per unit
+> the *user* asked for; your internal steps to deliver it (sub-agents you spawn, exploration, a
+> deploy/reinstall step, a doc tweak that ships with the change) are **subtasks of that card, or
+> nothing** — never their own top-level cards. If the user lists 5 tasks → 5 cards; if one task takes
+> 10 internal steps → 1 card + subtasks, *not* 10 cards. Sub-agents follow this automatically via the
+> mode dial (`board.settings.subagentCards` / `BOARD_SUBAGENT_CARDS`): **`subtask`** (default) attaches
+> a spawned agent's work to the active In-Progress card (none active → nothing); **`collab`** (opt-in)
+> gives agent-to-agent product work its own child cards under an epic; **`off`** = silent.
+
 **`fly` is the ONLY column-change verb** — `card.py fly <num> <col>` mutates data AND asserts the
 animation contract (~320ms glide + 400ms pause so chained flies don't race the browser). Side-effect
 flags: `--note`, `--writeup`/`--writeup-stdin`, `--subtask`, `--bug`, `--improve`. The old `move` was

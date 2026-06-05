@@ -56,6 +56,26 @@ other settings. Restart any open Claude Code session to pick up the change.
 > `--hook all`/`--hook live` set. The LIVE guarantee itself comes from the Stop backstop,
 > not the per-edit flash — the flash is a UX nicety on top.
 
+### Subagent tracking — the mode dial (`#79`)
+
+Two further hooks ship in the plugin manifest (`hooks/hooks.json`, always on with the
+plugin — not in `install_hooks.py`): `PreToolUse(matcher Agent)` → `hook_subagent_spawn.sh`
+and `SubagentStop` → `hook_subagent_stop.sh`, both backed by `_hook_subagent_recon.py`.
+They track work done by spawned sub-agents **without the sub-agent needing to know the
+protocol**. Where that work lands is the **mode dial**, resolved per board from
+`BOARD_SUBAGENT_CARDS` (env) → `board.json → settings.subagentCards` → default:
+
+| Mode | A spawned sub-agent's work becomes… | Use |
+|---|---|---|
+| `off` | nothing | no sub-agent tracking at all |
+| `subtask` *(default)* | a **subtask of the active In-Progress card**; **nothing** if no card is in flight | normal work — internal helper/tooling agents don't pollute the board with top-level cards |
+| `collab` | its **own child card linked to an epic** (`settings.subagentEpic`) | agent-to-agent product builds — the board mirrors the agent tree (epic → per-agent cards → subtasks) |
+
+Read-only sub-agent types (`Explore`, `Plan`) are never carded in any mode. To run an
+agent-to-agent build: set `settings.subagentCards: "collab"` + `settings.subagentEpic: <epic#>`
+on the board (the orchestrator creates the epic first), then each collaborator's deliverable
+auto-maps to a child card under it.
+
 ---
 
 ## Autostart install (cross-platform · #103)
