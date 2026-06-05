@@ -9,7 +9,7 @@
     /* Boho 2% palette — light, warm, hue-tinted columns; cards float white. */
     --bg:               #F8FBFC; /* frosted glass — page bg */
     --bg-header:        #FAF6F1; /* warm cream — header bar */
-    --col-bg:           #F4F2EE; /* neutral default column tint (custom columns) */
+    --col-bg:           #FDFCF6; /* boho pre-paint fallback (JS colBohoBg is authoritative) */
     --col-header:       #5B4D43; /* warm dark for column titles */
     --card-bg:          #FFFFFF;
     --card-border:      #E6E2DC; /* warm taupe hairline */
@@ -22,11 +22,8 @@
     --purple:           #8E78A8; /* softer purple — ideas badge */
     --neutral:          #ECE6DD; /* warm grey for tags / progress / counts */
     /* Boho per-column tints (2% off-white in each hue family) */
-    --col-ideas:        #FDFAFB; /* cotton candy */
-    --col-backlog:      #FDFAF5; /* soft camel */
-    --col-inprogress:   #FDFCF6; /* vanilla ice cream */
-    --col-blocked:      #FAF8FC; /* blueberry cream */
-    --col-done:         #F9FCF9; /* morning mist */
+    /* #472 — boho column palette now lives in JS (BOHO_DONE + BOHO_CYCLE / colBohoBg);
+       the per-column --col-* vars were removed (single source of truth in the script). */
     --shadow:       0 1px 0 rgba(44,38,32,.08), 0 1px 2px rgba(44,38,32,.05);
     --shadow-hover: 0 4px 12px rgba(44,38,32,.10), 0 1px 3px rgba(44,38,32,.06);
   }
@@ -362,11 +359,9 @@
     padding: 8px;
   }
   /* Boho per-column hue tints (hue family at ~2% off-white). */
-  .column[data-col="ideas"]      { background: var(--col-ideas); }
-  .column[data-col="backlog"]    { background: var(--col-backlog); }
-  .column[data-col="inprogress"] { background: var(--col-inprogress); }
-  .column[data-col="blocked"]    { background: var(--col-blocked); }
-  .column[data-col="done"]       { background: var(--col-done); }
+  /* #472 — column backgrounds are assigned in JS (colBohoBg): 'done' pinned to
+     morning mist, all other columns recycle the boho palette by order. var(--col-bg)
+     below is only the pre-paint fallback. */
   .column.dragover { background: #F1E9DF; box-shadow: inset 0 0 0 2px var(--accent); }
   /* #119 — while a card is mid-drag, dim its SOURCE column so it's obvious
      the card is "leaving" and the user's attention is drawn to the cursor. */
@@ -3980,6 +3975,28 @@ const _COL_KIND_COLOR = {
   blocked: '#A03030',   // deep red — Blocked
   done:    '#3D8F65',   // emerald — Done
 };
+// #472 — boho column palette. Every column's background is a boho tint: the
+// 'done' column is PINNED to morning mist; all other columns recycle the 5
+// remaining boho colors by their order in state.columns (so new/custom columns
+// auto-pick the next color, cycling). Applies to every board (shared board.html)
+// and therefore every fresh bootstrap.
+const BOHO_DONE  = '#F9FCF9';  // morning mist · faint sage  (done only)
+const BOHO_CYCLE = [
+  '#FDFAFB',  // cotton candy   · faint pink
+  '#FDFCF6',  // vanilla cream  · cream-yellow
+  '#F8FBFC',  // frosted glass  · faint cool blue
+  '#FAF8FC',  // blueberry cream· faint lavender
+  '#FDFAF5',  // soft camel     · faint warm tan
+];
+function colBohoBg(col) {
+  if (!col) return BOHO_CYCLE[0];
+  if (col.id === 'done') return BOHO_DONE;
+  const nonDone = (state && state.columns || []).filter(c => c.id !== 'done');
+  let i = nonDone.findIndex(c => c.id === col.id);
+  if (i < 0) i = 0;
+  return BOHO_CYCLE[i % BOHO_CYCLE.length];
+}
+
 function columnColor(col) {
   if (!col) return '#8b8680';
   if (col.kind && _COL_KIND_COLOR[col.kind]) return _COL_KIND_COLOR[col.kind];
@@ -4683,6 +4700,7 @@ function renderColumn(col, cards) {
   const el = document.createElement('div');
   el.className = 'column';
   el.dataset.col = col.id;
+  el.style.background = colBohoBg(col);   // #472 — boho palette: done pinned, others recycle
 
   // Card drag-drop (cards moving INTO this column) — distinguish from
   // column-reorder drag by checking the dataTransfer type on dragover.
