@@ -1559,7 +1559,6 @@
   <span class="sp"></span>
   <button id="reset-cols-btn" class="header-pill" style="display:none" title="Restore default column order: Task → Backlog → In Progress → Done → Notes, then others by recency">↺ Reset columns</button>
   <button id="tags-btn" class="header-pill" style="display:none" title="Show all tags used on this board">🏷 Tags <span id="tags-count">0</span></button>
-  <button id="sort-time-btn" class="header-pill" style="display:none" title="Reorder every card by time (newest first) — one glide animation, no commands">⇅ Sort by time</button>
   <span class="view-toggle" id="view-toggle" style="display:none">
     <button data-view="board" class="active">Board</button>
     <button data-view="calendar">Calendar</button>
@@ -3567,8 +3566,6 @@ function enterApp() {
   $('#setup').style.display = 'none';
   $('#view-toggle').style.display = '';
   $('#tags-btn').style.display = '';
-  const sortBtn = $('#sort-time-btn');
-  if (sortBtn) { sortBtn.style.display = ''; sortBtn.onclick = flipResort; }
   const resetBtn = $('#reset-cols-btn');
   if (resetBtn) {
     resetBtn.style.display = '';
@@ -5213,6 +5210,7 @@ function renderColumn(col, cards) {
 
 let _es = null;
 let _sseConnected = false;
+let _bootstrapFillSeen = false;  // #92 — a fill (replay/speedup/solo) ran this HUD session → auto-reorder after its reconcile
 
 function cssEsc(s) {
   // CSS.escape exists everywhere modern; fallback for paranoia.
@@ -5718,14 +5716,26 @@ function startSSE() {
     try {
       const d = JSON.parse(e.data);
       if (!window.BoardLoadHUD) return;
+      // #92 — remember a bootstrap FILL ran this HUD session (replay/speedup/solo),
+      // so we only auto-reorder after a reconcile that FOLLOWED a fill (i.e. a
+      // bootstrap), not after a standalone live SessionStart recon.
+      if (d.phase === 'replay' || d.phase === 'speedup' || d.phase === 'solo') _bootstrapFillSeen = true;
       // #327 single-HUD: completion is driven by the backend `final` flag, NOT by
       // "done>=total" — a stage hitting 100% (replay/speedup/solo) is NOT the end,
       // it hands off to the next stage on the SAME HUD (no flash/disappear/race).
       if (d.final) {
         BoardLoadHUD.done(d.label, d.phase);
-        // #101 — fill fully done; let the last card writes apply, then run the
-        // one-time newest-on-top sort across all columns (self-guards to once).
-        setTimeout(sortAllColumnsOnceAfterFill, 600);
+        // #92 — ONLY during bootstrap, ONLY after the reconcile finishes: glide
+        // every card into time order (flipResort, FLIP animation). A standalone
+        // live recon (no preceding fill) keeps the cheap one-time snap-sort.
+        if (d.phase === 'reconcile' && _bootstrapFillSeen) {
+          _bootstrapFillSeen = false;
+          setTimeout(flipResort, 600);
+        } else {
+          // #101 — fill fully done; let the last card writes apply, then run the
+          // one-time newest-on-top sort across all columns (self-guards to once).
+          setTimeout(sortAllColumnsOnceAfterFill, 600);
+        }
       } else if (d.total > 0 && d.done >= d.total) {
         // Stage reached 100% but isn't final → advance the header to the next
         // stage and stay visible. replay→speedup, speedup/solo→reconcile.
