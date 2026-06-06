@@ -56,15 +56,23 @@ removed because it jumped. **No "want me to add a card?" prompt — just do it.*
    just not live-tracked) — it's a mirror, not a gate. Declaring up front (law #1) is still 100% on
    you; the hook only makes the miss visible the next session so it self-corrects.
 
-### Shape → pattern (match the incoming work, then card it that way)
+### Shape → pattern (LAW — every unit MUST match exactly one of these rows)
+
+> **The master discriminator is THE HEADER TEST.** Before choosing a shape, ask:
+> *can I write **one honest `verb + noun` header** that covers all the parts in front of me?*
+> **Yes** → they're parts of ONE deliverable → **one card, parts as subtasks**.
+> **No** → they're independent units → **N cards, one each**.
+> The header you can (or can't) write IS the decision — never crammed-into-the-title; the
+> parts always live in subtasks, the title stays a clean `verb + noun`.
 
 | Shape | Pattern |
 |---|---|
-| **Single unit** | 1 card: `add` → `fly inprogress` (before editing) → `fly done --writeup`. The atomic template the others compose from. |
-| **Multiple to-dos in one message** | `add` **all N up front** into Task (so none gets buried — the VISION "task 5 forgotten" case) → fly them `inprogress`→`done` **one at a time**; never light two pulses at once. |
-| **Plan mode (multi-step plan)** | 1 **parent** card + `subtask add` per step; fly parent `inprogress`, `subtask done <n> <sid>` at each commit, `fly done` once after final verify — *not* one done-card per step (that shows "done" while the build is half-built). |
-| **Phase / tier effort** | 1 card **per tier**, carded task→IP→done **before the next tier's card exists** (one in flight). Optional thin **epic** parked in `backlog` as a link hub, never IP'd. A discovery inside a tier → `subtask add` of that tier, not a new sibling. |
-| **Mid-task branch** *(the exception: new work that does NOT spawn a card)* | A discovery **in service of the current card's goal** nests as a **subtask**, not a new card — this is the one shape where new work stays *inside* an existing card. Parent **stays `inprogress`**; `subtask add <n> "<finding>" --parent <sid>` the instant a blocker trees out (1→1.1→1.1.1), *before* acting on it; unwind leaf-first, parent `fly done` last. (A *genuinely unrelated* discovery is NOT this case → it's a new card / auto-idea, per the rows above.) Use `blocked` only for an external hand-off — it drops the pulse, which is how deep branches get forgotten. |
+| **1. Single task** | 1 card: `add` → `fly inprogress` (before editing) → `fly done --writeup`. Title = `verb + noun`. The atomic template the others compose from. |
+| **2a. Multiple RELATED parts — one honest header** *(passes the header test)* | **1 card + N subtasks.** Title = the shared `verb + noun` header (e.g. `Unify urgent column`); each part = `subtask add <n> "<part>"` — **never** list the parts in the title. Fly the parent `inprogress`; `subtask done <n> <sid>` as each part finishes (it strikes through and the card shows `2/4`); `fly done` once the last part lands. |
+| **2b. Multiple INDEPENDENT tasks — no single header** *(fails the header test)* | **N cards.** `add` **all N up front** into Task (so none gets buried — the VISION "task 5 forgotten" case) → fly them `inprogress`→`done` **one at a time**; never light two pulses at once. If you can't name them all with one `verb + noun`, they are NOT one card. |
+| **3. Plan mode (multi-step plan)** | 1 **parent** card + `subtask add` per step (a header-test "yes" by construction); fly parent `inprogress`, `subtask done <n> <sid>` at each commit, `fly done` once after final verify — *not* one done-card per step (that shows "done" while the build is half-built). |
+| **4. Phase / tier effort** | 1 card **per tier**, carded task→IP→done **before the next tier's card exists** (one in flight). Optional thin **epic** parked in `backlog` as a link hub, never IP'd. A discovery inside a tier → `subtask add` of that tier, not a new sibling. |
+| **5. Mid-task branch** *(test: does it serve the CURRENT card's goal?)* | "Mid-task" is NOT the test — you're *always* mid-task. The test is **does resolving this serve the current card's goal?** **Yes** (a blocker you must clear to ship this card) → **subtask**, parent **stays `inprogress`**; `subtask add <n> "<finding>" --parent <sid>` the instant it trees out (1→1.1→1.1.1), *before* acting on it; unwind leaf-first, parent `fly done` last. **No** (e.g. doing backend, you spot an unrelated UI bug) → **NEW card** — `add` it into Task, keep your one pulse on the current card, pick it up after. Don't chase the tangent. Use `blocked` only for an external hand-off — it drops the pulse, which is how deep branches get forgotten. |
 
 ### After ship
 - **Regression** → `card.py fly <num> inprogress --bug "<what broke>"` — re-flies with the `bug` tag +
