@@ -260,6 +260,8 @@ def _looks_multipart(title: str, origin: str) -> bool:
     """Heuristic: does this card describe MORE THAN ONE part? Used by the
     decompose-before-IP guard (#103). Conservative — only fires on strong
     list signals so a single task with one stray comma doesn't trip it:
+      • a ` + `-joined title (the canonical multi-part shape, e.g.
+        `Column delete + grip drag + drag-to-trash`)
       • a numbered list with ≥2 items (`1. … 2. …` / `1) … 2)`)
       • `Header: a, b` — a colon followed by a comma-list
       • ≥2 commas in the title (a list of ≥3 things)
@@ -268,6 +270,8 @@ def _looks_multipart(title: str, origin: str) -> bool:
     title = title or ""
     origin = origin or ""
     text = f"{title}\n{origin}".lower()
+    if " + " in title:   # +-joined part labels — the canonical 2a title format
+        return True
     nums = re.findall(r"(?:^|\s)(\d+)[.)]\s", text)
     if len(set(nums)) >= 2:
         return True
