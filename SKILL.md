@@ -63,14 +63,14 @@ removed because it jumped. **No "want me to add a card?" prompt — just do it.*
 > **Yes** → they're parts of ONE deliverable → **one card** (parts in the title **and** as subtasks).
 > **No** → they're independent units → **N cards, one each**.
 > The header you can (or can't) write IS the *shape* decision. For a one-card unit the **title is the
-> glance**: the parts as short ` + `-joined labels (e.g. `Column delete + grip drag + drag-to-trash +
-> FLIP reorder`), **not** a vague abstract header (`Settle column` ❌). **Each part is also a subtask**
+> glance**: the parts separated by ` + ` (e.g. `Column delete + grip drag + drag-to-trash +
+> FLIP reorder`), each kept concise — **not** a vague abstract header (`Settle column` ❌). **Each part is also a subtask**
 > (fuller detail) for tick-off / `N/M` progress. Title = glance; subtasks = trackable detail.
 
 | Shape | Pattern |
 |---|---|
-| **1. Single task** | 1 card: `add` → `fly inprogress` (before editing) → `fly done --writeup`. Title = `verb + noun`. The atomic template the others compose from. |
-| **2a. Multiple RELATED parts — one deliverable** *(passes the header test)* | **1 card + N subtasks, decomposed BEFORE inprogress.** **Title = the parts as short ` + `-joined labels** (the glance, e.g. `Column delete + grip drag + drag-to-trash + FLIP reorder`); **each part is also a subtask** (fuller detail, for tick-off). **Long lists** (title never exceeds **4 ` + ` segments**): ≤4 parts → flat ` + ` title; **5–16 → group** into ≤4 *named* groups of ≤4 (title = the group names joined by ` + `; the group's items become **nested** subtasks via `subtask add <n> "<item>" --parent <gid>`); **>16 → it's a phase plan** (shape 4). Subtasks must exist before `fly inprogress` (5-step order below). |
+| **1. Single task** | 1 card: `add` → `fly inprogress` (before editing) → `fly done --writeup`. Title = a plain name, e.g. `Fix auth redirect` — **no ` + ` separators** (those are ONLY for multi-part cards; a single task is never `a + b`). The atomic template the others compose from. |
+| **2a. Multiple RELATED parts — one deliverable** *(passes the header test)* | **1 card + N subtasks, decomposed BEFORE inprogress.** **Title = the parts separated by ` + `** (each kept concise — the glance, e.g. `Column delete + grip drag + drag-to-trash + FLIP reorder`); **each part is also a subtask** (fuller detail, for tick-off). **Long lists** (title never exceeds **4 ` + ` segments**): ≤4 parts → flat ` + ` title; **5–16 → group** into ≤4 *named* groups of ≤4 (title = the group names separated by ` + `; the group's items become **nested** subtasks via `subtask add <n> "<item>" --parent <gid>`); **>16 → it's a phase plan** (shape 4). Subtasks must exist before `fly inprogress` (5-step order below). |
 | **2b. Multiple INDEPENDENT tasks — no single header** *(fails the header test)* | **N cards.** `add` **ALL N up front into Task FIRST** — before starting *any* of the work, so none gets buried (the VISION "task 5 forgotten" case) — *then* fly them `inprogress`→`done` **one at a time** (one pulse; never two lit). **Don't** add-one→finish-it→add-the-next; create the whole batch first. If you can't name them all with one label, they are NOT one card. |
 | **3. Plan mode (multi-step plan)** | 1 **parent** card + `subtask add` per step (a header-test "yes" by construction); fly parent `inprogress`, `subtask done <n> <sid>` at each commit, `fly done` once after final verify — *not* one done-card per step (that shows "done" while the build is half-built). |
 | **4. Phase / tier plan** | **1 card PER PHASE**, tagged `phase`, title `Phase N — <goal>`, in **Task**; the phase's deliverables are its **subtasks** (decompose-before-IP applies). The roadmap = N phase cards, glanceable — **never** a wall of one-card-per-deliverable. **Phase cards never go to `inprogress`** (a phase is too big for one pulse). To build a deliverable, **GRADUATE** it into its own card: `add --column task --title "<deliverable>" --link <phase#>` → `fly inprogress`; tick the phase's matching subtask when that card ships. One graduated card in flight at a time. (`card.py fly` **blocks** a `phase`-tagged card from entering inprogress and hands you the graduate command.) |
@@ -80,7 +80,7 @@ removed because it jumped. **No "want me to add a card?" prompt — just do it.*
 > A multi-part card's subtasks are created **while it is still in Task**, *before* it ever
 > flies to `inprogress`. Decomposition is part of *starting* the card, not part of finishing it.
 > **Do this, in this order, every time:**
-> 1. `card.py add --column task --title "<labelA + labelB + labelC>" --origin "<their words>"`  ← `+`-joined short labels (≤4 segments)
+> 1. `card.py add --column task --title "<part A + part B + part C>" --origin "<their words>"`  ← parts separated by ` + ` (≤4 segments)
 > 2. `card.py subtask add <n> "<part 1>"` … `subtask add <n> "<part N>"`  ← **decompose NOW, in Task** (one subtask per label; nest items with `--parent` when grouped)
 > 3. `card.py fly <n> inprogress`  ← only **after** the subtasks exist
 > 4. work each part → `card.py subtask done <n> <sid>` (card shows `1/N → 2/N → …`, struck through)
