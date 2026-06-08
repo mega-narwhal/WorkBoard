@@ -6161,6 +6161,33 @@ function startSSE() {
   };
 }
 
+// #526 — SSE self-heal watchdog. onerror trusts the browser's native
+// EventSource auto-reconnect, which covers transient drops but NOT a terminal
+// CLOSED state (readyState===2) — e.g. the server restarts and native reconnect
+// gives up. A VISIBLE board would then silently stop animating until a manual
+// refresh. This watchdog re-opens the stream whenever the tab is visible and
+// the stream is gone (null) or terminally closed. It deliberately does NOTHING
+// while hidden — the visibilitychange handler (#337) owns close-on-hide /
+// reopen-on-show, and we must not fight it. Cheap (one readyState check / 5s)
+// and idempotent (startSSE closes any prior handle first). The 3s poll already
+// guarantees state correctness; this restores the live glide.
+let _sseWatchdogTimer = null;
+function startSSEWatchdog() {
+  if (_sseWatchdogTimer) clearInterval(_sseWatchdogTimer);
+  _sseWatchdogTimer = setInterval(() => {
+    if (document.hidden) return;                       // #337 owns the hidden case
+    if (!window.EventSource) return;
+    // CONNECTING(0)/OPEN(1) → healthy or natively recovering; leave it.
+    // null or CLOSED(2) while visible → the stream is dead; re-open it.
+    if (!_es || _es.readyState === 2) startSSE();
+  }, 5000);
+}
+// A network flap that terminally kills the stream: reconnect the instant the OS
+// reports we're back online (don't wait up to 5s for the watchdog tick).
+window.addEventListener('online', () => {
+  if (!document.hidden && (!_es || _es.readyState === 2)) startSSE();
+});
+
 // ===== Init =====
 async function init() {
   // Close modal: ESC or click on overlay backdrop
@@ -6336,6 +6363,7 @@ async function init() {
     enterApp();
     startSSE();
     startPoll();
+    startSSEWatchdog();   // #526 — re-open a terminally-dead stream while visible
   } catch (e) {
     $('#setup-err').textContent =
       'Could not reach board server: ' + (e.message || e) +
