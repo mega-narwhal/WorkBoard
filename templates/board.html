@@ -1934,8 +1934,13 @@ function _renderLogLine(entry) {
   const esc = s => String(s).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
   const tagSuffix = entry.bug
     ? ' <span style="color:#ff6b6b;font-weight:600;">[🐞 bug]</span>' : '';
+  // #504 — source prefix so an automated move isn't mistaken for a hands-on one.
+  // Muted grey, lower-weight: "the system did this", not a card you touched.
+  const VIA_LABEL = { recon: 'Recon', undo: 'Undo', harvest: 'Auto-harvest', autoship: 'Auto-ship' };
+  const viaPrefix = entry.via && VIA_LABEL[entry.via]
+    ? `<span style="color:#a09ab8;">(${VIA_LABEL[entry.via]})</span> ` : '';
   const line = document.createElement('div');
-  line.innerHTML = `<span style="color:#777;">${entry.t}</span> <span style="color:${color};">${String(entry.kind).toUpperCase().padEnd(6, ' ')}</span> ${esc(entry.summary)}${tagSuffix}`;
+  line.innerHTML = `<span style="color:#777;">${entry.t}</span> <span style="color:${color};">${String(entry.kind).toUpperCase().padEnd(6, ' ')}</span> ${viaPrefix}${esc(entry.summary)}${tagSuffix}`;
   body.insertBefore(line, body.firstChild);
   while (body.childNodes.length > _LOGS_BUF_MAX) body.removeChild(body.lastChild);
 }
@@ -1950,12 +1955,13 @@ function replayLogs() {
 // if the HUD is open (cheap check). Used by SSE handlers. Optional `card` arg
 // appends tag chips (🐞 bug). #493 — also persisted to a rolling in-memory
 // buffer (debounced to localStorage) so the tail survives a refresh.
-function logEvent(kind, summary, card) {
+function logEvent(kind, summary, card, via) {
   const entry = {
     ts: Date.now(),
     t: new Date().toTimeString().slice(0,8),
     kind, summary: String(summary),
     bug: !!(card && (card.tags || []).includes('bug')),
+    via: via || null,  // #504 — recon|undo|harvest|autoship, else null
   };
   const buf = _logsBufEnsure();
   buf.push(entry);
@@ -5563,7 +5569,12 @@ function handleCardUpdated({ card, fromColumn, toColumn }) {
     simulateUserDragMove(card, fromColumn, toColumn, oldEl);
     refreshColumnCount(fromColumn);
     refreshColumnCount(toColumn);
-    logEvent('move', `#${card.num} ${fromColumn} → ${toColumn}`, card);
+    // #504 — the just-appended history event carries `via` (recon|undo|…) iff
+    // this move was automated. Guard on from/to so a stale prior via can't
+    // mislabel a hands-on move that happens to follow an automated one.
+    const h = card.history && card.history.length ? card.history[card.history.length - 1] : null;
+    const via = (h && h.from === fromColumn && h.to === toColumn) ? h.via : null;
+    logEvent('move', `#${card.num} ${fromColumn} → ${toColumn}`, card, via);
   } else {
     // In-place edit (title/priority/tags/subtask) — swap DOM, pulse + flash.
     const newEl = renderCardCompact(card);

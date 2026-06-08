@@ -244,16 +244,22 @@ def _set_active_work(d, card, old_col, new_col):
         d["activeWorkId"] = None
 
 
-def _record_move(card, old_col, new_col):
+def _record_move(card, old_col, new_col, via=None):
     """#258 — append a movement event {from, to, at} to the card's history so
     every column shift is timestamped. A clean structured label timeline for the
     transition-prediction model (#251) — lives in board.json, no JSONL parsing.
-    Creation is recorded with from=None. No-op when the column doesn't change."""
+    Creation is recorded with from=None. No-op when the column doesn't change.
+
+    #504 — optional ``via`` tags WHO moved the card (recon | undo | harvest |
+    autoship). Plain user/agent moves leave it unset. The Logs HUD reads the
+    latest event's via to prefix the line, e.g. `(Recon) MOVE #12 …`, so an
+    automated move is never mistaken for a hands-on one."""
     if old_col == new_col:
         return
-    card.setdefault("history", []).append({
-        "from": old_col, "to": new_col, "at": now_iso(),
-    })
+    ev = {"from": old_col, "to": new_col, "at": now_iso()}
+    if via:
+        ev["via"] = via
+    card.setdefault("history", []).append(ev)
 
 
 def _looks_multipart(title: str, origin: str) -> bool:
@@ -312,6 +318,7 @@ def cmd_fly(args, d, board):
     subtask  = getattr(args, "subtask", None)
     bug       = getattr(args, "bug", None)
     improve  = getattr(args, "improve", None)
+    via      = getattr(args, "via", None)  # #504 — who moved it (recon|undo|…)
     pause_ms = getattr(args, "pause_ms", 0)
     writeup  = maybe_stdin(getattr(args, "writeup", None),
                            getattr(args, "writeup_stdin", False))
@@ -454,7 +461,7 @@ def cmd_fly(args, d, board):
 
     c["updatedAt"] = now_iso()
     _set_active_work(d, c, old, args.column)
-    _record_move(c, old, args.column)
+    _record_move(c, old, args.column, via=via)
     rev = atomic_save(board, d)
 
     badge = " 🐞" if bug else (" ✨" if improve else "")
@@ -706,7 +713,7 @@ def cmd_auto_ship(args, d, board):
     c["writeup"] = writeup
     c["updatedAt"] = ts
     _set_active_work(d, c, old, "done")
-    _record_move(c, old, "done")
+    _record_move(c, old, "done", via="autoship")
     rev = atomic_save(board, d)
     print(f"✈ #{c['num']} {old} → done [auto-ship, {len(hits)} commit hits] (rev {rev})")
 

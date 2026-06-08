@@ -152,6 +152,10 @@ def build_parser():
                      help="sleep N ms after save (default 400, matches simulateUserDragMove)")
     pfy.add_argument("--force", action="store_true",
                      help="override the decompose-before-IP guard (genuinely one atomic task)")
+    pfy.add_argument("--via", default=None, metavar="SOURCE",
+                     choices=["recon", "undo", "harvest", "autoship"],
+                     help="#504 tag WHO moved it; Logs HUD shows e.g. (Recon) MOVE — "
+                          "omit for a normal hands-on move")
     pfy.set_defaults(fn=cmd_fly)
 
     # subtask
