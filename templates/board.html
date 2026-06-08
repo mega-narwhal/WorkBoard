@@ -1950,9 +1950,13 @@ function _renderLogLine(entry) {
     ? ' <span style="color:#ff6b6b;font-weight:600;">[🐞 bug]</span>' : '';
   // #504 — source prefix so an automated move isn't mistaken for a hands-on one.
   // Muted grey, lower-weight: "the system did this", not a card you touched.
-  const VIA_LABEL = { recon: 'Recon', undo: 'Undo', harvest: 'Auto-harvest', autoship: 'Auto-ship' };
+  const VIA_LABEL = { user: 'User', agent: 'Agent', recon: 'Recon', undo: 'Undo', harvest: 'Auto-harvest', autoship: 'Auto-ship' };
+  // #509 — colour the actor so User vs Agent is scannable at a glance: user =
+  // warm teal (a human did it), agent = lavender (Claude/CLI), automated
+  // sub-types = muted grey ("the system, unattended").
+  const VIA_COLOR = { user: '#6fb3a8', agent: '#b6a8e0' };
   const viaPrefix = entry.via && VIA_LABEL[entry.via]
-    ? `<span style="color:#a09ab8;">(${VIA_LABEL[entry.via]})</span> ` : '';
+    ? `<span style="color:${VIA_COLOR[entry.via] || '#a09ab8'};">(${VIA_LABEL[entry.via]})</span> ` : '';
   const line = document.createElement('div');
   line.innerHTML = `<span style="color:#777;">${entry.t}</span> <span style="color:${color};">${String(entry.kind).toUpperCase().padEnd(6, ' ')}</span> ${viaPrefix}${esc(entry.summary)}${tagSuffix}`;
   body.insertBefore(line, body.firstChild);
@@ -5403,7 +5407,11 @@ function refreshActiveWork() {
 // _record_move). No-op when the column doesn't actually change.
 function recordMove(card, fromCol, toCol) {
   if (fromCol === toCol) return;
-  (card.history = card.history || []).push({ from: fromCol, to: toCol, at: now() });
+  // #509 — a move made IN THE BROWSER (drag or kebab/select "Move to") is the
+  // human; tag it via:'user' so the Logs HUD shows (User) MOVE. CLI moves get
+  // via:'agent' server-side. The tag rides in the POSTed history, so it's the
+  // same attribution every watching tab sees.
+  (card.history = card.history || []).push({ from: fromCol, to: toCol, at: now(), via: 'user' });
 }
 
 // Live transition handler — set/clear the persisted active-work id on a real

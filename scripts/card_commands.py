@@ -256,9 +256,11 @@ def _record_move(card, old_col, new_col, via=None):
     automated move is never mistaken for a hands-on one."""
     if old_col == new_col:
         return
-    ev = {"from": old_col, "to": new_col, "at": now_iso()}
-    if via:
-        ev["via"] = via
+    # #509 — a CLI move IS the agent (Claude/automation). Default via to
+    # 'agent' so the Logs HUD shows (Agent) MOVE, distinct from a human's
+    # (User) browser drag. The specific automated sources (recon | undo |
+    # harvest | autoship) pass their own via and override this default.
+    ev = {"from": old_col, "to": new_col, "at": now_iso(), "via": via or "agent"}
     card.setdefault("history", []).append(ev)
 
 
