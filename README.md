@@ -39,14 +39,15 @@ board-steward lives in two places, on purpose:
 | **Dev repo** | `~/Desktop/WorkBoard/` | **Source of truth.** Git history, the live dev `board/`, the `training_data/` corpus. Edit here. |
 | **Installed plugin** | `~/.claude/plugins/cache/workboard/board-steward/<version>/` | The clean, standalone copy Claude Code actually loads (resolved at runtime via `${CLAUDE_PLUGIN_ROOT}`). Never edit here. |
 
-The installed copy is kept in lockstep by **one** path — no manual `cp`:
+The installed plugin is refreshed by **reinstalling from the marketplace** — Claude Code loads it from the versioned cache, so there's no manual sync:
 
 ```bash
-dev/sync_skill.sh          # mirror repo → installed skill (rsync, drops dev cruft, preserves runtime telemetry/)
-dev/sync_skill.sh --check  # report drift only (exit 1 if they differ)
+claude plugin marketplace add ~/Desktop/WorkBoard   # register the repo as a marketplace (once)
+claude plugin install board-steward@workboard       # (re)install fresh repo code
+# same-version refresh? clear the cache first: rm -rf ~/.claude/plugins/cache/workboard/board-steward
 ```
 
-`dev/install_git_hooks.sh` installs a **`post-commit`** hook that runs the sync on every commit, so the installed plugin always reflects the last committed state. (`install.sh` is the separate copy-based path for end users who don't have the repo.) Run the hook installer once after cloning.
+`dev/install_git_hooks.sh` installs a **`post-commit`** hook that runs the fast regression smoke (`dev/smoke_test.py --fast`, #316) after each commit — silent on success, loud on a regression so you catch it before pushing. Run it once after cloning. (`install.sh` is the separate copy-based path for end users who don't have the repo.)
 
 ## History Replay
 

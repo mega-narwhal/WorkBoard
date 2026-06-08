@@ -1,22 +1,21 @@
 #!/usr/bin/env bash
 #
-# post-commit — keep the installed skill in lockstep with committed repo state.
+# post-commit — fast regression guard after each commit.
 #
-# Runs AFTER a commit succeeds (so the skill always mirrors what was actually
-# committed, never an aborted/amended state). The skill dir lives outside the
-# repo, so this hook has no effect on the commit itself — it just refreshes the
-# external copy. Installed by dev/install_git_hooks.sh; source lives in
-# dev/git-hooks/ so it's version-controlled and reproducible.
+# Runs AFTER a commit succeeds. Has no effect on the commit itself. Installed by
+# dev/install_git_hooks.sh; source lives in dev/git-hooks/ so it's
+# version-controlled and reproducible.
+#
+# (#529: the old skill-dir sync step was removed — board-steward installs as a
+# marketplace plugin from the versioned cache now, not an ~/.agents mirror, so
+# there's nothing to rsync on commit. `claude plugin install` refreshes it.)
 #
 set -euo pipefail
 REPO="$(git rev-parse --show-toplevel)"
 
-# 1. keep the installed skill in lockstep with committed state
-"$REPO/dev/sync_skill.sh"
-
-# 2. fast regression guard (#316): ~3s import/CLI/undefined-name core — the
-#    #307 split-gap bug class. Non-blocking (the commit already happened); silent
-#    on success, loud only on a real regression so you fix it before pushing.
+# fast regression guard (#316): ~3s import/CLI/undefined-name core — the #307
+# split-gap bug class. Non-blocking (the commit already happened); silent on
+# success, loud only on a real regression so you fix it before pushing.
 if ! python3 "$REPO/dev/smoke_test.py" --fast >/tmp/board-steward-smoke.log 2>&1; then
   echo ""
   echo "⚠  post-commit regression smoke FAILED (commit succeeded — fix before pushing):"

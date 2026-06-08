@@ -7,8 +7,9 @@
 # place, making the setup reproducible: run it once after cloning.
 #
 # Currently installs:
-#   post-commit  → runs dev/sync_skill.sh, mirroring the repo into the
-#                  installed skill dir on every commit (board #302).
+#   post-commit  → runs the fast regression smoke (dev/smoke_test.py --fast,
+#                  #316) after each commit. (#529: the old skill-dir sync step
+#                  was retired with the marketplace-plugin model.)
 #
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,4 +21,4 @@ for hook in "$HOOKS_SRC"/*; do
   install -m 0755 "$hook" "$HOOKS_DST/$name"
   echo "✓ installed $name → .git/hooks/$name"
 done
-echo "Done. Hooks active. (post-commit will sync the skill on your next commit.)"
+echo "Done. Hooks active. (post-commit runs the fast regression smoke on your next commit.)"
