@@ -240,8 +240,8 @@ the file exists.
      --origin "the user's WHY" --notes "what/how/state; cite the SHA if a COMMIT line is in the digest" \
      --created-at <bucket_ts_iso> [--tag T]
    # done card → TWO hops (lays in In Progress); card.py auto-adds the ☑ initial-ship subtask:
-   python3 <card_py> --board <board> fly <num> inprogress --pause-ms 400
-   python3 <card_py> --board <board> fly <num> done --pause-ms 400 --writeup "<the notes>"
+   python3 <card_py> --board <board> fly <num> inprogress
+   python3 <card_py> --board <board> fly <num> done --writeup "<the notes>"
    # inprogress → one hop. backlog/mandatory/notes → leave (no fly).
    # RICHER PATH (#294) — only when the digest SHOWS it: reconstruct a real bug-bounce:
    python3 <card_py> --board <board> fly <num> inprogress --bug "<what broke>"
