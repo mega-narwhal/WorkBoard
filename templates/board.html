@@ -1790,6 +1790,7 @@ function _logsHud() {
   body.style.cssText = 'padding:6px 10px 8px;overflow-y:auto;flex:1;min-height:60px;';
   hud.appendChild(body);
   document.body.appendChild(hud);
+  _anchorHudTopLeft(hud);   // #492 — left/top anchored from the start so the resize handle grows normally
 
   // Draggable header (mirrors drag-hud pattern).
   let drag = null;
@@ -1838,6 +1839,17 @@ function _logsHud() {
 // Always-on Logs HUD has two states: expanded (full body) and minimized
 // (header bar only). Saved size is restored on expand; minimize disables
 // the resize handle so dragging from header doesn't accidentally resize.
+// #492 — anchor a floating HUD by left/top from its current rect (clearing
+// right/bottom). The native bottom-right resize handle grows down-right and
+// assumes a top-left anchor; bottom/right anchoring (from #487 or the default)
+// inverts the resize. Same box, different anchor — no visual move.
+function _anchorHudTopLeft(el) {
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  el.style.left = r.left + 'px'; el.style.top = r.top + 'px';
+  el.style.right = ''; el.style.bottom = '';
+}
+
 function setLogsMinimized(min) {
   const hud  = _logsHud();
   const body = document.getElementById('logs-hud-body');
@@ -1871,6 +1883,10 @@ function setLogsMinimized(min) {
     btn.textContent   = '▾';
     btn.title         = 'Minimize';
   }
+  // #492 — re-anchor to top-left at the resulting position so the native
+  // bottom-right resize handle grows normally again (the #487 bottom-pin is
+  // only needed for the duration of the collapse/grow, not afterward).
+  _anchorHudTopLeft(hud);
   try { localStorage.setItem(_LOGS_HUD_MIN_KEY, min ? '1' : '0'); } catch (e) {}
 }
 
@@ -3712,6 +3728,7 @@ function resetHudsToDefault() {
     lh.style.left = ''; lh.style.top = '';
     lh.style.right = '12px'; lh.style.bottom = '12px';
     lh.style.width = '340px'; lh.style.height = '240px'; lh.style.resize = 'both';
+    _anchorHudTopLeft(lh);   // #492 — keep resize-handle growth normal after reset
   }
   // Recon / load HUD → default: top-right (top:110px, right:12px).
   try { localStorage.removeItem('workboard.loadHudPos'); } catch (e) {}
