@@ -4885,11 +4885,19 @@ function renderColumn(col, cards) {
     const siblings = Array.from(body.querySelectorAll('.card[data-card-id]'))
       .filter(c => c !== _cardDrag.srcEl);
     let beforeId = null;  // null = append to end
-    for (const c of siblings) {
-      const r = c.getBoundingClientRect();
-      if (e.clientY < r.top + r.height / 2) {
-        beforeId = c.dataset.cardId;
-        break;
+    if (col.id !== _cardDrag.srcCol) {
+      // #479 — dragging INTO a different column previews (and lands) at the TOP:
+      // pin the hover slot to the first card. commitCardDrag inserts before this
+      // same hoverBeforeCardId, so the live ghost preview and the committed slot
+      // agree. Within-column reorder (below) still honors the exact cursor slot.
+      beforeId = siblings.length ? siblings[0].dataset.cardId : null;
+    } else {
+      for (const c of siblings) {
+        const r = c.getBoundingClientRect();
+        if (e.clientY < r.top + r.height / 2) {
+          beforeId = c.dataset.cardId;
+          break;
+        }
       }
     }
     if (_cardDrag.hoverCol !== col.id || _cardDrag.hoverBeforeCardId !== beforeId) {
