@@ -3620,7 +3620,7 @@ function _conformLegacyColumns() {
 async function resetColumnsToDefault() {
   if (!state) return;
   if (!(await miniConfirm('Reset column order?', {
-    sub: 'Reorders to: Task · Notes+Ideas · Backlog · In Progress · 🚨 Super-Urgent+Discarded · Done (Ideas under Notes, Discarded under Super-Urgent), then extra columns by recency. A legacy Mandatory column is upgraded to 🚨 Super-Urgent (its cards move with it). No cards deleted — ' + undoHint() + ' to undo.',
+    sub: 'Reorders to: Task · Notes+Ideas · Backlog · In Progress · 🚨 Super-Urgent+Discarded · Done. No cards deleted — ' + undoHint() + ' to undo.',
     okText: 'Reset',
     okClass: 'primary',
   }))) return;
