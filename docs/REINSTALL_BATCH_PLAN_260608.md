@@ -19,10 +19,12 @@ the repo `docs/`, not in `~/.board-steward/` or the plugin cache).
 
 **Fresh-install baseline:** clean-slate + marketplace reinstall done this session — picker→bootstrap→55 cards flew (replay)→reconcile moved 12, on fresh code. ("speedup" tier didn't fire = expected: all activity in the recent replay day, older tier empty.) **Real 374-card board restored** from the clean-slate backup; live at :7891.
 
-**OPEN follow-ups (not yet done):**
-- **#527** — flag-hygiene: strip redundant `--pause-ms` overrides (`hourly_reconcile.py:207-208`, `BOOTSTRAP.md`, etc.); also the rule "never pass `--pause-ms`, default 400" (saved to memory).
-- **#529** — decide: retire the legacy `~/.agents` skill-dir sync (`dev/sync_skill.sh` + post-commit hook), superseded by the marketplace plugin.
-- Secondary discover2 review notes (low priority, different axis): convo-dir `HH:MM`/`git --since` timezone handling; `files_from_tool_use` hardcoded 5-tool list (future Claude-Code file-tools won't register).
+**Also done this session (non-batch follow-ups):**
+- **#527** ✅ — flag-hygiene: dropped redundant `--pause-ms 400` (= default) from inline/bootstrap instructions (`a97a48f`). Rule "never pass `--pause-ms`" saved to memory. (Intentional 150/120 auto-harvest pacing kept.)
+- **#529** ✅ — retired the legacy `~/.agents` skill-dir sync: removed `dev/sync_skill.sh` + its post-commit step + the stale `~/.agents` copy; KEPT the post-commit smoke guard; docs → marketplace-reinstall model (`fb1cf0c`). Completes the #378 de-sprawl.
+
+**Still OPEN (low priority, different axis — not blocking any batch):**
+- Secondary discover2 review notes: convo-dir `HH:MM`/`git --since` timezone handling; `files_from_tool_use` hardcoded 5-tool list (future Claude-Code file-tools won't register). Not yet carded — file if/when relevant.
 
 **NEXT: Batch 3** (archive scheduling + 60-day gate — see below). Per the loop, after Batch 3: clean-slate + reinstall to verify.
 
