@@ -2184,6 +2184,38 @@ document.addEventListener('mouseup', e => {
   if (moved) { e.preventDefault(); e.stopPropagation(); }
 }, true);
 
+// ===== Ctrl/Cmd + scroll to zoom the board (#523) =======================
+// Figma/browser-style zoom. Ctrl/Cmd + wheel scales #board via CSS `zoom`
+// (reflows naturally, unlike transform:scale). On a Mac trackpad a pinch fires
+// wheel with ctrlKey, so this covers pinch-to-zoom too. Persisted to
+// localStorage; Ctrl/Cmd+0 resets to 100%. Header/HUDs stay at native size —
+// only the board content zooms.
+const _ZOOM_KEY = 'workboard.zoom';
+const _ZOOM_MIN = 0.4, _ZOOM_MAX = 2.5;
+let _zoom = parseFloat(localStorage.getItem(_ZOOM_KEY)) || 1;
+function applyZoom() {
+  const b = document.getElementById('board');
+  if (b) b.style.zoom = _zoom;
+}
+function setZoom(z, announce) {
+  _zoom = Math.min(_ZOOM_MAX, Math.max(_ZOOM_MIN, z));
+  applyZoom();
+  try { localStorage.setItem(_ZOOM_KEY, String(_zoom)); } catch (_) {}
+  if (announce && typeof toast === 'function') toast(`Zoom ${Math.round(_zoom * 100)}%`, 1100);
+}
+document.addEventListener('wheel', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;     // plain scroll = normal scroll
+  const b = document.getElementById('board');
+  if (!b) return;
+  // Only intercept when the gesture is over the board (let HUDs/modals scroll).
+  if (e.target.closest('#logs-hud, #drag-hud, .modal-overlay, #mini-prompt-overlay, #mini-confirm-overlay')) return;
+  e.preventDefault();                        // block the browser's native page zoom
+  // Exponential step → smooth + symmetric in/out; scroll up (deltaY<0) zooms in.
+  setZoom(_zoom * Math.exp(-e.deltaY * 0.0015), true);
+}, { passive: false });
+// Apply the persisted zoom once the DOM is ready (the #board element is static).
+document.addEventListener('DOMContentLoaded', applyZoom);
+
 // ===== Column stacking schema (#117 — schema only; no render impact yet) =====
 // A column may sit BELOW another column in a vertical stack via the
 // `stackUnder` field. null/missing = top-level column with its own slot in
@@ -6158,6 +6190,7 @@ async function init() {
     const k = e.key.toLowerCase();
     if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+    else if (k === '0') { e.preventDefault(); setZoom(1, true); }   // #523 — reset zoom to 100%
   });
   $('#modal-overlay').addEventListener('click', e => {
     if (e.target === e.currentTarget) closeModal();
