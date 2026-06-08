@@ -456,14 +456,16 @@
   }
 
   /* Mini-confirm dialog — boho card, blurred overlay. */
-  #mini-confirm-overlay {
+  #mini-confirm-overlay,
+  #mini-prompt-overlay {
     position: fixed; inset: 0; z-index: 400;
     background: rgba(45,40,38,0.32);
     backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
     display: none; align-items: center; justify-content: center;
     animation: mc-fadein 160ms ease-out;
   }
-  #mini-confirm-overlay.show { display: flex; }
+  #mini-confirm-overlay.show,
+  #mini-prompt-overlay.show { display: flex; }
   @keyframes mc-fadein { from { opacity: 0; } to { opacity: 1; } }
   .mini-confirm-card {
     background: var(--card-bg);
@@ -509,6 +511,30 @@
   }
   .mini-confirm-card .mc-btn.danger:hover {
     background: #C96A4E; border-color: #C96A4E;
+  }
+  /* #513 — disabled primary while the input is empty (the empty-input guard). */
+  .mini-confirm-card .mc-btn:disabled,
+  .mini-confirm-card .mc-btn:disabled:hover {
+    opacity: .42; cursor: not-allowed; transform: none;
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
+  /* #513 — labelled text field for miniPrompt, styled to match the card. */
+  .mini-confirm-card .mp-field { text-align: left; margin-bottom: 16px; }
+  .mini-confirm-card .mp-label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .mini-confirm-card .mp-input {
+    width: 100%; box-sizing: border-box;
+    padding: 9px 12px; border-radius: 8px;
+    border: 1px solid var(--card-border); background: var(--card-bg);
+    color: var(--ink); font-size: 14px; font-family: inherit;
+    transition: border-color .12s, box-shadow .12s;
+  }
+  .mini-confirm-card .mp-input::placeholder { color: var(--muted); opacity: .7; }
+  .mini-confirm-card .mp-input:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(217,119,87,0.18);
   }
   .column-header {
     display: flex; align-items: center; gap: 8px;
@@ -1563,6 +1589,23 @@
     <div class="mc-actions">
       <button class="mc-btn" id="mc-cancel">Cancel</button>
       <button class="mc-btn danger" id="mc-ok">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- #513 — styled single-input modal (miniPrompt), replaces the native prompt()
+     for "+ Add column". Reuses the mini-confirm card/overlay/animation so it
+     feels identical to the Reset Columns dialog. -->
+<div id="mini-prompt-overlay">
+  <div class="mini-confirm-card">
+    <div class="mc-msg" id="mp-title">Add</div>
+    <div class="mp-field">
+      <label class="mp-label" id="mp-label" for="mp-input">Name</label>
+      <input class="mp-input" id="mp-input" type="text" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="mc-actions">
+      <button class="mc-btn" id="mp-cancel">Cancel</button>
+      <button class="mc-btn primary" id="mp-ok">Add</button>
     </div>
   </div>
 </div>
@@ -2729,6 +2772,48 @@ function miniConfirm(msg = 'Confirm?', opts = {}) {
     document.addEventListener('keydown', onKey);
     // Focus the primary action so Enter confirms by default.
     setTimeout(() => okBtn.focus(), 30);
+  });
+}
+
+// #513 — styled single-input modal mirroring miniConfirm, replacing the native
+// prompt() that felt like a CLI. Resolves the trimmed value, or null on
+// cancel/empty. Enter submits, Escape / overlay-click / Cancel dismiss, the
+// primary button disables while the field is empty (empty-input guard), and the
+// input autofocuses + selects. opts: {title, label, placeholder, value, okText}.
+function miniPrompt(opts = {}) {
+  return new Promise(resolve => {
+    const overlay = $('#mini-prompt-overlay');
+    const titleEl = $('#mp-title');
+    const labelEl = $('#mp-label');
+    const input   = $('#mp-input');
+    const okBtn   = $('#mp-ok');
+    const cxBtn   = $('#mp-cancel');
+    titleEl.textContent = opts.title || 'Add';
+    labelEl.textContent = opts.label || 'Name';
+    input.placeholder   = opts.placeholder || '';
+    input.value         = opts.value || '';
+    okBtn.textContent   = opts.okText || 'Add';
+    const syncOk = () => { okBtn.disabled = !input.value.trim(); };
+    syncOk();
+    overlay.classList.add('show');
+
+    const cleanup = () => {
+      overlay.classList.remove('show');
+      okBtn.onclick = cxBtn.onclick = overlay.onclick = null;
+      input.oninput = input.onkeydown = null;
+      document.removeEventListener('keydown', onKey);
+    };
+    const done   = val => { cleanup(); resolve(val); };
+    const submit = () => { const v = input.value.trim(); if (v) done(v); };
+    const onKey  = e => { if (e.key === 'Escape') { e.preventDefault(); done(null); } };
+    input.oninput = syncOk;
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } };
+    okBtn.onclick = submit;
+    cxBtn.onclick = () => done(null);
+    overlay.onclick = e => { if (e.target === overlay) done(null); };
+    document.addEventListener('keydown', onKey);
+    // Autofocus + select so the user can type immediately or overwrite a default.
+    setTimeout(() => { input.focus(); input.select(); }, 30);
   });
 }
 
@@ -3956,8 +4041,13 @@ function render() {
     const addCol = document.createElement('button');
     addCol.className = 'col-add-btn';
     addCol.textContent = '+ Add column';
-    addCol.onclick = () => {
-      const name = prompt('Column name?');
+    addCol.onclick = async () => {
+      const name = await miniPrompt({
+        title: 'Add column',
+        label: 'Column name',
+        placeholder: 'e.g. In Review',
+        okText: 'Add',
+      });
       if (!name) return;
       pushUndo();
       state.columns.push({ id: uid('col'), name, kind: 'custom' });
