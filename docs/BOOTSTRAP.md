@@ -108,8 +108,9 @@ correct installer (`--dry-run` still previews on any OS).
 
 1. **Ensure the local board server is up.** Cheap check + spawn if needed:
    ```bash
+   PLUGIN=$(ls -dt ~/.claude/plugins/cache/*/board-steward/*/ 2>/dev/null | head -1)
    curl -sf http://127.0.0.1:7891/health >/dev/null 2>&1 || \
-     nohup python3 ~/.agents/skills/board-steward/scripts/serve.py \
+     nohup python3 "$PLUGIN/scripts/serve.py" \
        --project "$(pwd)" >/tmp/board-steward.log 2>&1 &
    sleep 0.3 && curl -sf http://127.0.0.1:7891/health | python3 -m json.tool
    ```
@@ -135,7 +136,8 @@ correct installer (`--dry-run` still previews on any OS).
 
 ## Helper scripts (shipped with this plugin)
 
-Live at `~/.agents/skills/board-steward/scripts/`:
+Live at the installed plugin's `scripts/` dir — resolve it with
+`PLUGIN=$(ls -dt ~/.claude/plugins/cache/*/board-steward/*/ | head -1)`:
 
 | Script | Purpose | Usage |
 |---|---|---|
@@ -163,15 +165,18 @@ then cards stream in one-by-one with pop animations. The user *watches their own
 materialize*. Don't shortcut this — the visible build is the value.
 
 ```bash
+# 0. Resolve the installed plugin dir
+PLUGIN=$(ls -dt ~/.claude/plugins/cache/*/board-steward/*/ 2>/dev/null | head -1)
+
 # 1. Bootstrap board dir + start server in background
-python3 ~/.agents/skills/board-steward/scripts/serve.py --project "$(pwd)" --bootstrap >/tmp/board-steward.log 2>&1 &
+python3 "$PLUGIN/scripts/serve.py" --project "$(pwd)" --bootstrap >/tmp/board-steward.log 2>&1 &
 sleep 0.4 && curl -sf http://127.0.0.1:7891/health | python3 -m json.tool
 
 # 2. Open the browser — user sees empty board with default columns
 open http://127.0.0.1:7891     # macOS; use xdg-open on Linux
 
 # 3. Mine session history into a JSON context dump (no cards written yet)
-python3 ~/.agents/skills/board-steward/scripts/discover.py --project "$(pwd)" --days 14 --memory > /tmp/board-discover.json
+python3 "$PLUGIN/scripts/discover.py" --project "$(pwd)" --days 14 --memory > /tmp/board-discover.json
 ```
 
 Then **read `/tmp/board-discover.json`** (per-session first/last prompt, files edited, ship/
@@ -344,8 +349,8 @@ A 65-card index ≈30KB; 200-card ≈90KB. `board.json` scales with notes/writeu
 
 ## Telemetry (optional self-grading)
 
-`scripts/log_event.py` appends one JSON event per run to
-`~/.agents/skills/board-steward/telemetry/events.jsonl` (trigger, reads, writes, drift,
+`scripts/log_event.py` appends one JSON event per run to the fixed home path
+`~/.board-steward/telemetry/events.jsonl` (override `BOARD_TELEMETRY_FILE`) — trigger, reads, writes, drift,
 est_tokens, issues, notes). It's how the skill self-grades — inspect with
 `python3 scripts/report.py [--days 7]`. Optional; not part of the per-turn LIVE loop.
 

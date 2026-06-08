@@ -161,7 +161,7 @@ sits `inprogress` after the work shipped. Run a reconciliation pass:
 *check*, not the *move* (auto-moving re-introduces the silent-drift class).
 
 ```bash
-python3 ~/.agents/skills/board-steward/scripts/card.py list --column inprogress
+python3 <card_py> list --column inprogress            # <card_py> = the resolved path from the SessionStart digest
 git log --oneline --since="$(date -v-2H +%FT%T)"     # commits in the last 2h — anything un-carded?
 ```
 
@@ -182,7 +182,7 @@ clause-start): `I have an idea[:.]` / `idea[:.]`, `todo[:.]`, `remember to`, `no
 `what if we` (only if paired with a deferred verb).
 
 ```bash
-python3 ~/.agents/skills/board-steward/scripts/card.py add \
+python3 <card_py> add \
   --title "<deferred verb-phrase, ≤70 chars>" --auto \
   --auto-source "<the verbatim marker>" --origin "<user's full quoted sentence>"
 ```

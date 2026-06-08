@@ -65,8 +65,10 @@ if [ -z "${server_hint}" ]; then
   fi
 fi
 
-# Best-effort: read last card-added timestamp from telemetry.
-TELEMETRY="${HOME}/.agents/skills/board-steward/telemetry/events.jsonl"
+# Best-effort: read last card-added timestamp from telemetry. #378 DE-SPRAWL:
+# fixed home dir (matches log_event.py/report.py), BOARD_TELEMETRY_FILE override;
+# legacy plugin-relative path kept as a read fallback for old installs.
+TELEMETRY="${BOARD_TELEMETRY_FILE:-${HOME}/.board-steward/telemetry/events.jsonl}"
 [ -f "${TELEMETRY}" ] || TELEMETRY="$(dirname "$0")/../telemetry/events.jsonl"
 last_card_ts=""
 if [ -f "${TELEMETRY}" ]; then

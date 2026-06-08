@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append one telemetry event to ~/.agents/skills/board-steward/telemetry/events.jsonl.
+"""Append one telemetry event to ~/.board-steward/telemetry/events.jsonl.
 
 Called by the Steward as the LAST action of every invocation (after signoff).
 The event captures: trigger, board state, what was read/written, drift detected,
@@ -38,10 +38,15 @@ Known issue tags (encode pain so report.py can count + rank):
     schema-confusion
     hook-misfire
 """
-import json, sys, datetime, argparse
+import json, os, sys, datetime, argparse
 from pathlib import Path
 
-EVENTS_FILE = Path.home() / ".agents/skills/board-steward/telemetry/events.jsonl"
+# #378 DE-SPRAWL: telemetry lives in the FIXED home dir (alongside the port
+# registry in ~/.board-steward/), NOT under the old ~/.agents install path or
+# the versioned plugin cache — so it survives plugin upgrades. BOARD_TELEMETRY_FILE
+# overrides it (e2e/test isolation). report.py reads the SAME resolution.
+EVENTS_FILE = Path(os.environ.get("BOARD_TELEMETRY_FILE")
+                   or Path.home() / ".board-steward/telemetry/events.jsonl")
 
 
 def write_event(event: dict) -> dict:

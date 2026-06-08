@@ -37,7 +37,7 @@ board-steward lives in two places, on purpose:
 | | Path | Role |
 |---|---|---|
 | **Dev repo** | `~/Desktop/WorkBoard/` | **Source of truth.** Git history, the live dev `board/`, the `training_data/` corpus. Edit here. |
-| **Installed plugin** | `~/.agents/skills/board-steward/` | The clean, standalone copy Claude Code actually loads — repo minus `.git`/`board`/`training_data`/cruft. Never edit here. |
+| **Installed plugin** | `~/.claude/plugins/cache/workboard/board-steward/<version>/` | The clean, standalone copy Claude Code actually loads (resolved at runtime via `${CLAUDE_PLUGIN_ROOT}`). Never edit here. |
 
 The installed copy is kept in lockstep by **one** path — no manual `cp`:
 

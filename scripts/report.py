@@ -12,11 +12,14 @@ Usage:
     python3 report.py --project /path/...   # filter to one project's board
     python3 report.py --json                # machine-readable instead of markdown
 """
-import json, sys, datetime, argparse
+import json, os, sys, datetime, argparse
 from pathlib import Path
 from collections import Counter, defaultdict
 
-EVENTS_FILE = Path.home() / ".agents/skills/board-steward/telemetry/events.jsonl"
+# #378 DE-SPRAWL: must match log_event.py's resolution — the FIXED home dir
+# (~/.board-steward/telemetry/), overridable via BOARD_TELEMETRY_FILE.
+EVENTS_FILE = Path(os.environ.get("BOARD_TELEMETRY_FILE")
+                   or Path.home() / ".board-steward/telemetry/events.jsonl")
 
 
 def _parse_ts(s):

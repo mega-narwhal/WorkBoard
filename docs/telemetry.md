@@ -1,23 +1,29 @@
 # Board Steward — self-tracking telemetry
 
-Every Steward invocation appends one JSON line to `events.jsonl` so the skill can be **graded honestly** later instead of from memory.
+Every Steward invocation appends one JSON line to `events.jsonl` — at the fixed
+home path `~/.board-steward/telemetry/events.jsonl` (override with
+`BOARD_TELEMETRY_FILE`) — so the skill can be **graded honestly** later instead
+of from memory.
 
 **Goal:** answer "where is the Steward struggling?" 2-3 days from now. Pain notes + issue tags are the gold; counts are context.
 
 ## Inspect
 
 ```bash
+# Scripts live in the installed plugin — resolve its dir once:
+PLUGIN=$(ls -dt ~/.claude/plugins/cache/*/board-steward/*/ 2>/dev/null | head -1)
+
 # Full markdown report
-python3 ~/.agents/skills/board-steward/scripts/report.py
+python3 "$PLUGIN/scripts/report.py"
 
 # Last week only
-python3 ~/.agents/skills/board-steward/scripts/report.py --days 7
+python3 "$PLUGIN/scripts/report.py" --days 7
 
 # Filter to one project's board
-python3 ~/.agents/skills/board-steward/scripts/report.py --project /Users/malco/Desktop/QuantifyMe/HFTAgents/board
+python3 "$PLUGIN/scripts/report.py" --project /Users/malco/Desktop/QuantifyMe/HFTAgents/board
 
 # Raw JSON (pipe to jq for ad-hoc queries)
-python3 ~/.agents/skills/board-steward/scripts/report.py --json
+python3 "$PLUGIN/scripts/report.py" --json
 ```
 
 ## Event schema
@@ -65,7 +71,7 @@ python3 ~/.agents/skills/board-steward/scripts/report.py --json
 End of every invocation (after signoff), the Steward calls:
 
 ```bash
-cat <<'EOF' | python3 ~/.agents/skills/board-steward/scripts/log_event.py
+cat <<'EOF' | python3 "$PLUGIN/scripts/log_event.py"
 {"trigger":"session-start","project":"/path/board","board_rev":37,"board_cards":65,
  "reads":["index"],"writes":{"cards_moved":0,"cards_added":0,"subtasks_changed":0,"writeups_filled":0},
  "drift_flagged":3,"drift_applied":0,"bookends":{"greeted":true,"signed_off":true},
