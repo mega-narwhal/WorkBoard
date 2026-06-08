@@ -1649,6 +1649,7 @@ let _colDragRects = null;      // id → DOMRect at dragstart (for FLIP)
 // drop commits to state.cards; dragend without drop re-renders to revert.
 let _cardDrag = null;          // { cardId, srcCol, srcEl, hoverCol, hoverBeforeCardId }
 let _cardDragRects = null;     // cardId → DOMRect at last reflow (for FLIP)
+let _localMoveLog = new Map(); // #518 — cardId→ts of moves logged directly, so the SSE echo doesn't double-log
 // #119 — column live-reflow during drag (iPhone home-screen feel).
 // Snapshot of state.columns taken at dragstart so cancel (dragend w/o drop)
 // can revert all the live-preview reorders. _colDragSrcId carries the source
@@ -2532,6 +2533,11 @@ function moveCardToColumn(card, targetCol) {
   // #254 — active-work follows a move into / out of In Progress (persisted).
   if (targetCol === 'inprogress' && fromCol !== 'inprogress') state.activeWorkId = card.id;
   else if (fromCol === 'inprogress' && targetCol !== 'inprogress' && state.activeWorkId === card.id) state.activeWorkId = null;
+  // #518 — log the move NOW. A right-click/menu move calls render() below, which
+  // disrupts the SSE-echo path that logs drags, so it never showed in the Logs
+  // HUD. Log directly (via=user) and mark it so the echo doesn't double-log.
+  logEvent('move', `#${card.num} ${colLabel(fromCol)} → ${colLabel(targetCol)}`, card, 'user');
+  _localMoveLog.set(card.id, Date.now());
   scheduleSave();
   render();
   requestAnimationFrame(() => flipPlayCards(rects, { duration: 480 }));
@@ -5780,7 +5786,15 @@ function handleCardUpdated({ card, fromColumn, toColumn }) {
     // mislabel a hands-on move that happens to follow an automated one.
     const h = card.history && card.history.length ? card.history[card.history.length - 1] : null;
     const via = (h && h.from === fromColumn && h.to === toColumn) ? h.via : null;
-    logEvent('move', `#${card.num} ${colLabel(fromColumn)} → ${colLabel(toColumn)}`, card, via);
+    // #518 — skip if this move was already logged directly at the source (e.g. a
+    // right-click/menu move via moveCardToColumn); consume the marker so a later
+    // genuine echo for the same card still logs.
+    const _recent = _localMoveLog.get(card.id);
+    if (_recent && Date.now() - _recent < 4000) {
+      _localMoveLog.delete(card.id);
+    } else {
+      logEvent('move', `#${card.num} ${colLabel(fromColumn)} → ${colLabel(toColumn)}`, card, via);
+    }
   } else {
     // In-place edit (title/priority/tags/subtask) — swap DOM, pulse + flash.
     const newEl = renderCardCompact(card);
