@@ -180,6 +180,18 @@
     font-size: 11px; color: var(--muted); font-weight: 600;
   }
   header .header-pill.active #tags-count { color: rgba(255,255,255,.65); }
+  /* #477 — segmented pill: two clickable actions (Reset Columns | Sort Time)
+     sharing one rounded shell, split by a hairline divider. */
+  header .header-pill.seg-pill { padding: 0; gap: 0; overflow: hidden; }
+  header .header-pill.seg-pill:hover { background: var(--card-bg); border-color: var(--accent); }
+  header .seg-pill .seg {
+    border: 0; background: transparent; color: inherit;
+    font: inherit; font-size: 12px; font-weight: 500;
+    padding: 5px 11px; cursor: pointer; transition: background .12s;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  header .seg-pill .seg:hover { background: rgba(217,119,87,.14); }
+  header .seg-pill .seg-div { align-self: stretch; width: 1px; background: var(--card-border); }
 
   /* Tag legend popover — anchored under the Tags button */
   .tag-legend {
@@ -892,52 +904,6 @@
     overflow: hidden;
     gap: 14px;
   }
-  /* ===== Velocity view (#114 BOARD-METRICS) ===== */
-  #velocity {
-    display: none;
-    height: calc(100% - 48px);
-    padding: 24px 28px 28px;
-    background: var(--bg);
-    color: var(--ink);
-    flex-direction: column;
-    gap: 20px;
-    overflow-y: auto;
-  }
-  #velocity .vel-head { display:flex; align-items:baseline; gap:14px; flex-shrink:0; }
-  #velocity .vel-head h2 { margin:0; font-size:22px; font-weight:600; letter-spacing:-.01em; }
-  #velocity .vel-head .vel-sub { color:var(--muted); font-size:13px; }
-  .vel-stats { display:flex; gap:14px; flex-wrap:wrap; }
-  .vel-stat {
-    background: var(--panel, #171a21); border:1px solid var(--line, #262b35);
-    border-radius:12px; padding:16px 20px; min-width:148px; flex:1;
-  }
-  .vel-stat .vs-num { font-size:30px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
-  .vel-stat .vs-label { color:var(--muted); font-size:12px; margin-top:4px; text-transform:uppercase; letter-spacing:.04em; }
-  .vel-stat .vs-sub { color:var(--muted); font-size:12px; margin-top:6px; }
-  .vel-stat.warn .vs-num { color:#D9A441; }
-  .vel-stat.crit .vs-num { color:#C84B4B; }
-  .vel-panel {
-    background: var(--panel, #171a21); border:1px solid var(--line, #262b35);
-    border-radius:12px; padding:18px 20px;
-  }
-  .vel-panel h3 { margin:0 0 14px; font-size:14px; font-weight:600; color:var(--ink); }
-  .vel-bars { display:flex; align-items:flex-end; gap:6px; height:120px; }
-  .vel-bar-wrap { flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end; }
-  .vel-bar {
-    width:100%; max-width:44px; border-radius:5px 5px 0 0;
-    background:linear-gradient(180deg,#3D8F65,#2f6f4f); min-height:2px;
-    transition:height .4s cubic-bezier(0.34,1.56,0.64,1);
-  }
-  .vel-bar.zero { background:var(--line,#262b35); }
-  .vel-bar-cap { font-size:11px; font-variant-numeric:tabular-nums; color:var(--ink); }
-  .vel-bar-day { font-size:10px; color:var(--muted); }
-  .vel-leader { list-style:none; padding:0; margin:0; }
-  .vel-leader li { display:flex; gap:10px; align-items:baseline; padding:8px 0; border-bottom:1px solid var(--line,#262b35); }
-  .vel-leader li:last-child { border-bottom:none; }
-  .vel-leader .vl-days { color:#C84B4B; font-weight:600; font-variant-numeric:tabular-nums; min-width:52px; }
-  .vel-leader .vl-num { color:var(--muted); font-variant-numeric:tabular-nums; min-width:42px; }
-  .vel-leader .vl-title { flex:1; }
-  .vel-empty { color:var(--muted); font-size:13px; padding:8px 0; }
   /* Top strip: month nav + month-at-a-glance counters */
   .cal-topbar {
     display: flex; align-items: center; gap: 14px;
@@ -1554,12 +1520,15 @@
     <span class="status" id="status" title="Connection status"><span class="dot"></span></span>
   </span>
   <span class="sp"></span>
-  <button id="reset-cols-btn" class="header-pill" style="display:none" title="Restore default layout: Task · Notes+Ideas · Backlog · In Progress · Mandatory+Discarded · Done (with stacks), then extras by recency. Also snaps the Logs + recon HUDs back to their default positions.">↺ Reset columns</button>
+  <span id="cols-pill" class="header-pill seg-pill" style="display:none">
+    <button id="reset-cols-btn" class="seg" title="Restore default layout: Task · Notes+Ideas · Backlog · In Progress · Mandatory+Discarded · Done (with stacks), then extras by recency. Also snaps the Logs + recon HUDs back to their default positions.">↺ Reset Columns</button>
+    <span class="seg-div"></span>
+    <button id="sort-time-btn" class="seg" title="Sort the cards inside every column by time (newest first). Column positions don't change — this just re-orders cards within each column, undoing any manual drag-reorder.">⇅ Sort Time</button>
+  </span>
   <button id="tags-btn" class="header-pill" style="display:none" title="Show all tags used on this board">🏷 Tags <span id="tags-count">0</span></button>
   <span class="view-toggle" id="view-toggle" style="display:none">
     <button data-view="board" class="active">Board</button>
     <button data-view="calendar">Calendar</button>
-    <button data-view="velocity">Velocity</button>
   </span>
 </header>
 
@@ -1575,7 +1544,6 @@
 
 <div id="board" style="display:none"></div>
 <div id="calendar"></div>
-<div id="velocity"></div>
 
 <div class="modal-overlay" id="modal-overlay"></div>
 
@@ -3636,11 +3604,12 @@ function enterApp() {
   $('#setup').style.display = 'none';
   $('#view-toggle').style.display = '';
   $('#tags-btn').style.display = '';
+  const colsPill = $('#cols-pill');
+  if (colsPill) colsPill.style.display = '';
   const resetBtn = $('#reset-cols-btn');
-  if (resetBtn) {
-    resetBtn.style.display = '';
-    resetBtn.onclick = resetColumnsToDefault;
-  }
+  if (resetBtn) resetBtn.onclick = resetColumnsToDefault;
+  const sortTimeBtn = $('#sort-time-btn');
+  if (sortTimeBtn) sortTimeBtn.onclick = sortCardsByTime;   // #477
   // #177 — Logs HUD is always on. Minimizable to header-only via the
   // ▾/▸ button inside the HUD. No top-bar pill (keeps the header clean).
   _logsHud();
@@ -3742,6 +3711,22 @@ async function resetColumnsToDefault() {
   requestAnimationFrame(() => flipPlayColumns(old));
   resetHudsToDefault();   // #488 — also snap the floating HUDs back to default
   toast('Columns + HUDs reset — ' + undoHint() + ' to undo', 3200);
+}
+
+// #477 — Sort Time: re-sort the cards INSIDE every column by time (newest
+// first by createdAt, num as tiebreak — the board's canonical order). Column
+// positions are untouched; this only re-orders the cards within each column,
+// undoing any manual drag-reorder. render() lists each column's cards in
+// state.cards array order, so one stable global time-sort re-orders every
+// column at once. The In-Progress "current work" pin is applied at render time,
+// so it still floats to the top. One undo entry.
+function sortCardsByTime() {
+  if (!state || !Array.isArray(state.cards)) return;
+  pushUndo();
+  state.cards.sort((a, b) => _cardSortTs(b) - _cardSortTs(a) || (b.num || 0) - (a.num || 0));
+  scheduleSave();
+  render();
+  toast('Cards sorted by time — ' + undoHint() + ' to undo', 3000);
 }
 
 // #488 — restore the floating HUDs (Logs + recon/load) to their default
@@ -3855,68 +3840,13 @@ function setView(v) {
   _view = v;
   $('#board').style.display    = (v === 'board')    ? 'flex' : 'none';
   $('#calendar').style.display = (v === 'calendar') ? 'flex' : 'none';
-  $('#velocity').style.display = (v === 'velocity') ? 'flex' : 'none';
   document.querySelectorAll('#view-toggle button').forEach(b => {
     b.classList.toggle('active', b.dataset.view === v);
   });
-  // #236 — Reset Columns only meaningful in Board view. Don't tease it on Calendar.
-  const resetBtn = $('#reset-cols-btn');
-  if (resetBtn) resetBtn.style.display = (v === 'board' && state) ? '' : 'none';
-  if (v === 'velocity') renderVelocity();
+  // #236 — column controls only meaningful in Board view. Don't tease them on Calendar.
+  const colsPill = $('#cols-pill');
+  if (colsPill) colsPill.style.display = (v === 'board' && state) ? '' : 'none';
   render();
-}
-
-// ===== Velocity view (#114 BOARD-METRICS) =====
-// Fetches /metrics (computed server-side from board.json) and paints stat
-// cards + a 7-day throughput bar chart + a stuck-card leaderboard. Read-only;
-// no board.json mutation. Re-fetched each time the tab opens.
-async function renderVelocity() {
-  const host = $('#velocity');
-  if (!host) return;
-  host.innerHTML = `<div class="vel-head"><h2>Velocity</h2><span class="vel-sub">loading…</span></div>`;
-  let m;
-  try {
-    const r = await fetch('/metrics?since=7d', { cache: 'no-store' });
-    m = await r.json();
-  } catch (e) {
-    host.innerHTML = `<div class="vel-head"><h2>Velocity</h2><span class="vel-sub">metrics unavailable (server offline?)</span></div>`;
-    return;
-  }
-  const tp = m.throughput, ct = m.cycleTime, pr = m.priority;
-  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  const cycleStr = ct.medianDays != null ? `${ct.medianDays}d` : '—';
-  const maxDay = Math.max(1, ...tp.perDay.map(d => d.count));
-
-  const stat = (num, label, sub, cls='') =>
-    `<div class="vel-stat ${cls}"><div class="vs-num">${num}</div><div class="vs-label">${label}</div>${sub ? `<div class="vs-sub">${sub}</div>` : ''}</div>`;
-
-  const bars = tp.perDay.map(d => {
-    const h = Math.round(d.count / maxDay * 100);
-    const dow = new Date(d.date + 'T00:00:00Z').toLocaleDateString(undefined, { weekday: 'short' });
-    return `<div class="vel-bar-wrap" title="${d.date}: ${d.count}">`
-         + `<span class="vel-bar-cap">${d.count || ''}</span>`
-         + `<div class="vel-bar ${d.count ? '' : 'zero'}" style="height:${Math.max(h, d.count ? 6 : 2)}%"></div>`
-         + `<span class="vel-bar-day">${dow}</span></div>`;
-  }).join('');
-
-  const leader = (m.blockers && m.blockers.length)
-    ? `<ul class="vel-leader">` + m.blockers.slice(0, 8).map(b =>
-        `<li><span class="vl-days">${b.stuckDays}d</span><span class="vl-num">#${b.num}</span>`
-        + `<span class="vl-title">${esc(b.code ? b.code + ' — ' : '')}${esc(b.title)}</span></li>`).join('') + `</ul>`
-    : `<div class="vel-empty">Nothing stuck more than 7 days in progress 🎉</div>`;
-
-  host.innerHTML = `
-    <div class="vel-head"><h2>Velocity</h2><span class="vel-sub">last ${m.sinceDays} days · rev ${m.rev} · ${m.totalCards} cards</span></div>
-    <div class="vel-stats">
-      ${stat(tp.total, 'shipped', `${tp.perDayAvg}/day avg`)}
-      ${stat(cycleStr, 'median cycle', ct.count ? `${ct.count} cards` : 'no data')}
-      ${stat(m.wip, 'in progress', 'work-in-progress')}
-      ${stat(pr.openCritical, 'open critical', `${pr.criticalNotStarted} not started`, pr.openCritical ? 'crit' : '')}
-      ${stat(pr.openMid, 'open mid', '', pr.openMid ? 'warn' : '')}
-    </div>
-    <div class="vel-panel"><h3>Throughput — cards shipped per day</h3><div class="vel-bars">${bars}</div></div>
-    <div class="vel-panel"><h3>Blockers — stuck &gt;7 days in progress</h3>${leader}</div>
-  `;
 }
 
 // #345 — render() rebuilds board.innerHTML wholesale, which resets every
