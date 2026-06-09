@@ -2370,9 +2370,16 @@ let _colRow = [];       // [{id, left, width}] in visual order
 let _colGap = 8;
 function _captureColRow() {
   _colRow = [];
+  // #545 — store CONTENT-relative lefts (add scrollLeft, subtract board origin) so
+  // the snapshot survives horizontal auto-scroll during the drag. Otherwise, once
+  // the board scrolls right, viewport-captured positions go stale and the extreme-
+  // right slot becomes untargetable.
+  const board = $('#board');
+  const bRect = board.getBoundingClientRect();
+  const sx = board.scrollLeft;
   document.querySelectorAll('#board .column-stack').forEach(w => {
     const r = w.getBoundingClientRect();
-    _colRow.push({ id: w.dataset.stackRoot, left: r.left, width: r.width });
+    _colRow.push({ id: w.dataset.stackRoot, left: r.left - bRect.left + sx, width: r.width });
   });
   _colGap = _colRow.length > 1 ? Math.max(0, _colRow[1].left - (_colRow[0].left + _colRow[0].width)) : 8;
 }
@@ -5411,12 +5418,16 @@ function renderColumn(col, cards) {
     }
     // Reorder: decide the insertion gap from the pointer vs each root's ORIGINAL
     // midline (_colRow, captured at dragstart) — NOT live positions — so the shift
-    // can't move the decision and can't flicker. Skip the dragged column's slot.
+    // can't move the decision and can't flicker. Use CONTENT-space X (add scrollLeft)
+    // so the decision stays correct after horizontal auto-scroll — incl. the extreme
+    // right. Skip the dragged column's slot.
+    const _b = $('#board'), _bx = _b.getBoundingClientRect().left;
+    const px = e.clientX - _bx + _b.scrollLeft;
     const srcRoot = rootIdOf(_colDragSrcId);
     let beforeRootId = null;
     for (const r of _colRow) {
       if (r.id === srcRoot) continue;
-      if (e.clientX < r.left + r.width / 2) { beforeRootId = r.id; break; }
+      if (px < r.left + r.width / 2) { beforeRootId = r.id; break; }
     }
     _colDrop = { mode: 'reorder', beforeRootId };
     _applyColShift();   // glide the columns apart to open the gap (the "shift away")
