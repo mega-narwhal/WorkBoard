@@ -3173,6 +3173,22 @@ function flushSave() {
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
 window.addEventListener('pagehide', flushSave);
+// #536 — Cmd/Ctrl+S saves a CHECKPOINT (like Cmd+S in a doc): commit any in-flight
+// field edit, force an immediate save (the server snapshots a numbered backup per
+// save), and log "Saved checkpoint" so there's a findable point to revert to —
+// either Cmd-Z in-session, or ask Claude to restore that backup later.
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+    e.preventDefault();
+    if (!state) return;
+    if (document.activeElement && document.activeElement.blur) {
+      try { document.activeElement.blur(); } catch (_) {}
+    }
+    save('checkpoint');
+    logEvent('save', '💾 Saved checkpoint');
+    toast('✓ Checkpoint saved');
+  }
+});
 
 // ===== Undo / Redo =====
 // Snapshot strategy: deep-clone the mutable parts of state (cards, columns,
