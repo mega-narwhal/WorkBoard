@@ -5,7 +5,7 @@ Measured 2026-05-28. The skill's promise is **zero per-prompt context bleed**; t
 ## TL;DR
 
 - **~222 tokens/session** baseline (SessionStart hook once, no per-prompt injection).
-- **~7,666 tokens** when SKILL.md body loads (only on board engagement, not every prompt).
+- **~4,065 tokens** when SKILL.md body loads (only on board engagement, not every prompt). *(Was 7,666; the 2026-06-09 core/reference split + de-dup brought it down, and reference moved to `docs/PLAYBOOK.md` loaded on demand. The ≤2,000 cap isn't reachable without cutting rules — the laws alone are ~2.2k — so adherence (laws + worked examples) was prioritized over the number.)*
 - **0 tokens** for board.json (~33K on disk, never auto-loaded — CLI-only access).
 - **Lightest per-prompt skill of the five peers benchmarked.** Heavier on cold-engagement than CLAUDE.md, lighter on every other axis.
 
@@ -81,7 +81,7 @@ Enforced (or to be enforced) so the skill doesn't quietly bloat:
 | Surface | Cap | Enforced by |
 |---|--:|---|
 | SessionStart hook block | ≤ 300 tok | hand-coded; PR-time review |
-| SKILL.md (always-load body) | ≤ 2,000 tok | **NOT yet — currently 7,666** (see follow-up: SKILL.md core/reference split) |
+| SKILL.md (always-load body) | ≤ 2,000 tok (aspirational) | **~4,065** after the 2026-06-09 split + de-dup (#202). Reference → `docs/PLAYBOOK.md`. The ≤2,000 number is sub-rule-set size (laws alone ~2.2k); kept adherence (laws + examples) over the cap. |
 | index.json | ≤ 12,000 tok (~48 KB) | `archive_done.py --days 14` sweeps old Done |
 | Done writeup median | ≤ 200 tok/card | hand-coded; reconciliation §F flags overruns |
 | Single `card.py show` | ≤ 2,000 tok | natural — only bloats if writeup is unbounded |
@@ -92,7 +92,7 @@ Enforced (or to be enforced) so the skill doesn't quietly bloat:
 
 ## Open hardening work (filed as follow-ups)
 
-- **SKILL.md core/reference split** — Trim core to ~1.5K tokens (mandatory + decision table + lifecycle §E + reconciliation §F + canonical write recipe), move playbook/schema/tags/install/bootstrap to `docs/` files loaded on demand.
+- ~~**SKILL.md core/reference split**~~ ✅ DONE 2026-06-09 (#202). Split to `docs/PLAYBOOK.md` (full card.py recipes, auto-card markers, tag rules, text-field detail) + `docs/BOOTSTRAP.md` (first-install). De-duped the laws (phase/decompose/under-engage repetition) and ADDED worked `card.py` examples (one per shape) for adherence. 4,754 → ~4,065 tok body. The ≤2,000 target was reframed: the laws are inherently ~2.2k, so adherence was prioritized over the cap.
 - **Schedule `archive_done.py`** — Currently a manual script. Wire into a launchd timer (or serve.py background thread) so it runs daily.
 - **Token-cost field in telemetry** — Add `est_tokens` to `log_event.py` schema so `report.py` can flag bloat trends over time.
 - **Cap enforcement** — `card.py` warns on Done-writeup > 800B; `serve.py` warns on index.json > 50KB.
