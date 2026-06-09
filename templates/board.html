@@ -3024,6 +3024,10 @@ function _snapState() {
     title: state.title || '',
     columns: state.columns || [],
     cards: state.cards || [],
+    // #503 — the active-work pulse must roll back in lockstep with card
+    // positions, or undo/redo desyncs the glow from the genuinely-current IP
+    // card (the bug: move to IP → pulse, then undo → pulse stuck/lost).
+    activeWorkId: state.activeWorkId || null,
   });
 }
 function _restoreSnap(snap) {
@@ -3031,6 +3035,10 @@ function _restoreSnap(snap) {
   state.title = o.title;
   state.columns = o.columns;
   state.cards = o.cards;
+  // Guard legacy/partial snapshots (e.g. an older entry without the key) so we
+  // never blank the pulse on restore; refreshActiveWork() (called by render())
+  // re-derives it and keeps it unique to the one genuinely-IP card.
+  if ('activeWorkId' in o) state.activeWorkId = o.activeWorkId || null;
 }
 function pushUndo() {
   const s = _snapState();
@@ -5271,6 +5279,7 @@ function renderColumn(col, cards) {
         title: state.title || '',
         columns: snap,
         cards: state.cards || [],
+        activeWorkId: state.activeWorkId || null,   // #503 — keep pulse in lockstep
       }));
       if (_undoStack.length > _UNDO_CAP) _undoStack.shift();
       _redoStack.length = 0;
@@ -5368,6 +5377,7 @@ function renderColumn(col, cards) {
           title: state.title || '',
           columns: _colDragSnapshot,
           cards: state.cards || [],
+          activeWorkId: state.activeWorkId || null,   // #503 — keep pulse in lockstep
         }));
         if (_undoStack.length > _UNDO_CAP) _undoStack.shift();
         _redoStack.length = 0;
