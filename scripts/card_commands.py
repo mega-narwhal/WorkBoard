@@ -470,7 +470,18 @@ def cmd_fly(args, d, board):
 
     c["updatedAt"] = now_iso()
     _set_active_work(d, c, old, args.column)
-    _record_move(c, old, args.column, via=via)
+    # #577 HARDENING — done is ALWAYS reached via inprogress. If a card flies
+    # straight to done from task/backlog/etc (a direct ship, a reconcile move,
+    # or any path that skipped the pulse), record the intermediate inprogress
+    # hop so the card's lifecycle history reads …→inprogress→done, never a bare
+    # task→done. Belt-and-suspenders on the emit/reconcile IP routing (#574/#575);
+    # the normal live flow (already in inprogress before done) is untouched —
+    # old=='inprogress' skips the injection, so emit's two-step never doubles.
+    if args.column == "done" and old not in ("inprogress", "done"):
+        _record_move(c, old, "inprogress", via=via)
+        _record_move(c, "inprogress", args.column, via=via)
+    else:
+        _record_move(c, old, args.column, via=via)
     rev = atomic_save(board, d)
 
     badge = " 🐞" if bug else (" ✨" if improve else "")
