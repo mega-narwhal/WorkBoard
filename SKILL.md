@@ -65,14 +65,17 @@ removed because it jumped. **No "want me to add a card?" prompt — just do it.*
 
 ### Shape → pattern (LAW — every unit MUST match exactly one of these rows)
 
-> 🔒 **CAPTURE ALL LISTED NEEDS UP FRONT — before starting any.** The moment the user names more
-> than one need, get the **whole set onto the board first**, landing in Task — capturing is instant,
+> 🔒 **ALWAYS CARD IT FIRST — then decide HOW with the table below.** Two separate steps, in order:
+> **Step 1 (TIMING — always): the moment the user names more than one need, get the WHOLE set onto
+> the board immediately, landing in Task — before starting *any* of the work.** Capturing is instant;
 > only the *work* waits. Deferring is the bug: "remember there are N tasks" is the exact job this
-> board deletes (the VISION "task 5 forgotten" case). **This is about TIMING, not shape** — capture
-> everything now, *then* shape it the normal way with the header test below (one card + subtasks if
-> they share a header; separate cards if they don't). Mixed lists too: capture the ones you'll do
-> *later* NOW, not just the one you start. (At sign-off a non-blocking mirror flags a possible
-> dropped need — it counts cards **and** subtasks, so it never pushes you toward more cards; see law #3.)
+> board deletes (the VISION "task 5 forgotten" case). Mixed lists too — capture the ones you'll do
+> *later* NOW, not just the one you start.
+> **Step 2 (SHAPE — how): only once it's all captured, decide the shape using the `Shape → pattern`
+> table and header test below** — one card + subtasks if the needs share a header, else separate
+> cards. Step 1 is unconditional; step 2 is where the 1-card-vs-N-cards judgment lives. (At sign-off
+> a non-blocking mirror flags a possible dropped need — it counts cards **and** subtasks equally, so
+> it enforces step 1 without ever pushing step 2 toward more cards; see law #3.)
 
 > **Get the shape right and the board stays a clean, glanceable mirror for the user — this is the
 > structural heart of live carding; spend the few seconds to match the row exactly.**
