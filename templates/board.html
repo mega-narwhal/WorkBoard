@@ -1402,6 +1402,10 @@
   }
   .icon-btn:hover { background: rgba(9,30,66,.10); color: var(--ink); }
   .del-btn:hover { color: var(--red); }
+  /* #551 — Empty Discarded: subtle by default (not shouty for a destructive,
+     low-frequency action), red-tinted on hover to signal danger. */
+  .icon-btn.empty-btn { opacity: .5; font-size: 13px; }
+  .icon-btn.empty-btn:hover { opacity: 1; background: rgba(214,69,65,.12); }
 
   /* Textareas */
   textarea.notes-modal, textarea.writeup-modal {
@@ -5385,6 +5389,19 @@ function renderColumn(col, cards) {
   count.className = 'count';
   count.textContent = cards.length;
   hdr.appendChild(count);
+
+  // #551 — Empty Discarded affordance: a subtle 🧹 in the Discarded column header,
+  // shown ONLY when it holds cards (nothing to sweep otherwise). Discoverable but
+  // not shouty (low opacity → red-tinted on hover); the confirm dialog gates it.
+  if ((col.id === 'discarded' || /^discarded$/i.test(col.name || '')) && cards.length) {
+    const empty = document.createElement('button');
+    empty.className = 'icon-btn empty-btn';
+    empty.textContent = '🧹';
+    empty.setAttribute('aria-label', `Empty Discarded (${cards.length})`);
+    empty.title = `Empty Discarded — permanently delete ${cards.length} card(s)`;
+    empty.onclick = (e) => { e.stopPropagation(); emptyDiscarded(); };
+    hdr.appendChild(empty);
+  }
 
   // Always-on × for CUSTOM columns (was: empty-only). Confirm if it has
   // cards — they'd otherwise be orphaned in state but invisible on board.
