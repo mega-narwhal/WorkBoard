@@ -607,13 +607,15 @@
   .card.active-work {
     animation: card-inprogress-pulse 1800ms ease-in-out infinite;
   }
+  /* #503 — box-shadow ONLY (no transform): a live scale() on the active card
+     perturbs the layout / getBoundingClientRect / FLIP math the drag preview
+     relies on. Keeping it purely cosmetic (a breathing coral halo) means the
+     pulse can never interfere with dragging any card in any column. */
   @keyframes card-inprogress-pulse {
     0%, 100% { box-shadow: 0 0 0 1px rgba(217, 119, 87, 0.15),
-                           0 2px 8px rgba(217, 119, 87, 0.18);
-               transform: scale(1); }
+                           0 2px 8px rgba(217, 119, 87, 0.18); }
     50%      { box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.55),
-                           0 8px 40px rgba(217, 119, 87, 0.65);
-               transform: scale(1.02); }
+                           0 8px 40px rgba(217, 119, 87, 0.65); }
   }
   /* Don't pulse mid-drag — drag/in-flight classes own the visual. */
   .card.active-work.dragging,
@@ -2132,6 +2134,45 @@ document.addEventListener('dragover', e => {
 document.addEventListener('drop', _asStop, true);
 document.addEventListener('dragend', _asStop, true);
 
+// #494 — a board repaint mid-drag tears down the dragged card's DOM node and
+// the HTML5 drag silently aborts: the ghost vanishes and a WITHIN-column reorder
+// (which relies on the live-preview node) fails, while a BETWEEN-column move
+// still "lands" because the card's column actually changed. This bit users as
+// "I can't move other cards while one is in progress / Claude is working." Fix:
+// the poll loop and every SSE handler DEFER their repaint while a card or column
+// is being dragged — they still merge incoming data into `state` so nothing is
+// lost — and the drag's own end flushes ONE reconciling render(). A drag in
+// flight wins over a repaint.
+let _pendingResync = false;
+function isDragInProgress() {
+  // Key on the drag STATE vars (cleared deterministically in commit/cancel/end),
+  // not body classes whose removal can be missed if a dragend never fires.
+  return _cardDrag != null || _colDragSrcId != null;
+}
+function flushPendingResync() {
+  if (isDragInProgress() || !_pendingResync) return;
+  _pendingResync = false;
+  render();
+  tickLastUpdate();
+}
+// rAF so the drag's own commit/cancel/end handlers (bubble phase) clear the drag
+// state before we test isDragInProgress().
+document.addEventListener('drop',    () => requestAnimationFrame(flushPendingResync), true);
+document.addEventListener('dragend', () => requestAnimationFrame(flushPendingResync), true);
+
+// #499 — safety net for a missed dragend. A drag's cleanup lives in its dragend
+// handler, which can be skipped when a mid-drag render() detaches the dragged
+// node (column-reorder reverts rebuild the columns). The residue then blocks
+// future card drops (the col-dragging-active guard) and freezes repaints. A new
+// dragstart proves any prior drag is over, so wipe stale residue HERE (capture
+// phase) before the real dragstart handlers set fresh state for THIS drag.
+document.addEventListener('dragstart', () => {
+  _cardDrag = null;
+  _colDragSrcId = null;
+  document.body.classList.remove('card-dragging-active');
+  document.body.classList.remove('col-dragging-active');
+}, true);
+
 // ===== Cmd+drag to pan the board (#514) =================================
 // When the board is wider/taller than the viewport you may not be able to
 // reach a drop target by dragging a card alone. Holding Cmd (⌘) / Ctrl turns a
@@ -2495,12 +2536,7 @@ function commitCardDrag() {
   recordMove(card, _cardDrag.srcCol, targetCol);   // #258 movement history
   // #254 — active-work follows a live MOVE into In Progress (persisted via the
   // scheduleSave() below, so it survives refresh). Parked cards never light up.
-  if (targetCol === 'inprogress' && _cardDrag.srcCol !== 'inprogress') {
-    state.activeWorkId = card.id;
-  } else if (_cardDrag.srcCol === 'inprogress' && targetCol !== 'inprogress'
-             && state.activeWorkId === card.id) {
-    state.activeWorkId = null;
-  }
+  setActiveWorkForMove(card.id, _cardDrag.srcCol, targetCol);   // #503 — shared rule
   // Auto-strip the 'bug' tag on done — regression is fixed. Remove the
   // .is-bug class inline so the 🐞 + border vanish the moment the card
   // lands, no SSE round-trip lag.
@@ -2569,8 +2605,7 @@ function moveCardToColumn(card, targetCol) {
   if (targetCol !== 'done') card.doneAt = null;
   recordMove(card, fromCol, targetCol);      // #258 movement history
   // #254 — active-work follows a move into / out of In Progress (persisted).
-  if (targetCol === 'inprogress' && fromCol !== 'inprogress') state.activeWorkId = card.id;
-  else if (fromCol === 'inprogress' && targetCol !== 'inprogress' && state.activeWorkId === card.id) state.activeWorkId = null;
+  setActiveWorkForMove(card.id, fromCol, targetCol);   // #503 — shared rule
   // #518 — log the move NOW. A right-click/menu move calls render() below, which
   // disrupts the SSE-echo path that logs drags, so it never showed in the Logs
   // HUD. Log directly (via=user) and mark it so the echo doesn't double-log.
@@ -3067,6 +3102,7 @@ function startPoll() {
     if (pendingDirty) return;
     if (Date.now() < suppressPollUntil) return;
     if (isUserEditing()) return;
+    if (isDragInProgress()) return;   // #494 — never rebuild the DOM mid-drag
     try {
       const r = await fetch(BOARD_URL, { cache: 'no-store' });
       if (!r.ok) return;
@@ -5644,7 +5680,12 @@ function recordMove(card, fromCol, toCol) {
 // triggered the move (card.py, or the UI drop/modal handlers) persists
 // state.activeWorkId. This keeps the client's in-memory state correct for
 // SSE-driven moves where the board-level field wouldn't otherwise propagate.
-function applyActiveWorkTransition(cardId, fromCol, toCol) {
+// #503 — single source of truth for the active-work transition RULE: a card
+// MOVED into In Progress becomes the active (pulsing + top-pinned) card; the
+// active card MOVED OUT clears it. Pure state mutation, no repaint — every move
+// path (drag commit, kebab/select move, SSE replay) sets activeWorkId
+// identically through this one function instead of re-inlining the rule.
+function setActiveWorkForMove(cardId, fromCol, toCol) {
   if (!state) return;
   if (toCol === 'inprogress' && fromCol !== 'inprogress') {
     state.activeWorkId = cardId;
@@ -5652,6 +5693,11 @@ function applyActiveWorkTransition(cardId, fromCol, toCol) {
              && state.activeWorkId === cardId) {
     state.activeWorkId = null;
   }
+}
+
+function applyActiveWorkTransition(cardId, fromCol, toCol) {
+  if (!state) return;
+  setActiveWorkForMove(cardId, fromCol, toCol);
   refreshActiveWork();
 }
 
@@ -5691,6 +5737,7 @@ function handleCardAdded({ card }) {
   // user might be on Calendar. Toast is fixed-position.
   if (card.meta && card.meta.autoCreated) showAutoCardToast(card);
   if (_view !== 'board') return;
+  if (isDragInProgress()) { _pendingResync = true; return; }   // #494 — defer DOM until drag ends
   if (findCardEl(card.id)) return;          // race with poll — already in DOM
 
   const col = findColumnEl(card.column);
@@ -5814,6 +5861,7 @@ function handleCardUpdated({ card, fromColumn, toColumn }) {
   if (idx >= 0) Object.assign(state.cards[idx], card);
   else { state.cards.push(card); }
   if (_view !== 'board') return;
+  if (isDragInProgress()) { _pendingResync = true; return; }   // #494 — defer DOM until drag ends
 
   const oldEl = findCardEl(card.id);
   if (!oldEl) { handleCardAdded({ card }); return; }
@@ -5861,6 +5909,7 @@ function handleCardRemoved({ id }) {
   const removed = state.cards.find(c => c.id === id);
   state.cards = state.cards.filter(c => c.id !== id);
   if (removed) logEvent('remove', `#${removed.num} "${removed.title}"`);
+  if (isDragInProgress()) { _pendingResync = true; return; }   // #494 — defer DOM until drag ends
   const el = findCardEl(id);
   if (!el) return;
   const colId = el.dataset.col;
@@ -6057,6 +6106,7 @@ function handleColumnAdded({ column, index }) {
     state.columns.splice(typeof index === 'number' ? index : state.columns.length, 0, column);
   }
   if (_view !== 'board') return;
+  if (isDragInProgress()) { _pendingResync = true; return; }   // #494 — defer DOM until drag ends
   if (findColumnEl(column.id)) return;
 
   const boardEl = $('#board');
@@ -6074,6 +6124,7 @@ function handleColumnRemoved({ id }) {
   const removed = state.columns.find(c => c.id === id);
   state.columns = state.columns.filter(c => c.id !== id);
   if (removed) logEvent('col', `− column "${removed.name || removed.id}"`);
+  if (isDragInProgress()) { _pendingResync = true; return; }   // #494 — defer DOM until drag ends
   const el = findColumnEl(id);
   if (!el) return;
   el.style.transition = 'opacity 200ms ease, max-width 300ms ease';
