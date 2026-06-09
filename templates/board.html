@@ -402,6 +402,13 @@
   body.col-dragging-active .column { cursor: grabbing; }
   body.col-dragging-active .column:not(.col-dragging) {
     animation: col-wiggle 0.6s ease-in-out infinite;
+    /* Keep the iPhone tilt CRISP — no blur. Animating rotate() re-rasterizes the
+       column's text every frame at a new sub-pixel angle (the "blur" you see).
+       Promoting each wiggling column to its own GPU layer makes the browser
+       rasterize it ONCE and composite the rotation as a stable texture. Scoped
+       to the drag, so the layers are released the moment the drag ends. */
+    will-change: transform;
+    backface-visibility: hidden;
   }
   @keyframes col-wiggle {
     0%, 100% { transform: rotate(0deg); }
