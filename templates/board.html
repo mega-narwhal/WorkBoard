@@ -6218,8 +6218,67 @@ function openCardMenu(card, x, y) {
   }, 0);
 }
 
+// #550 — tactile discard/delete sounds, SYNTHESIZED via Web Audio (Apple's trash
+// sound is a proprietary system asset we can't ship). Discard = a soft downward
+// whoosh; permanent delete = a paper-crumple + low thunk. On by default; mute via
+// localStorage wbSound='0'. AudioContext is lazily created on the triggering
+// gesture (satisfies the browser autoplay policy).
+let _audioCtx = null;
+let _soundOn = (localStorage.getItem('wbSound') !== '0');
+function _ac() {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
+    return _audioCtx;
+  } catch (_) { return null; }
+}
+function _noiseBuf(ctx, dur) {
+  const n = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  return buf;
+}
+function playDiscardSound() {
+  if (!_soundOn) return; const ctx = _ac(); if (!ctx) return;
+  const t = ctx.currentTime;
+  const src = ctx.createBufferSource(); src.buffer = _noiseBuf(ctx, 0.24);
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(1900, t); lp.frequency.exponentialRampToValueAtTime(180, t + 0.2);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  src.connect(lp); lp.connect(g); g.connect(ctx.destination);
+  src.start(t); src.stop(t + 0.25);
+}
+function playDeleteSound() {
+  if (!_soundOn) return; const ctx = _ac(); if (!ctx) return;
+  const t0 = ctx.currentTime;
+  for (let i = 0; i < 5; i++) {                         // crumple = quick noise grains
+    const t = t0 + i * 0.035 + Math.random() * 0.012;
+    const src = ctx.createBufferSource(); src.buffer = _noiseBuf(ctx, 0.05);
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.value = 1200 + Math.random() * 2200; bp.Q.value = 0.8;
+    const g = ctx.createGain(); const amp = 0.09 + Math.random() * 0.06;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(amp, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.start(t); src.stop(t + 0.06);
+  }
+  const osc = ctx.createOscillator(); osc.type = 'sine';  // low thunk
+  osc.frequency.setValueAtTime(140, t0 + 0.16); osc.frequency.exponentialRampToValueAtTime(60, t0 + 0.3);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0001, t0 + 0.16);
+  og.gain.exponentialRampToValueAtTime(0.11, t0 + 0.18);
+  og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.32);
+  osc.connect(og); og.connect(ctx.destination); osc.start(t0 + 0.16); osc.stop(t0 + 0.34);
+}
+
 function deleteCard(id) {
   if (!state) return;
+  playDeleteSound();   // #550 — permanent delete = crumple
   pushUndo();
   // #522 — log BEFORE removing (the SSE echo's handleCardRemoved can't log our
   // own delete: the card is already gone from local state by the time it fires).
@@ -6271,6 +6330,7 @@ async function discardCard(id) {
     return;
   }
   if (_openCardId === id) closeModal();
+  playDiscardSound();   // #550 — discard / drop-in-trash = whoosh
   moveCardToColumn(card, disc.id);
 }
 
@@ -6283,6 +6343,7 @@ async function emptyDiscarded() {
   const n = state.cards.filter(c => c.column === disc.id).length;
   if (!n) { toast('Discarded is already empty'); return; }
   if (!(await miniConfirm('Empty Discarded?', { sub: `Permanently delete ${n} discarded card(s)` }))) return;
+  playDeleteSound();   // #550 — bulk permanent delete = crumple
   pushUndo();
   state.cards = state.cards.filter(c => c.column !== disc.id);
   scheduleSave();
