@@ -3394,8 +3394,12 @@ function makePrioChip(card) {
   btn.title = 'Priority: ' + (card.priority || 'unset') + ' — click to cycle';
   btn.onclick = (e) => {
     e.stopPropagation();
-    const cycle = { critical: 'mid', mid: 'low', low: null, null: 'critical' };
-    card.priority = cycle[card.priority ?? 'null'];
+    // #548 — single click always advances. Normalize any falsy priority
+    // ('' / undefined / null) to "unset" first; the old `?? 'null'` map made the
+    // first click a no-op for '' / undefined (so it took two clicks).
+    const order = [null, 'critical', 'mid', 'low'];   // unset → C → M → L → unset
+    const i = order.indexOf(card.priority || null);
+    card.priority = order[((i < 0 ? 0 : i) + 1) % order.length];
     card.updatedAt = now();
     scheduleSave(); render();
   };
