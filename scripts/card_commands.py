@@ -238,15 +238,10 @@ def _set_active_work(d, card, old_col, new_col):
     active (only a real transition does); moving the active card out clears it.
     This is the old live-transition definition, made persistent."""
     if new_col == "inprogress" and old_col != "inprogress":
-        # #503 STICKY — claim the pulse only when no card is currently the active
-        # one in In Progress. The existing active card keeps it until IT leaves;
-        # new arrivals don't steal it. (Also heals a stale pointer to a card that
-        # is no longer in In Progress.)
-        cur = next((c for c in d.get("cards", [])
-                    if c.get("id") == d.get("activeWorkId")), None)
-        active_still_ip = bool(cur) and cur.get("column") == "inprogress"
-        if not active_still_ip:
-            d["activeWorkId"] = card["id"]
+        # #546 — the card that most recently TRANSITIONED into In-Progress becomes
+        # the active (pulsing) one and sticks to that card (by id) until the NEXT
+        # card transitions into IP and takes over. (Reverts the #503 "don't steal".)
+        d["activeWorkId"] = card["id"]
     elif old_col == "inprogress" and new_col != "inprogress" \
             and d.get("activeWorkId") == card["id"]:
         d["activeWorkId"] = None
