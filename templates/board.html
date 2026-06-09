@@ -5583,7 +5583,21 @@ function renderColumn(col, cards) {
         sel.removeAllRanges();
         sel.addRange(range);
       } catch (_) {}
-      titleEl.addEventListener('blur', () => closeModal(), { once: true });
+      titleEl.addEventListener('blur', () => {
+        // #547 — if nothing was written (title left empty or still the default
+        // "New card"/"New idea" placeholder), don't persist an empty card.
+        const t = (titleEl.textContent || '').trim();
+        const placeholder = 'New ' + (col.id === 'ideas' ? 'idea' : 'card');
+        if (!t || t === placeholder) {
+          state.cards = state.cards.filter(c => c.id !== card.id);
+          if (state.nextNum === n + 1) state.nextNum = n;   // reclaim the number
+          closeModal();
+          scheduleSave();
+          render();
+          return;
+        }
+        closeModal();
+      }, { once: true });
     });
   };
   el.appendChild(addBtn);
