@@ -123,7 +123,14 @@ path<TAB>label):
 
 ${projects}
 
-ACTION (do this now, don't wait to be asked): PRINT the projects above as a
+ACTION (do this now, don't wait to be asked):
+
+  • If there is EXACTLY ONE project listed above → do NOT draw a picker or wait.
+    Auto-open it: run \`bash "${hook_dir}/bootstrap_project.sh" "<that one PATH>"\`
+    straight away (default 2-day window), then go to the announcement below. One
+    option means there's nothing to choose.
+
+  • If there are TWO OR MORE projects → PRINT them as a
 NUMBERED LIST in a normal chat message (plain markdown — it renders on EVERY
 terminal theme). Do NOT call AskUserQuestion: its question-title field is
 invisible on any theme that mismatches the terminal background (e.g. the default
