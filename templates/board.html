@@ -2320,6 +2320,25 @@ function stackOrderedColumns() {
 // drops from O(cards) to O(columns). Falls back to the authoritative render() if
 // the live DOM doesn't hold every state column, or if the stack walk wouldn't
 // place every existing node (orphan) — so correctness can never regress.
+// #534 — SINGLE source of truth for the column→.column-stack DOM layout, shared
+// by render() (fresh nodes) and reorderColumnsDOM() (reused nodes). Appends one
+// .column-stack wrapper per root into `container`, and for each column in walk
+// order appends whatever `perColumn(col)` returns. Keeping both callers on this
+// helper means the stack structure can never drift between a full render and the
+// live drag preview.
+function buildColumnStacks(container, perColumn) {
+  getStackRoots().forEach(root => {
+    const wrap = document.createElement('div');
+    wrap.className = 'column-stack';
+    wrap.dataset.stackRoot = root.id;
+    walkStack(root.id).forEach(col => {
+      const el = perColumn(col);
+      if (el) wrap.appendChild(el);
+    });
+    container.appendChild(wrap);
+  });
+}
+
 function reorderColumnsDOM() {
   if (!state || _view !== 'board') { render(); return; }
   const board = $('#board');
@@ -2329,16 +2348,8 @@ function reorderColumnsDOM() {
   if ((state.columns || []).some(c => !existing.has(c.id))) { render(); return; }
   const addBtn = board.querySelector('.col-add-btn');
   const frag = document.createDocumentFragment();
-  getStackRoots().forEach(root => {
-    const wrap = document.createElement('div');
-    wrap.className = 'column-stack';
-    wrap.dataset.stackRoot = root.id;
-    walkStack(root.id).forEach(col => {
-      const node = existing.get(col.id);
-      if (node) wrap.appendChild(node);   // MOVES the existing subtree (cards intact)
-    });
-    frag.appendChild(wrap);
-  });
+  // Reuse the existing subtree per column (cards + listeners + scroll intact).
+  buildColumnStacks(frag, col => existing.get(col.id));
   // Safety: if the walk didn't place every existing column (orphan/cycle), don't
   // risk dropping a column — fall back to the full render (which is authoritative).
   if (frag.querySelectorAll('.column[data-col]').length !== existing.size) { render(); return; }
@@ -4228,23 +4239,19 @@ function render() {
     // #117 — render in stacks: one .column-stack wrapper per root, containing
     // the root + all stackUnder descendants in walk order. Single-column
     // "stacks" still get a wrapper so the layout is uniform.
-    getStackRoots().forEach(root => {
-      const wrap = document.createElement('div');
-      wrap.className = 'column-stack';
-      wrap.dataset.stackRoot = root.id;
-      walkStack(root.id).forEach(col => {
-        let cards = state.cards.filter(c => c.column === col.id);
-        // #249 — pin the "current work" card (most-recent in In Progress) to
-        // the TOP of the column so every session opens showing what you're
-        // working on. Stable sort preserves the order of the rest.
-        if (col.id === 'inprogress') {
-          const aid = activeWorkId();
-          if (aid) cards = cards.slice().sort((a, b) =>
-            a.id === aid ? -1 : b.id === aid ? 1 : 0);
-        }
-        wrap.appendChild(renderColumn(col, cards));
-      });
-      board.appendChild(wrap);
+    // #534 — shared with reorderColumnsDOM() via buildColumnStacks; render()
+    // creates a fresh .column per column (with the In-Progress top-pin sort).
+    buildColumnStacks(board, col => {
+      let cards = state.cards.filter(c => c.column === col.id);
+      // #249 — pin the "current work" card (most-recent in In Progress) to
+      // the TOP of the column so every session opens showing what you're
+      // working on. Stable sort preserves the order of the rest.
+      if (col.id === 'inprogress') {
+        const aid = activeWorkId();
+        if (aid) cards = cards.slice().sort((a, b) =>
+          a.id === aid ? -1 : b.id === aid ? 1 : 0);
+      }
+      return renderColumn(col, cards);
     });
     const addCol = document.createElement('button');
     addCol.className = 'col-add-btn';
