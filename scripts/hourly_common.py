@@ -177,6 +177,8 @@ You are extracting kanban cards from a block of work activity. The input below i
 
 Your job: identify the DISCRETE UNITS OF WORK that happened in each bucket. Each unit becomes ONE card. Group related turns (the user asked, then clarified, then you built it, then they reviewed) under ONE card — NOT one card per turn.
 
+THE HEADER TEST (how to decide one card vs many): can ONE honest label cover all the parts of a unit? YES → it is ONE card — put the parts in the title separated by ` + ` AND list them in the "subtasks" array. NO (independent, unrelated work) → SEPARATE cards, one each. Example: "reorder + drag-to-trash + FLIP glide" share the label 'column drag interactions' → one card with 3 subtasks; "bump version, fix a typo, add a logout button" share no honest label → three cards.
+
 Output: a JSON ARRAY of card objects. Each card:
 {
   "title": "verb + noun phrase naming the SPECIFIC subject of the work — concrete and faithful to what was actually built, NOT a vague abstract header ('Fix card-drag freeze on iPhone' ✓, 'Improve board' ✗). ≤70 chars (a multi-part title may use the full budget). CLEAN — do NOT prefix with the code (it renders as its own badge). KEY: if the card bundles SEVERAL related parts (the common case when you grouped multiple turns into one card), list the parts in the title separated by ' + ' — this is 'the glance', exactly how a live-carded title looks (e.g. 'Column delete + grip drag + drag-to-trash + FLIP reorder'), up to 4 segments; do NOT collapse a multi-part unit into one generic word. Single-part work stays a plain phrase. NO conversational openers (btw, can u, oh wait). NO verbatim user wording — summarize the WORK specifically. Examples: 'Atomic-hop primitive for card moves', 'Investigate convo dedup', 'Redis bus + canary lazy-fetch + A↔B heartbeat'.",
@@ -186,6 +188,7 @@ Output: a JSON ARRAY of card objects. Each card:
   "origin": "WHY this work exists — the user's goal or the trigger, in their voice/intent (not yours). ≤200 chars. e.g. 'User wanted card-drag to work on iPhone where the columns stack vertically and the old handler froze.' This is the 'why this exists' a teammate reads to understand the card at a glance. Empty string only if genuinely unknowable.",
   "notes": "What the work actually was: problem → approach → outcome (or current state). 1-3 sentences, ≤300 chars. Concrete — name the file/function/command. If a COMMIT line (a sha) for this work appears in the bucket log, ALWAYS cite its short sha, e.g. 'Shipped in 7b565ff.' For UNFINISHED work, state what's left. Empty string only if no signal.",
   "tags": ["one or two from: feature | bug | fix | refactor | doc | design | discipline | infrastructure"],
+  "subtasks": "OPTIONAL array decomposing a MULTI-PART card into its parts — exactly ONE entry per ` + ` segment in the title, in the same order, each a concise fuller-detail phrase (≤120 chars, not a repeat of the title). This is what makes a mined card match a LIVE-carded one ('each part is also a subtask'). Use it ONLY when the title bundles parts; for genuinely single-part work return [] — do NOT invent subtasks (that over-splits). ≤4 entries. For a long grouped list an entry may be {\"text\": \"<group name>\", \"children\": [\"<item>\", …]} (ONE nesting level).",
   "transitions": "OPTIONAL ordered array of EXTRA lifecycle hops AFTER the first ship — reconstruct the TRUE path the card took, but ONLY when the digest explicitly shows it. Each entry: {\"to\": \"inprogress\"|\"done\", \"kind\": \"bug\"|\"improve\"|null, \"reason\": \"short text ≤80 chars\"}. kind 'bug' = the shipped card BROKE (regression/revert/reopen in the log) and flew back to In Progress to be fixed; 'improve' = an enhancement after ship. A reopen is normally followed by a {\"to\":\"done\"} hop. OMIT or [] for the normal task→IP→done (most cards). NEVER invent a bug cycle the digest doesn't show."
 }
 
@@ -196,6 +199,8 @@ Column routing rules:
 - "task"       → mentioned, named, planned but no edits yet
 - "backlog"    → deferred / open / undone: user said "later" / "next session" / "tomorrow" / "defer" / "pending" / "we'll revisit" / "nvm save it", OR the work was started but explicitly NOT finished
 - "notes"      → captured observation / idea / decision, NOT a unit of work to ship
+
+Route to the unit's FINAL observed state across the WHOLE log below, not the moment it was first mentioned: if a commit sha or ship phrase for this unit appears ANYWHERE in the activity (even if the unit was merely *named* or *planned* earlier), it is "done" — don't leave it in "task"/"inprogress" just because the mention came before the ship. (Getting the final column right here is what keeps the later reconcile pass from having to move it.)
 
 OPEN / DEFERRED work is the highest-value signal — surface it, don't bury it:
 - If the work was deferred or left unfinished, route to "backlog" (or "task" if never started) AND begin notes with "⏸ OPEN — " followed by exactly what remains and the trigger to resume (e.g. "⏸ OPEN — sim_60d --strict still fails on the archive-on-install gap; resume to decide strict-cap policy.").

@@ -133,6 +133,72 @@ def _card_add(card_py: Path, board: Path, card: dict) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _card_subtask_add(card_py: Path, board: Path, num: int, text: str,
+                      parent: str | None = None) -> str | None:
+    """Add ONE subtask via the card.py CLI (#570 — bootstrap decomposition,
+    same path live carding uses). Returns the new subtask id (parsed from the
+    command's '+ s-…:' line) so the caller can tick it done, or None on
+    failure. Silently tolerant — a bad subtask must never break the fill."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    args = [sys.executable, str(card_py), "--board", str(board),
+            "subtask", "add", str(num), text[:160]]
+    if parent:
+        args += ["--parent", parent]
+    try:
+        out = subprocess.run(args, capture_output=True, text=True, timeout=8)
+    except subprocess.SubprocessError:
+        return None
+    if out.returncode != 0:
+        return None
+    m = re.search(r"\+\s+(s-[a-z0-9-]+)", out.stdout)
+    return m.group(1) if m else None
+
+
+def _emit_subtasks(card_py: Path, board: Path, num: int, subtasks,
+                   mark_done: bool) -> int:
+    """Decompose a multi-part mined card into REAL subtasks (#570 — transpose
+    live shape into bootstrap), so the card matches a live-carded one instead of
+    the auto 1/1 'initial ship'. SHAPE-NEUTRAL: an empty/missing list is a no-op
+    (single-part cards keep today's behavior). Each item is a plain string, or a
+    {"text", "children":[…]} dict (one level of nesting for the grouped case).
+    When mark_done, ticks every emitted subtask so a shipped card reads N/N.
+    Returns the count of top-level subtasks emitted."""
+    if not isinstance(subtasks, list) or not subtasks:
+        return 0
+    n = 0
+    for item in subtasks[:4]:                     # ≤4 flat segments (SKILL 2a)
+        if isinstance(item, dict):
+            text = item.get("text") or ""
+            children = item.get("children") or []
+        else:
+            text, children = item, []
+        sid = _card_subtask_add(card_py, board, num, text)
+        if not sid:
+            continue
+        n += 1
+        for child in (children or [])[:4]:
+            ctext = child.get("text") if isinstance(child, dict) else child
+            csid = _card_subtask_add(card_py, board, num, ctext, parent=sid)
+            if csid and mark_done:
+                _card_subtask_done(card_py, board, num, csid)
+        if mark_done:
+            _card_subtask_done(card_py, board, num, sid)
+    return n
+
+
+def _card_subtask_done(card_py: Path, board: Path, num: int, sid: str) -> bool:
+    try:
+        out = subprocess.run(
+            [sys.executable, str(card_py), "--board", str(board),
+             "subtask", "done", str(num), sid],
+            capture_output=True, text=True, timeout=8)
+    except subprocess.SubprocessError:
+        return False
+    return out.returncode == 0
+
+
 def _card_fly(card_py: Path, board: Path, num: int, col: str,
               writeup: str | None = None, bug: str | None = None,
               improve: str | None = None, subtask: str | None = None) -> bool:
@@ -189,13 +255,20 @@ def emit_card(card_py: Path, board: Path, card: dict,
               show_lifecycle: bool, pace_s: float) -> int | None:
     """Add the card, then optionally walk lifecycle hops if show_lifecycle."""
     final_col = card.get("column") or "task"
+    subtasks = card.get("subtasks")
     if show_lifecycle and final_col in ("done", "inprogress"):
-        # Start in task → fly to final
+        # Start in task → decompose → fly to final
         card_for_add = dict(card)
         card_for_add["column"] = "task"
         num = _card_add(card_py, board, card_for_add)
         if num is None:
             return None
+        # #570: emit REAL subtasks while still in task (before the fly) so the
+        # card arrives shaped like a live one and never trips the #103
+        # decompose-before-IP guard. A done card's parts are complete → tick
+        # them (reads N/N); an inprogress card's parts stay open.
+        _emit_subtasks(card_py, board, num, subtasks,
+                       mark_done=(final_col == "done"))
         time.sleep(pace_s)
         if final_col == "done":
             _card_fly(card_py, board, num, "inprogress")
@@ -208,7 +281,14 @@ def emit_card(card_py: Path, board: Path, card: dict,
             _card_fly(card_py, board, num, "inprogress")
         return num
     else:
-        return _card_add(card_py, board, card)
+        num = _card_add(card_py, board, card)
+        if num is None:
+            return None
+        # Non-lifecycle add (card born directly in its final column). Decompose
+        # the same way; tick done only when it's a done card.
+        _emit_subtasks(card_py, board, num, subtasks,
+                       mark_done=(final_col == "done"))
+        return num
 
 
 
