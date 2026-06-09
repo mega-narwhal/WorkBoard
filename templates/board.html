@@ -2333,8 +2333,11 @@ function captureColumnRects() {
 
 // FLIP "last/invert/play": after a re-render, animate each column from
 // where it WAS (in oldRects) to where it IS (current rect).
-function flipPlayColumns(oldRects) {
+function flipPlayColumns(oldRects, opts = {}) {
   if (!oldRects) return;
+  // #119 — default 1080ms (column reorder). #535 — card moves pass a shorter
+  // duration so a column gliding down on a card-move feels snappy, not sluggish.
+  const dur = opts.duration || 1080;
   document.querySelectorAll('#board .column').forEach(c => {
     const id = c.dataset.col;
     const oldR = oldRects.get(id);
@@ -2348,8 +2351,7 @@ function flipPlayColumns(oldRects) {
         { transform: `translate(${dx}px, ${dy}px)` },
         { transform: 'translate(0, 0)' },
       ],
-      // #119 — slowed 360 → 1080ms (1/3 speed) per user request for column reflow.
-      { duration: 1080, easing: 'cubic-bezier(0.34, 1.4, 0.64, 1)' }
+      { duration: dur, easing: 'cubic-bezier(0.34, 1.4, 0.64, 1)' }
     );
   });
 }
@@ -2511,11 +2513,20 @@ function reflowCardDragPreview() {
     });
   });
   const rects = captureCardRects();
+  // #535 — also capture COLUMN positions: moving the card into this column grows
+  // it, which pushes a stacked-below column down. flipPlayColumns animates only
+  // the columns whose top-left actually MOVED (the displaced stack member) — the
+  // grow-in-place source/target columns have dy≈0 and are skipped, so this never
+  // shifts the drag source/target hitbox.
+  const colRects = captureColumnRects();
   targetCol.insertBefore(_cardDrag.srcEl, wantNextEl);
   _cardDragRects = rects;
   // Short duration for live drag reflow — long durations stack up faster than
   // the user can wiggle the cursor. SSE moves still default to 1080ms.
-  requestAnimationFrame(() => flipPlayCards(rects, { duration: 280 }));
+  requestAnimationFrame(() => {
+    flipPlayCards(rects, { duration: 280 });
+    flipPlayColumns(colRects, { duration: 280 });   // #535 — glide the pushed-down column
+  });
 }
 
 // Commit the previewed position to state on drop. Computes insertion index
@@ -2609,6 +2620,7 @@ function moveCardToColumn(card, targetCol) {
   if (!card || !targetCol || card.column === targetCol) return;
   const fromCol = card.column;
   const rects = captureCardRects();          // FLIP: positions before the move
+  const colRects = captureColumnRects();     // #535 — glide a pushed-down stacked column too
   pushUndo();
   card.column = targetCol;
   card.updatedAt = now();
@@ -2624,7 +2636,10 @@ function moveCardToColumn(card, targetCol) {
   _localMoveLog.set(card.id, Date.now());
   scheduleSave();
   render();
-  requestAnimationFrame(() => flipPlayCards(rects, { duration: 480 }));
+  requestAnimationFrame(() => {
+    flipPlayCards(rects, { duration: 480 });
+    flipPlayColumns(colRects, { duration: 480 });   // #535 — glide the pushed-down column
+  });
 }
 
 function cancelCardDrag() {
