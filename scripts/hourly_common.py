@@ -213,6 +213,7 @@ Lifecycle transitions (reconstruct the TRUE path, not just the final state):
 
 Quality bar:
 - Skip conversational micro-turns ("yes", "ok", "stop", "open the board", "rerun"). They are NOT cards.
+- Skip AMBIGUOUS / NON-DELIVERABLE activity: if you cannot name a concrete deliverable, or the purpose is unclear from the log (e.g. "edited some files, purpose unknown / likely scaffolding"), or it's a vague stub with no concrete subject ("test verification", "validation", "do the thing"), DO NOT card it — that's noise, not a unit of work. When the deliverable is unclear, OMIT it rather than carding a placeholder.
 - One unit of work = one card. If the user asked about feature X, you built it, and they reviewed it — that is ONE card titled by what X is.
 - If two units of work happened in the same hour, return two cards.
 - origin = the user's WHY; notes = the WHAT/HOW/STATE. Keep them distinct, both concrete. Prefer real file/commit/command names over vague summaries.

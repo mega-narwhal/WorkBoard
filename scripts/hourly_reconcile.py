@@ -34,8 +34,8 @@ For each card, decide its TRUE STATUS based on whether the user (in the activity
 - Said "skip", "nvm", "don't do that", "we won't ship this", "defer", "later" → MOVE to backlog
 - Said "done", "we shipped it", or there is a commit/ship hit matching the card's noun cluster → MOVE to done
 - Said "urgent", "must", "this is impt", "critical", "asap", "p0", "p1", "blocker" → MOVE to super-urgent
-- No clear later signal AND card matches active work → STAY
-- Sat untouched > 24h with no follow-up → MOVE to backlog (stale)
+- No clear later signal → STAY (leave it where extraction put it)
+- DO NOT move a card to backlog merely because it's old / untouched / >24h. Staleness alone is NOT a defer signal — only an EXPLICIT "skip/nvm/defer/later/next session/we'll revisit" phrase (the first rule) moves a card to backlog. On a multi-day bootstrap, most cards are naturally "old"; sweeping them all to backlog buries the board in false pending-work, so don't.
 
 Return ONLY a JSON array (no markdown). One object per card you have a confident judgment on (omit cards you'd keep as STAY):
 [
