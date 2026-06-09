@@ -196,6 +196,13 @@ reminder every turn (install via `docs/BOOTSTRAP.md` → `--hook all`). This tab
 interjects on every code question is noise. But once you DO act, act fully: move + writeup + index
 regen + bidirectional link if there's a parent.
 
+**Priority (low / mid / critical = L/M/H) — a judgment set ONCE at carding, never automated.** Choose it
+when you `add` the card, from IMPORTANCE/impact (not status): `critical` = urgent/blocking or high-impact
+(auto-set for urgent words → 🚨 SUPER URGENT), `mid` = normal work (the default), `low` = nice-to-have.
+Because it's importance, **set it in Task and leave it alone** — don't churn it as the card moves through
+In-Progress → Done. **No hook sets or enforces priority** — it's discipline, like the rest of carding; if
+it's wrong, just `card.py update <n> --priority <…>`.
+
 ---
 
 ## Reconciliation — keep the board honest
