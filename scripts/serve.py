@@ -761,8 +761,12 @@ def _build_arg_parser():
                     help="On bootstrap, do NOT mine prior Claude sessions into cards (default: do)")
     ap.add_argument("--discover-days", type=int, default=2,
                     help="FLY-IN window: how many days of work to mine into "
-                         "cards on bootstrap (default 2). NOT the picker — the "
-                         "first-run project picker enumerates separately via "
+                         "cards on bootstrap (default 2 — RECOMMENDED: recent, "
+                         "relevant work). A LARGER window is a deliberate opt-in "
+                         "ONLY for digging up older work — it surfaces stale, "
+                         "less-relevant cards and a worse first board; don't bump "
+                         "it casually. (Card count stays capped by --discover-max.) "
+                         "NOT the picker — the first-run picker enumerates via "
                          "discover2 --list-projects --days 3 in the hook. The "
                          "tier-fly anchors this window on the project's LAST "
                          "session, so an idle gap doesn't empty it.")
@@ -839,6 +843,21 @@ def _resolve_board_dir(args):
             file=sys.stderr,
         )
         sys.exit(2)
+
+    # #554 — deter wide history windows. 2 days is the recommended, relevant
+    # default; a large window surfaces stale, less-relevant cards (a worse first
+    # board). Warn loudly so even a deliberate run is a conscious choice — but
+    # don't block (the operator asked for it explicitly).
+    if args.discover_days > 7:
+        print(
+            f"⚠️  --discover-days {args.discover_days}: mining MORE than the "
+            f"recommended 2-day window. This surfaces older, possibly-stale work "
+            f"and degrades the first-board experience — intended only for "
+            f"deliberately digging up past work. (Card count stays capped by "
+            f"--discover-max {args.discover_max}.) Re-run with --discover-days 2 "
+            f"for the recommended window.",
+            file=sys.stderr,
+        )
 
     board_dir = start / "board"
     bootstrap_board(board_dir, profile=args.profile,

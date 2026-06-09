@@ -24,7 +24,12 @@
 set +e
 set -u
 
-proj_root="${1:?usage: bootstrap_project.sh <project_root>}"
+proj_root="${1:?usage: bootstrap_project.sh <project_root> [discover_days]}"
+# #554 — optional history window in days. UNSET → serve.py's 2-day default (the
+# recommended window: recent, relevant work). Pass a larger value ONLY when the
+# user EXPLICITLY wants to dig up older work — a wide window surfaces stale,
+# less-relevant cards and degrades the first-board experience. Don't bump casually.
+days="${2:-}"
 hook_dir="$(cd "$(dirname "$0")" && pwd)"
 serve_py="${hook_dir}/serve.py"
 board_dir="${proj_root}/board"
@@ -54,7 +59,9 @@ if ! curl -s --max-time 0.3 "http://127.0.0.1:${want_port}/health" >/dev/null 2>
   # env -u CLAUDECODE: bootstrap fill + its end-of-fill reconcile_sweep are
   # subprocesses of this server; unset so they take the Haiku path, not the
   # in-session prose recon_pending path (#recon).
-  env -u CLAUDECODE nohup python3 "${serve_py}" --project "${proj_root}" --port "${want_port}" ${bootstrap_flag} \
+  dd_flag=""
+  [ -n "${days}" ] && dd_flag="--discover-days ${days}"   # #554 — only when explicitly requested
+  env -u CLAUDECODE nohup python3 "${serve_py}" --project "${proj_root}" --port "${want_port}" ${bootstrap_flag} ${dd_flag} \
     >"${proj_root}/.board-server.log" 2>&1 </dev/null &
   disown 2>/dev/null || true
   # Wait for bind + board.json (bootstrap_board writes synchronously).

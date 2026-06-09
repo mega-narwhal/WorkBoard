@@ -146,6 +146,12 @@ number/path to the project PATH and create + open the board by running:
 That assigns the project's port, mines its history into a one-by-one fly-in,
 opens the browser, and marks onboarding done. Do NOT pick for them.
 
+Use the DEFAULT 2-day window — run it with just the PATH. 2 days is the good
+first experience (recent, relevant work). Only append a days argument (e.g.
+bootstrap_project.sh "PATH" 14) if the user EXPLICITLY asks to mine older / more
+history — never bump it yourself; a wide window floods the first board with stale,
+less-relevant cards.
+
 When you announce the board, use THIS exact shape — relay verbatim, don't pad:
 
 1. One line: the board is live + its port (http://127.0.0.1:<port>).
