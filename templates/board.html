@@ -5709,7 +5709,13 @@ function recordMove(card, fromCol, toCol) {
 function setActiveWorkForMove(cardId, fromCol, toCol) {
   if (!state) return;
   if (toCol === 'inprogress' && fromCol !== 'inprogress') {
-    state.activeWorkId = cardId;
+    // #503 STICKY — a card moving INTO In Progress claims the pulse ONLY when no
+    // card is currently the active one in IP. The existing active card keeps the
+    // glow + top-pin until IT leaves In Progress; new arrivals join below without
+    // stealing it. (Also auto-heals a stale pointer aimed at a card no longer in IP.)
+    const cur = state.cards.find(c => c.id === state.activeWorkId);
+    const activeStillInIP = cur && cur.column === 'inprogress';
+    if (!activeStillInIP) state.activeWorkId = cardId;
   } else if (fromCol === 'inprogress' && toCol !== 'inprogress'
              && state.activeWorkId === cardId) {
     state.activeWorkId = null;
