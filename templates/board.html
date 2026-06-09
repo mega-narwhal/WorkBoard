@@ -5850,6 +5850,7 @@ function simulateUserDragMove(card, fromColumn, toColumn, oldEl) {
   // card.py fly --pause-ms 400 default for a snappy chain.
   setTimeout(() => {
     const before = captureCardRects();
+    const colBefore = captureColumnRects();   // #535 — glide a pushed-down stacked column on a fly
     oldEl.remove();
     const newEl = renderCardCompact(card);
     newEl.style.visibility = 'hidden';   // revealed when ghost lands
@@ -5873,6 +5874,9 @@ function simulateUserDragMove(card, fromColumn, toColumn, oldEl) {
     const beforeSiblings = new Map(before);
     beforeSiblings.delete(card.id);
     flipPlayCards(beforeSiblings, { duration: 240 });
+    // #535 — glide the pushed-down stacked column in parallel with the 240ms
+    // travel, so the fly stays 320ms total and the column lands as the card does.
+    flipPlayColumns(colBefore, { duration: 240 });
 
     const dstRect = newEl.getBoundingClientRect();
     const dx = dstRect.left - srcRect.left;
