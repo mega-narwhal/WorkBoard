@@ -2680,8 +2680,9 @@ function commitCardDrag() {
 function moveCardToColumn(card, targetCol) {
   if (!card || !targetCol || card.column === targetCol) return;
   const fromCol = card.column;
-  const rects = captureCardRects();          // FLIP: positions before the move
-  const colRects = captureColumnRects();     // #535 — glide a pushed-down stacked column too
+  // Capture the live source node BEFORE any state/DOM change so the ghost fly can
+  // start from where the card actually sits.
+  const oldEl = (_view === 'board') ? findCardEl(card.id) : null;
   pushUndo();
   card.column = targetCol;
   card.updatedAt = now();
@@ -2696,11 +2697,18 @@ function moveCardToColumn(card, targetCol) {
   logEvent('move', `#${card.num} ${colLabel(fromCol)} → ${colLabel(targetCol)}`, card, 'user');
   _localMoveLog.set(card.id, Date.now());
   scheduleSave();
-  render();
-  requestAnimationFrame(() => {
-    flipPlayCards(rects, { duration: 480 });
-    flipPlayColumns(colRects, { duration: 480 });   // #535 — glide the pushed-down column
-  });
+  // The right-click / select "Move to" now flies with the SAME ghost as CLI/SSE
+  // moves — a position:fixed clone at z-index 2000 — so the card travels cleanly
+  // ON TOP of the board. The old path was a plain flipPlayCards FLIP on the
+  // in-flow card node, which the .column-body overflow:hidden CLIPPED and which
+  // had no elevated z-index, so it slid BEHIND other columns ("flying below").
+  // simulateUserDragMove surgically moves the DOM (no full render) and carries
+  // the #535 column glide itself.
+  if (oldEl && !_animSuppressed()) {
+    simulateUserDragMove(card, fromCol, targetCol, oldEl);
+  } else {
+    render();   // calendar view / animation-suppressed / node missing → plain rebuild
+  }
 }
 
 function cancelCardDrag() {
