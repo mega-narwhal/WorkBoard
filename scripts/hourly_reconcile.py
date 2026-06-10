@@ -30,9 +30,14 @@ You are reconciling a kanban board against the user's recent activity.
 Below: cards currently in NON-DONE columns of the board, with their titles, bucket timestamps, and notes.
 After that: the chronological activity log from the same time window.
 
+If an "ALREADY DONE" block is present, it lists cards that have SHIPPED — use it to spot non-done cards that are really redundant duplicates of finished work.
+
 For each card, decide its TRUE STATUS based on whether the user (in the activity log) later:
 - Said "skip", "nvm", "don't do that", "we won't ship this", "defer", "later" → MOVE to backlog
 - Said "done", "we shipped it", or there is a commit/ship hit matching the card's noun cluster → MOVE to done
+- A COMMIT or "CLAUDE edited" line touches a FILE the card names in its title or notes → MOVE to done. File overlap is strong ship-evidence even when the commit subject is vague ("wip", "misc cleanup", "checkpoint") — the file is what reveals the work was actually done.
+- The card's unit of work already appears in the ALREADY DONE block (same feature / noun cluster as a shipped card) → MOVE to done (it's a redundant duplicate of finished work).
+- It is an IN-PROGRESS card from an EARLIER day whose named file shows up in a later commit/edit, with no sign work continued → prefer MOVE to done over leaving it stranded in In-Progress. BOUNDED: only when there is an actual file/commit hit — a bare old In-Progress card with NO matching activity STAYS (do not over-close on staleness alone).
 - Said "urgent", "must", "this is impt", "critical", "asap", "p0", "p1", "blocker" → MOVE to super-urgent
 - No clear later signal → STAY (leave it where extraction put it)
 - DO NOT move a card to backlog merely because it's old / untouched / >24h. Staleness alone is NOT a defer signal — only an EXPLICIT "skip/nvm/defer/later/next session/we'll revisit" phrase (the first rule) moves a card to backlog. On a multi-day bootstrap, most cards are naturally "old"; sweeping them all to backlog buries the board in false pending-work, so don't.
@@ -63,8 +68,106 @@ def _build_recon_card_block(cards: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _safe_basenames(files, limit: int = 8) -> list[str]:
+    """Basenames of up to `limit` file paths, skipping any non-string entry —
+    a malformed event could carry None/int in its files list, which would crash
+    Path()."""
+    out: list[str] = []
+    for f in (files or []):
+        if not isinstance(f, (str, bytes, os.PathLike)):
+            continue
+        out.append(Path(f).name)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _find_repo_root(start: Path | None) -> Path | None:
+    """Walk up from `start` to the nearest dir containing a .git — the real repo
+    root. board.parent.parent is right for the common <project>/board/board.json
+    layout, but a nested / monorepo board would otherwise miss the repo; walking
+    up finds it (and returns None when there genuinely is no git checkout, so
+    _resolve_commit_files just no-ops)."""
+    if not start:
+        return None
+    try:
+        p = start.resolve()
+    except OSError:
+        return None
+    for cand in (p, *p.parents):
+        if (cand / ".git").is_dir():
+            return cand
+    return None
+
+
+def _resolve_commit_files(events: list[dict], repo: Path | None,
+                          max_lookups: int = 80) -> None:
+    """In-place: fill ev['files'] for git_commit events that carry a sha but no
+    files, by asking git for that commit's --name-only file list.
+
+    #350-in-recon: the bootstrap harvester records commit *subjects* but leaves
+    commit files empty. The single strongest done-signal is which FILE a commit
+    touched (a vague "wip" subject hides a real ship). Rather than change the
+    harvester, recon recovers the files itself here — best-effort, confined to
+    this module. `repo` is the project the board lives in; skipped if it's not a
+    git checkout (e.g. the /tmp throwaway boards the benchmark/fixtures use,
+    whose events already carry files).
+
+    Bounded by `max_lookups` (one `git show` subprocess each) so a huge multi-day
+    window with hundreds of fileless commits can't stall the sweep — newest
+    commits resolved first (they're the ones cards most likely match)."""
+    root = _find_repo_root(repo)
+    if not root:
+        return
+    # tz-aware floor so a (rare) event missing ts can't crash the sort with a
+    # None-vs-datetime or naive-vs-aware comparison.
+    _floor = datetime.min.replace(tzinfo=timezone.utc)
+    pending = sorted(
+        (ev for ev in events
+         if ev.get("kind") == "git_commit" and not ev.get("files")
+         and ((ev.get("meta") or {}).get("sha")
+              or (ev.get("meta") or {}).get("shaShort"))),
+        key=lambda e: e.get("ts") or _floor, reverse=True)[:max_lookups]
+    for ev in pending:
+        meta = ev.get("meta") or {}
+        sha = meta.get("sha") or meta.get("shaShort")
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(root), "show", "--name-only",
+                 "--pretty=format:", str(sha)],
+                capture_output=True, text=True, timeout=5)
+            if proc.returncode == 0:
+                ev["files"] = [ln.strip() for ln in proc.stdout.splitlines()
+                               if ln.strip()]
+        except (OSError, subprocess.SubprocessError):
+            continue
+
+
+def _build_done_block(done_cards: list[dict], max_cards: int = 40) -> str:
+    """Already-DONE cards, so the LLM can flag a non-done card that is really a
+    DUPLICATE of shipped work (the done-vs-undone idea — #350 #4). A card whose
+    unit of work already sits in Done is redundant and should also be Done."""
+    lines: list[str] = []
+    for c in done_cards[:max_cards]:
+        title = (c.get("title") or "")[:80]
+        notes = (c.get("notes") or "").replace("\n", " ")[:120]
+        line = f"  #{c['num']} — {title}"
+        if notes:
+            line += f"  ({notes})"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _build_activity_digest(events: list[dict], max_chars: int = 8000) -> str:
-    """Compact chronological digest of user prompts + commits for the recon LLM call."""
+    """Compact chronological digest of user prompts + commits (with the FILES
+    each touched) + Claude's file edits, for the recon LLM call.
+
+    #350-in-recon: the file-touch signal is the strongest done-evidence we have —
+    a card whose named file appears in a commit or edit is almost certainly that
+    work, even when the commit subject is vague. The harvest already records
+    edited files on assistant events (and recon back-fills commit files via
+    _resolve_commit_files), but the OLD recon digest dropped them, hiding real
+    ships. We now surface them so file-overlap → done can fire."""
     lines: list[str] = []
     for ev in sorted(events, key=lambda e: e["ts"]):
         kind = ev["kind"]
@@ -75,7 +178,15 @@ def _build_activity_digest(events: list[dict], max_chars: int = 8000) -> str:
                 lines.append(f"  [{ts}] USER: {text}")
         elif kind == "git_commit":
             sha = (ev.get("meta") or {}).get("shaShort", "")
-            lines.append(f"  [{ts}] COMMIT {sha}: {ev['text'][:100]}")
+            line = f"  [{ts}] COMMIT {sha}: {ev['text'][:100]}"
+            names = _safe_basenames(ev.get("files"))
+            if names:
+                line += f"  [files: {', '.join(names)}]"
+            lines.append(line)
+        elif kind in ("asst_msg", "convo_asst", "tool_use"):
+            names = _safe_basenames(ev.get("files"))
+            if names:
+                lines.append(f"  [{ts}] CLAUDE edited: {', '.join(names)}")
     out = "\n".join(lines)
     if len(out) > max_chars:
         # Keep the END (most recent) so user's later "nvm" calls survive.
@@ -84,14 +195,18 @@ def _build_activity_digest(events: list[dict], max_chars: int = 8000) -> str:
 
 
 def _llm_reconcile(cards: list[dict], events: list[dict],
+                   done_cards: list[dict] | None = None,
                    timeout_s: int = 90) -> list[dict]:
     """Run one LLM call. Returns list of {num, target, reason}."""
     card_block = _build_recon_card_block(cards)
     activity = _build_activity_digest(events)
+    done_block = _build_done_block(done_cards or [])
     full = (
         f"{_RECON_PROMPT}\n\n"
         f"--- CARDS ({len(cards)}) ---\n{card_block}\n\n"
-        f"--- ACTIVITY LOG ---\n{activity}\n"
+        + (f"--- ALREADY DONE (for duplicate detection) ---\n{done_block}\n\n"
+           if done_block else "")
+        + f"--- ACTIVITY LOG ---\n{activity}\n"
     )
     try:
         proc = subprocess.run(
@@ -116,7 +231,8 @@ def _llm_reconcile(cards: list[dict], events: list[dict],
 
 def _emit_recon_pending(board: Path, candidates: list[dict],
                          events: list[dict], card_py: Path,
-                         banner_num: int | None) -> int:
+                         banner_num: int | None,
+                         done_cards: list[dict] | None = None) -> int:
     """Write recon_pending.json for main Claude to action. Returns 0
     (recon hasn't happened yet — the file is the deliverable). Main Claude
     reads the file next turn, decides moves, calls card.py fly, and
@@ -134,8 +250,15 @@ def _emit_recon_pending(board: Path, candidates: list[dict],
             "moves via `card.py fly <num> <col> [--writeup TEXT] "
             "[--note TEXT]`. Delete this file "
             "when done. Stay-by-default — only move when a clear signal "
-            "(user said skip/nvm/abandoned/we shipped it / matching commit)."
+            "(user said skip/nvm/abandoned/we shipped it / matching commit / "
+            "a file in the activity overlaps the card / it duplicates a card "
+            "in already_done)."
         ),
+        "already_done": [
+            {"num": c["num"], "title": c.get("title", ""),
+             "notes": c.get("notes") or ""}
+            for c in (done_cards or [])[:40]
+        ],
         "candidates": [
             {
                 "num": c["num"],
@@ -302,10 +425,22 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
     if not candidates:
         return 0
 
+    # #350-in-recon: the already-DONE cards (for duplicate-of-done detection) and
+    # recovered commit file-lists (for file-overlap → done). Both are read-only
+    # enrichments fed to the LLM — no change to extraction/harvest.
+    done_cards = [
+        c for c in state.get("cards", [])
+        if c.get("column") == "done"
+        and "banner" not in (c.get("tags") or [])
+    ]
+    # Walk up from the board dir to the repo root (handles nested/monorepo boards
+    # too) — no-ops if there's no git checkout.
+    _resolve_commit_files(events, board.parent)
+
     # Inline-recon path: write TODO and let main Claude action it.
     if os.environ.get("CLAUDECODE") == "1":
         return _emit_recon_pending(board, candidates, events,
-                                    card_py, banner_num)
+                                    card_py, banner_num, done_cards)
 
     # Autonomous path: subprocess Haiku. Serialize per board — a SECOND concurrent
     # reconcile (e.g. the bootstrap end-of-replay sweep + a SessionStart recon-only
@@ -332,7 +467,7 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
             _banner_update_text(card_py, board, banner_num,
                                 f"🔍 reconciling {len(candidates)} cards…")
 
-        moves = _llm_reconcile(candidates, events)
+        moves = _llm_reconcile(candidates, events, done_cards)
         if not moves:
             print("  recon: 0 moves", file=sys.stderr)
             _emit_progress(card_py, board, 1, 1,
@@ -420,6 +555,8 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
 
 __all__ = [
     "_RECON_PROMPT", "_build_recon_card_block", "_build_activity_digest",
+    "_build_done_block", "_resolve_commit_files", "_find_repo_root",
+    "_safe_basenames",
     "_llm_reconcile", "_emit_recon_pending",
     "_emit_extraction_pending", "reconcile_sweep",
 ]
