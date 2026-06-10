@@ -2869,6 +2869,14 @@ function relativeTime(s) {
   return Math.floor(days/365) + 'y ago';
 }
 
+// The timestamp the card-time badge should display: for Done cards show when
+// it was COMPLETED (doneAt, falling back to updatedAt), otherwise when it was
+// created. Keeps a done card reading "today" instead of "created Nd ago".
+function cardDisplayTime(card) {
+  if (card.column === 'done') return card.doneAt || card.updatedAt || card.createdAt;
+  return card.createdAt;
+}
+
 // ===== JS tooltip (body-level — escapes overflow:hidden ancestors) =====
 let _tooltipEl = null;
 function ensureTooltipEl() {
@@ -2956,7 +2964,7 @@ function tickTimes() {
     if (!cardEl) return;
     const card = state.cards.find(c => c.id === cardEl.dataset.cardId);
     if (!card || !card.createdAt) return;
-    const next = relativeTime(card.createdAt);
+    const next = relativeTime(cardDisplayTime(card));
     if (el.textContent !== next) el.textContent = next;
   });
 }
@@ -3611,12 +3619,13 @@ function renderCardCompact(card) {
   if (card.createdAt) {
     const tm = document.createElement('div');
     tm.className = 'card-time';
-    tm.textContent = relativeTime(card.createdAt);
+    tm.textContent = relativeTime(cardDisplayTime(card));
+    // Keep the tooltip simple: just Created + Updated. (Dropped the old
+    // "subtask" line — it fed card.lastTouchedSubtask, an ID string not a
+    // timestamp, into fmtTime → garbage like "2001-04-01 / 25y ago".)
     tm.setAttribute('data-tip',
-      `created : ${fmtTime(card.createdAt)}` +
-      (card.updatedAt && card.updatedAt !== card.createdAt ? `\nupdated : ${fmtTime(card.updatedAt)} (${relativeTime(card.updatedAt)})` : '') +
-      (card.lastTouchedSubtask ? `\nsubtask : ${fmtTime(card.lastTouchedSubtask)} (${relativeTime(card.lastTouchedSubtask)})` : '') +
-      (card.doneAt ? `\ndone    : ${fmtTime(card.doneAt)} (${relativeTime(card.doneAt)})` : '')
+      `created : ${fmtTime(card.createdAt)} (${relativeTime(card.createdAt)})` +
+      (card.updatedAt && card.updatedAt !== card.createdAt ? `\nupdated : ${fmtTime(card.updatedAt)} (${relativeTime(card.updatedAt)})` : '')
     );
     tm.setAttribute('data-tip-placement', 'right');
     tm.onclick = (e) => e.stopPropagation();
