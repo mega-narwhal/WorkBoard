@@ -116,6 +116,12 @@ removed because it jumped. **No "want me to add a card?" prompt — just do it.*
 - **Regression** → `card.py fly <num> inprogress --bug "<what broke>"` — re-flies with the `bug` tag +
   a new open `🐞 fix bug: <reason>` subtask; the next `fly done` closes it (permanent cycle evidence).
 - **Enhancement** → `card.py fly <num> inprogress --improve "<what's added>"` — same flow, no bug tag.
+- **Review (LAW)** → the moment a review skill finishes (`/code-review`, `/security-review`,
+  `/simplify`, `/review`, `/ultrareview`), **stamp the card it covered**: `card.py review <num>
+  --skill <skill> --effort <lvl> --findings "<n / one-line>"`. One stamp per review pass; it adds a
+  `reviewed` tag + a `🔍` audit subtask. Pending review = Done cards lacking the stamp — query with
+  `card.py list --pending-review` (and `--stale-review` for cards whose code changed since review).
+  *Ambient code-reading is NOT a review — only an explicit review skill triggers this.*
 
 **Two layers of truth:** card **column = goal state** (is the high-level goal shipped); **subtasks =
 work-cycle history** (one open-then-closed subtask per ship/bug/improve cycle). Cycle subtasks are

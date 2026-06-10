@@ -255,6 +255,20 @@ def build_parser():
     pimp.add_argument("text", help="subtask text (the improvement)")
     pimp.set_defaults(fn=cmd_improve)
 
+    # review (#598) — stamp a card as code-reviewed (review-coverage ledger).
+    # Trigger is LAW in SKILL.md: after any review skill, stamp the card it covered.
+    prv = sub.add_parser("review",
+                         help="stamp a card as code-reviewed ('reviewed' tag + 🔍 subtask + "
+                              "reviews[] entry). Query coverage via `list --pending-review`.")
+    prv.add_argument("ref", help="card num / id / code")
+    prv.add_argument("--skill", default="code-review",
+                     help="review skill that ran (code-review|security-review|simplify|review|ultrareview)")
+    prv.add_argument("--effort", default=None, help="low|medium|high|max|ultra")
+    prv.add_argument("--sha", default=None, help="git sha reviewed (default: current HEAD)")
+    prv.add_argument("--findings", default=None, help="one-line summary / count of findings")
+    prv.add_argument("--at", default=None, help="ISO override for the review time (future backfill)")
+    prv.set_defaults(fn=cmd_review)
+
     pas = sub.add_parser("auto-ship",
                          help="auto-promote inprogress cards to done using git log (#101). "
                               "No ref = scan mode (table of candidates); ref + --apply = ship that one.")
@@ -284,6 +298,10 @@ def build_parser():
     pls.add_argument("--column", default=None)
     pls.add_argument("--priority", default=None)
     pls.add_argument("--tag", default=None)
+    pls.add_argument("--pending-review", action="store_true", dest="pending_review",
+                     help="only Done cards with no review on the coverage ledger (#598)")
+    pls.add_argument("--stale-review", action="store_true", dest="stale_review",
+                     help="only reviewed cards whose code changed after the review (#598)")
     pls.set_defaults(fn=cmd_list)
 
     # digest (5a) — compact board pulse on demand (same shape as SessionStart hook)
@@ -300,6 +318,10 @@ def build_parser():
     pq.add_argument("--column", default=None)
     pq.add_argument("--priority", default=None)
     pq.add_argument("--tag", default=None)
+    pq.add_argument("--pending-review", action="store_true", dest="pending_review",
+                    help="only Done cards with no review (#598)")
+    pq.add_argument("--stale-review", action="store_true", dest="stale_review",
+                    help="only reviewed cards whose code changed after the review (#598)")
     pq.add_argument("--since-days", type=int, default=None, dest="since_days",
                     help="only cards updated within the last N days")
     pq.add_argument("--limit", type=int, default=None, help="cap the number of rows")

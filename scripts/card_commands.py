@@ -579,6 +579,110 @@ def cmd_bug(args, d, board):
     print(f"🐞 #{c['num']} {old} → inprogress (+bug tag, +subtask {sid}) (rev {rev})")
 
 
+# ===== review-coverage ledger (#598) =====
+
+_REVIEW_SKILLS = {"code-review", "security-review", "simplify", "review", "ultrareview"}
+
+
+def _current_sha(board) -> str:
+    """Short HEAD sha of the repo the board lives in; '' if not a git repo."""
+    try:
+        root = _find_git_root(Path(board).parent)
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        return out.stdout.strip()
+    except Exception:
+        return ""
+
+
+def cmd_review(args, d, board):
+    """STAMP a card as code-reviewed — the review-coverage ledger (#598).
+
+    A review is a *stamp on the work*, NOT a column transition: the card
+    stays where it is. We record three things, each for a distinct reader:
+      • reviews[]            — ledger of record ({at, sha, skill, effort, findings})
+      • reviewedAt/Sha       — denormalized mirror of reviews[-1] for O(1) queries
+      • 'reviewed' tag + 🔍  — fast filter + human-visible audit line on the card
+
+    Trigger is LAW (SKILL.md): after any explicit review skill, stamp the
+    card it covered. Ambient code-reading is NOT a review. Query coverage
+    with `card.py list --pending-review`.
+    """
+    c = find_card(d, args.ref)
+    ts = args.at or now_iso()
+    sha = args.sha if args.sha is not None else _current_sha(board)
+    # strip any plugin namespace, e.g. "plugin:code-review" → "code-review"
+    skill = (args.skill or "code-review").split(":")[-1]
+    entry = {
+        "at": ts, "sha": sha, "skill": skill,
+        "effort": args.effort, "findings": args.findings,
+    }
+    c.setdefault("reviews", []).append(entry)
+    c["reviewedAt"] = ts
+    c["reviewedSha"] = sha
+    # 'reviewed' is a provenance marker — write it directly (like cmd_bug's
+    # 'bug' tag), bypassing _check_tags so it never needs taxonomy/--force.
+    c.setdefault("tags", [])
+    if "reviewed" not in c["tags"]:
+        c["tags"].append("reviewed")
+    # 🔍 audit subtask — done:True (a completed fact, not an open todo).
+    c.setdefault("subtasks", [])
+    sid = new_subtask_id(c)
+    label = f"🔍 {skill}" + (f" ({args.effort})" if args.effort else "")
+    if args.findings:
+        label += f": {args.findings[:60]}"
+    c["subtasks"].append({
+        "id": sid, "text": label, "done": True,
+        "doneAt": ts, "createdAt": ts, "children": [],
+    })
+    c["lastTouchedSubtask"] = sid
+    c["updatedAt"] = now_iso()
+    rev = atomic_save(board, d)
+    print(f"🔍 #{c['num']} reviewed [{skill}] @ {sha or '?'} (rev {rev})")
+
+
+def _iso_dt(s):
+    """Parse an ISO timestamp ('...Z' or with offset) → datetime; None on failure."""
+    if not s:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _last_code_change_at(c):
+    """Most recent timestamp representing a CODE change to this card's work.
+
+    Derived ONLY from real code signals — history events INTO inprogress/done
+    and doneAt — so a metadata edit (a `--note` append, a tag/link change, which
+    also bump updatedAt) never makes a reviewed card look stale. A bug/improve
+    reopen-and-reship DOES, because it writes a fresh →done history event.
+    Returns a datetime or None.
+    """
+    cands = [_iso_dt(h.get("at")) for h in (c.get("history") or [])
+             if h.get("to") in ("inprogress", "done")]
+    cands.append(_iso_dt(c.get("doneAt")))
+    cands = [x for x in cands if x]
+    return max(cands) if cands else None
+
+
+def _is_pending_review(c) -> bool:
+    """Done work that has never been reviewed (the coverage gap)."""
+    return c.get("column") == "done" and not c.get("reviewedAt")
+
+
+def _is_stale_review(c) -> bool:
+    """Reviewed, but code changed after the review → needs re-review."""
+    at = _iso_dt(c.get("reviewedAt"))
+    if not at:
+        return False
+    last = _last_code_change_at(c)
+    return last is not None and at < last
+
+
 # ===== auto-ship (#101 Phase 3b) =====
 
 def _find_git_root(start: Path) -> Path:
@@ -1228,6 +1332,10 @@ def cmd_list(args, d, board):
         cards = [c for c in cards if c.get("priority") == args.priority]
     if args.tag:
         cards = [c for c in cards if args.tag in (c.get("tags") or [])]
+    if getattr(args, "pending_review", False):
+        cards = [c for c in cards if _is_pending_review(c)]
+    if getattr(args, "stale_review", False):
+        cards = [c for c in cards if _is_stale_review(c)]
     for c in cards:
         p = (c.get("priority") or "-")[:1].upper()
         code = c.get("code") or c.get("id")
@@ -1342,6 +1450,10 @@ def cmd_query(args, d, board):
         cards = [c for c in cards if c.get("priority") == args.priority]
     if args.tag:
         cards = [c for c in cards if args.tag in (c.get("tags") or [])]
+    if getattr(args, "pending_review", False):
+        cards = [c for c in cards if _is_pending_review(c)]
+    if getattr(args, "stale_review", False):
+        cards = [c for c in cards if _is_stale_review(c)]
     if args.since_days is not None:
         cutoff = (datetime.datetime.now(datetime.timezone.utc)
                   - datetime.timedelta(days=args.since_days))

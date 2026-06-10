@@ -49,6 +49,10 @@ EDIT_TOOLS = {"edit", "write", "multiedit", "notebookedit"}
 EDIT_THRESHOLD = 3          # this many edits w/ no card = uncarded-work signal
 CARD_MARKERS =("card.py add", "card.py move", "card.py fly", "card.py improve",
                 "card.py bug", "card.py auto-ship", "card.py subtask")
+# #598: explicit review-skill invocations (a Skill tool_use with input.skill in
+# this set). Detected so the recon backstop can nudge when a review ran but no
+# `card.py review` stamped the card it covered. Ambient code-reading is NOT here.
+REVIEW_SKILLS = {"code-review", "security-review", "simplify", "review", "ultrareview"}
 # #591-A: in-repo edits to these basename patterns are session/log/scratch
 # artifacts, not project work — they must not trip the un-carded backstop even
 # though they live under project_root (the dump/log-write false positive).
@@ -103,6 +107,23 @@ def _bash_cmd(o: dict) -> str:
                 if isinstance(c, str):
                     cmds.append(c)
     return "\n".join(cmds)
+
+
+def _review_skill_in(o: dict) -> bool:
+    """True if this assistant message invoked an explicit review skill (#598).
+
+    A /code-review etc. shows up as a Skill tool_use with input.skill == the
+    skill name (possibly plugin-namespaced, e.g. 'plugin:code-review')."""
+    msg = o.get("message") or {}
+    content = msg.get("content")
+    if isinstance(content, list):
+        for blk in content:
+            if isinstance(blk, dict) and blk.get("type") == "tool_use" \
+               and str(blk.get("name", "")) == "Skill":
+                sk = str((blk.get("input") or {}).get("skill", "")).split(":")[-1]
+                if sk in REVIEW_SKILLS:
+                    return True
+    return False
 
 
 def _in_scope_edits(o: dict, project_root) -> int:
@@ -218,6 +239,8 @@ def scan_transcript(path: Path, project_root=None) -> dict:
     edits = 0
     ship_signals = 0
     card_actions = 0
+    review_skill_runs = 0   # #598 — review skills invoked THIS turn
+    review_actions = 0      # #598 — `card.py review` stamps THIS turn
     user_turns = 0
     last_user = ""
     # #562 sign-off mirror — session totals (NOT reset per turn):
@@ -248,6 +271,8 @@ def scan_transcript(path: Path, project_root=None) -> dict:
                         edits = 0
                         ship_signals = 0
                         card_actions = 0
+                        review_skill_runs = 0
+                        review_actions = 0
                         if need_detect is not None:
                             txt = _user_text(o)
                             if txt:
@@ -256,12 +281,15 @@ def scan_transcript(path: Path, project_root=None) -> dict:
                                                 need_detect.count_needs(txt))
                 elif tp == "assistant":
                     edits += _in_scope_edits(o, pr)
+                    if _review_skill_in(o):          # #598
+                        review_skill_runs += 1
                     bash = _bash_cmd(o).lower()
                     if bash:
                         if _is_ship_command(bash):
                             ship_signals += 1
                         if any(m in bash for m in CARD_MARKERS):
                             card_actions += 1
+                        review_actions += bash.count("card.py review")  # #598
                         # Session-total capture units (#562). Count adds AND
                         # subtask-adds separately (a card.py command may issue
                         # several); "card.py subtask add" does not contain the
@@ -274,6 +302,8 @@ def scan_transcript(path: Path, project_root=None) -> dict:
         "edits": edits,
         "ship_signals": ship_signals,
         "card_actions": card_actions,
+        "review_skill_runs": review_skill_runs,
+        "review_actions": review_actions,
         "user_turns": user_turns,
         "max_needs": max_needs,
         "capture_units": capture_units,
@@ -379,7 +409,8 @@ def main() -> int:
     project_root = board_path.parent.parent
     act = scan_transcript(Path(transcript), project_root) if transcript else {
         "edits": 0, "ship_signals": 0, "card_actions": 0, "user_turns": 0,
-        "max_needs": 1, "capture_units": 0}
+        "max_needs": 1, "capture_units": 0,
+        "review_skill_runs": 0, "review_actions": 0}
 
     board = load_board(board_path)
     cards = board.get("cards") or []
@@ -437,8 +468,15 @@ def main() -> int:
     # it never pushes toward multi-card. Mirror only — never blocks.
     need_gap = (act.get("max_needs", 1) >= 2
                 and act.get("capture_units", 0) < act["max_needs"])
+    # #598 review-coverage gap (advisory, never blocks). A review skill ran this
+    # turn but no `card.py review` stamped the card it covered — the review isn't
+    # on the coverage ledger. Detectable because a review skill is a discrete Skill
+    # tool_use; ambient code-reading is not, so this never fires on ordinary work.
+    review_gap = (act.get("review_skill_runs", 0) > 0
+                  and act.get("review_actions", 0) == 0)
     # Nothing worth surfacing → stay silent (don't nag on a read-only session).
-    if not uncarded_risk and not inprogress and not batched and not need_gap:
+    if not uncarded_risk and not inprogress and not batched and not need_gap \
+       and not review_gap:
         return 0
 
     reasons = []
@@ -474,6 +512,15 @@ def main() -> int:
             f"are on the board (in whatever shape the header test gives — one card "
             f"+ subtasks OR separate cards), or note why fewer. (Carding LAW — "
             f"capture up front; SKILL.md shape banner.)"
+        )
+    if review_gap:
+        reasons.append(
+            f"A code-review skill ran this session ({act['review_skill_runs']}×) "
+            f"but no `card.py review <ref>` was recorded — the review isn't on the "
+            f"coverage ledger. Stamp the card you reviewed: `card.py review <ref> "
+            f"--skill code-review --effort <lvl> --findings \"<n>\"` so "
+            f"`card.py list --pending-review` stays accurate. (Advisory — no "
+            f"action required; #598.)"
         )
 
     payload_out = {
