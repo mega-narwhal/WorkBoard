@@ -49,7 +49,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
+import time
 from pathlib import Path
 
 _scripts_dir = str(Path(__file__).resolve().parent)
@@ -462,10 +464,34 @@ def main():
         and _resolve_server_url(board) is not None
     )
     if server_present:
-        d = load(board)
-        args.fn(args, d, board)
+        # #609 — writes funnel through the server, which rev-CAS-rejects a write
+        # built on a stale base (a concurrent session/browser wrote since we
+        # loaded). On rejection, reload fresh and re-run the command — mutations
+        # recompute against the new state, and atomic_save raises BEFORE the
+        # command prints success, so only the winning attempt has visible effect.
+        MAX_WRITE_RETRIES = 12
+        for attempt in range(MAX_WRITE_RETRIES):
+            d = load(board)
+            try:
+                args.fn(args, d, board)
+                break
+            except card_state.BoardConflict:
+                if attempt == MAX_WRITE_RETRIES - 1:
+                    sys.exit("✋ the board kept changing under concurrent writes "
+                             f"({MAX_WRITE_RETRIES} tries). Nothing was lost — "
+                             "re-run the command.")
+                # Exponential backoff with full jitter so simultaneous writers
+                # don't retry in lockstep (thundering herd) and collide forever.
+                cap = min(0.4, 0.02 * (2 ** attempt))
+                time.sleep(random.uniform(0, cap))
     else:
-        with _boardio.board_lock(board):
+        # #609 — direct (no-server) writes hold the cross-process lock across the
+        # whole load→mutate→save. Never proceed UNLOCKED: if the lock can't be
+        # acquired, fail rather than risk a lost update.
+        with _boardio.board_lock(board) as locked:
+            if not locked:
+                sys.exit("✋ couldn't acquire the board lock (another writer is "
+                         "busy). Nothing was written — re-run the command.")
             card_state._HOLDING_LOCK = True
             try:
                 d = load(board)

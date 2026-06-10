@@ -34,6 +34,13 @@ import _boardio  # noqa: E402  (write-safety: flock + rolling backups)
 _HOLDING_LOCK = False
 
 
+class BoardConflict(Exception):
+    """#609 — the server rejected an agent write because the board advanced since
+    we loaded it (rev compare-and-swap miss). card.py::main() catches this,
+    reloads fresh state, and re-runs the command, so a concurrent writer's change
+    is never clobbered (no silent lost card)."""
+
+
 # ===== board locating =====
 
 def find_board(explicit: Path | None) -> Path:
@@ -132,13 +139,17 @@ def _resolve_server_url(board_path: Path) -> str | None:
     return None
 
 
-def _try_post_to_server(d: dict, board_path: Path) -> bool:
+def _try_post_to_server(d: dict, board_path: Path, base_rev: int) -> bool:
     """POST the state to the running board server that owns this board.
 
     The server diffs vs prev cached state, broadcasts SSE events, writes the
     file atomically, and regenerates index.json. Returns True on success.
     If no server owns this board, returns False so caller falls back to
     direct file write — NEVER posts to a server with a different board.
+
+    #609 — sends X-Board-Base-Rev (the rev we loaded) so the server can reject a
+    stale write (rev CAS). On a 409 conflict it raises BoardConflict so the
+    caller retries on fresh state instead of clobbering the winner.
     """
     if os.environ.get("BOARD_NO_SERVER") == "1":
         return False
@@ -151,10 +162,16 @@ def _try_post_to_server(d: dict, board_path: Path) -> bool:
             url.rstrip("/") + "/board.json",
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json", **_auth_headers()},
+            headers={"Content-Type": "application/json",
+                     "X-Board-Base-Rev": str(base_rev),
+                     **_auth_headers()},
         )
         with urllib.request.urlopen(req, timeout=3) as r:
             return r.status == 200
+    except urllib.error.HTTPError as e:
+        if e.code == 409:
+            raise BoardConflict()
+        return False
     except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
         return False
 
@@ -187,7 +204,8 @@ def atomic_save(p: Path, d: dict, regen: bool = True) -> int:
     write also grabs the file lock, so POSTing under it would deadlock — and we
     must NOT re-lock (flock on a second fd in the same process self-deadlocks).
     """
-    d["rev"] = d.get("rev", 0) + 1
+    base_rev = d.get("rev", 0)          # #609 — the rev we loaded; sent for CAS
+    d["rev"] = base_rev + 1
     d["savedAt"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     d["savedBy"] = "claude"
 
@@ -196,10 +214,18 @@ def atomic_save(p: Path, d: dict, regen: bool = True) -> int:
         # No-server path: caller (main) already holds the lock and chose direct.
         _write_direct(p, data)
     else:
-        if _try_post_to_server(d, p):
+        # #609 — raises BoardConflict on a 409 (stale base); we let it propagate
+        # so main() retries on fresh state. We must NOT fall through to a direct
+        # write on conflict — that would clobber the writer that won the race.
+        if _try_post_to_server(d, p, base_rev):
             return d["rev"]
-        # Server vanished mid-command → self-lock this one write.
-        with _boardio.board_lock(p):
+        # Server vanished mid-command → self-lock this one write. #609 — never
+        # write unlocked: if the lock can't be acquired, fail loudly rather than
+        # risk a lost update.
+        with _boardio.board_lock(p) as locked:
+            if not locked:
+                sys.exit("✋ couldn't acquire the board lock (another writer is "
+                         "busy). Nothing was written — re-run the command.")
             _write_direct(p, data)
     if regen and REGEN_SCRIPT.exists():
         subprocess.run(

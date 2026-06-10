@@ -48,9 +48,15 @@ def board_lock(target, timeout: float = 5.0):
     Both writers lock the SAME path (derived from the board.json location) so a
     server write and a direct fallback write serialize instead of racing.
 
-    Yields True if the lock was acquired, False if it timed out. On timeout the
-    caller STILL writes — ``os.replace`` remains atomic, and we would rather risk
-    a rare lost update than drop the user's write entirely to honor a stuck lock.
+    Yields True if the lock was acquired, False if it timed out. #609 — the
+    AGENT CLI write paths (card.py::main and card_state.atomic_save) now CHECK
+    the yielded bool and refuse to write (fail loudly so the user re-runs) rather
+    than proceeding unlocked, because a silent lost update is unacceptable. The
+    server's own atomic_write (serve.py) stays best-effort on timeout: it is the
+    board owner and runs under an in-process _write_lock, and it also serves the
+    BROWSER's POSTs, which have no retry — failing there would silently drop a
+    user edit, a worse outcome than the rare cross-process timeout. This helper
+    just reports acquisition; the write/abort policy lives in each caller.
     """
     target = Path(target)
     lock_path = target.parent / LOCK_NAME

@@ -110,6 +110,17 @@ def atomic_write(path: Path, data: bytes) -> None:
             raise
 
 
+def _disk_rev(board_path: Path) -> int:
+    """#609 — the authoritative on-disk rev, used to confirm a CAS conflict when
+    the in-memory _cached_state might have drifted below disk (a direct fallback
+    write). Best-effort: any read/parse failure returns -1 (never equals a real
+    base, so the caller falls back to rejecting — safe)."""
+    try:
+        return int(json.loads(board_path.read_text()).get("rev", 0) or 0)
+    except Exception:
+        return -1
+
+
 def regen_index(board_dir: Path) -> None:
     if not REGEN_SCRIPT.exists():
         return
@@ -653,11 +664,37 @@ class BoardHandler(BaseHTTPRequestHandler):
             self._send(400, b'{"error":"missing cards"}')
             return
 
+        # #609 — rev compare-and-swap for AGENT writes (card.py sends the rev it
+        # loaded in X-Board-Base-Rev). If the board advanced since then, another
+        # writer won the race; reject with 409 so card.py reloads + retries
+        # instead of clobbering that writer's change (silent lost card). The
+        # browser sends no header (base is None) → no gate → last-writer-wins as
+        # before (a documented, user-present, lower-severity case).
+        try:
+            base = self.headers.get("X-Board-Base-Rev")
+            base = int(base) if base is not None else None
+        except (TypeError, ValueError):
+            base = None
+
         global _cached_state
         body_out = json.dumps(payload, indent=2).encode()
         with _write_lock:
             with _cached_lock:
                 prev = _cached_state
+            if base is not None and prev is not None and (prev.get("rev") or 0) != base:
+                # The in-memory cache says the board moved — but it can DRIFT below
+                # disk if a card.py fallback wrote the file directly while we were
+                # up (server momentarily unresolvable / a non-409 POST failure).
+                # Confirm against the authoritative on-disk rev before rejecting,
+                # so a stale cache can't 409 every agent write into a stuck board.
+                disk_rev = _disk_rev(self.board_dir / "board.json")
+                if disk_rev != base:
+                    self._send(409, json.dumps({
+                        "ok": False, "conflict": True, "rev": disk_rev,
+                    }).encode())
+                    return
+                # else: cache was stale, base matches disk → accept; the write
+                # below re-syncs _cached_state.
             atomic_write(self.board_dir / "board.json", body_out)
             _boardio.write_backup(self.board_dir / "board.json", body_out)  # 3.5b
             regen_index(self.board_dir)
