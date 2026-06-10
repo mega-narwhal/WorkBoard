@@ -38,5 +38,8 @@ board/recon_pending.json
 # local plugin-reinstall backups (machine state, never ship)
 .reinstall-backups/
 
+# benchmark run output (transient byproduct, regenerated per run)
+dev/bench_results/
+
 # Added by board-steward — local board data may contain secrets
 board/.replay_state.json
