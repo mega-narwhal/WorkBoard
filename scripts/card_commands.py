@@ -239,9 +239,11 @@ def _set_active_work(d, card, old_col, new_col):
     active (only a real transition does); moving the active card out clears it.
     This is the old live-transition definition, made persistent."""
     if new_col == "inprogress" and old_col != "inprogress":
-        # #546 — the card that most recently TRANSITIONED into In-Progress becomes
-        # the active (pulsing) one and sticks to that card (by id) until the NEXT
-        # card transitions into IP and takes over. (Reverts the #503 "don't steal".)
+        # #587 — every caller of this is the AGENT (card.py add/move/start), which
+        # is "truly in progress" and ALWAYS claims the pulse, stealing from whatever
+        # was active. The asymmetry lives client-side: a USER's browser drag/menu
+        # move never claims (board.html setActiveWorkForMove byUser=true) — only
+        # agent moves like this one do. So this stays an unconditional claim.
         d["activeWorkId"] = card["id"]
     elif old_col == "inprogress" and new_col != "inprogress" \
             and d.get("activeWorkId") == card["id"]:

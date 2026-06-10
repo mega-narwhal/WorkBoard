@@ -2703,7 +2703,7 @@ function commitCardDrag() {
   }
   // #254 — active-work follows a live MOVE into In Progress (persisted via the
   // scheduleSave() below, so it survives refresh). Parked cards never light up.
-  setActiveWorkForMove(card.id, _cardDrag.srcCol, targetCol);   // #503 — shared rule
+  setActiveWorkForMove(card.id, _cardDrag.srcCol, targetCol, true);   // #587 — user drag never steals the pulse
   // Auto-strip the 'bug' tag on done — regression is fixed. Remove the
   // .is-bug class inline so the 🐞 + border vanish the moment the card
   // lands, no SSE round-trip lag.
@@ -2774,7 +2774,7 @@ function moveCardToColumn(card, targetCol) {
   if (targetCol !== 'done') card.doneAt = null;
   recordMove(card, fromCol, targetCol);      // #258 movement history
   // #254 — active-work follows a move into / out of In Progress (persisted).
-  setActiveWorkForMove(card.id, fromCol, targetCol);   // #503 — shared rule
+  setActiveWorkForMove(card.id, fromCol, targetCol, true);   // #587 — user kebab/select move never steals the pulse
   // #518 — log the move NOW. A right-click/menu move calls render() below, which
   // disrupts the SSE-echo path that logs drags, so it never showed in the Logs
   // HUD. Log directly (via=user) and mark it so the echo doesn't double-log.
@@ -5918,27 +5918,47 @@ function recordMove(card, fromCol, toCol) {
 // triggered the move (card.py, or the UI drop/modal handlers) persists
 // state.activeWorkId. This keeps the client's in-memory state correct for
 // SSE-driven moves where the board-level field wouldn't otherwise propagate.
-// #503 — single source of truth for the active-work transition RULE: a card
-// MOVED into In Progress becomes the active (pulsing + top-pinned) card; the
-// active card MOVED OUT clears it. Pure state mutation, no repaint — every move
-// path (drag commit, kebab/select move, SSE replay) sets activeWorkId
-// identically through this one function instead of re-inlining the rule.
-function setActiveWorkForMove(cardId, fromCol, toCol) {
+// #503/#587 — single source of truth for the active-work transition RULE.
+// SOURCE-AWARE steal: a card pushed into In-Progress by the AGENT (card.py:
+// add/move/start) is "truly in progress" and becomes the active (pulsing +
+// top-pinned) card, stealing from whatever was active. A card a USER manually
+// shifts into In-Progress (browser drag, kebab/select "Move to") is just
+// reorganizing — it NEVER claims the pulse (agent-only pulse), so the card the
+// agent is actually working on keeps glowing. Either way, the active card
+// MOVED OUT of In-Progress clears it. Pure state mutation, no repaint — every
+// move path routes through this one function instead of re-inlining the rule.
+// `byUser` = true for local browser moves, or for an SSE move whose latest
+// history event is via:'user' (see _moveByUser); false/undefined = agent.
+function setActiveWorkForMove(cardId, fromCol, toCol, byUser) {
   if (!state) return;
   if (toCol === 'inprogress' && fromCol !== 'inprogress') {
-    // #546 — the card that most recently TRANSITIONED into In-Progress becomes the
-    // active (pulsing + top-pinned) one, and STICKS to that specific card (by id)
-    // until the NEXT card transitions into IP and takes over. Not sort/position
-    // based — anchored to the card. (Reverts the #503 "don't steal" variant.)
-    state.activeWorkId = cardId;
+    // #587 — only an AGENT push claims the pulse; a user drag/menu move never
+    // steals it (and never lights a card up on its own — agent-only pulse).
+    if (!byUser) state.activeWorkId = cardId;
   } else if (fromCol === 'inprogress' && toCol !== 'inprogress'
              && state.activeWorkId === cardId) {
+    // A card LEAVING In-Progress stops being active no matter who moved it.
     state.activeWorkId = null;
   }
 }
 
-function applyActiveWorkTransition(cardId, fromCol, toCol) {
-  setActiveWorkForMove(cardId, fromCol, toCol);   // both callees guard !state
+// #587 — derive byUser for an SSE-replayed move: true iff the latest history
+// event matches this exact transition and is tagged via:'user' (browser).
+// card.py (agent) moves leave via unset, so they correctly read as agent.
+// #589 — 'undo'/'redo' restores count as USER too: they are reverts, not fresh
+// work, and the snapshot they restore already carries the authoritative
+// activeWorkId. Without this, the SSE echo of an undo/redo-tagged move re-derives
+// the pulse as "agent" and steals it, overriding the just-restored snapshot
+// (symptom: undo a B move and B hijacks the glow from the genuinely-active A).
+function _moveByUser(card, fromCol, toCol) {
+  const h = card && card.history && card.history.length
+    ? card.history[card.history.length - 1] : null;
+  const USER_VIA = h && (h.via === 'user' || h.via === 'undo' || h.via === 'redo');
+  return !!(h && h.from === fromCol && h.to === toCol && USER_VIA);
+}
+
+function applyActiveWorkTransition(cardId, fromCol, toCol, byUser) {
+  setActiveWorkForMove(cardId, fromCol, toCol, byUser);   // both callees guard !state
   refreshActiveWork();
 }
 
@@ -5996,7 +6016,8 @@ function handleCardAdded({ card }) {
   if (isDragInProgress()) {
     // #503 — still update the (pure-state) active-work id so the deferred
     // drag-end render() pulses/top-pins this card; only the DOM is deferred.
-    setActiveWorkForMove(card.id, null, card.column);
+    // #587 — an agent-created card (card.py add) claims; another tab's user add does not.
+    setActiveWorkForMove(card.id, null, card.column, _moveByUser(card, null, card.column));
     _pendingResync = true; return;   // #494 — defer DOM until drag ends
   }
   if (findCardEl(card.id)) return;          // race with poll — already in DOM
@@ -6019,7 +6040,9 @@ function handleCardAdded({ card }) {
   refreshColumnCount(card.column);
   // If a brand-new card is born directly into In Progress, treat it as
   // a transition from "nothing" → inprogress.
-  applyActiveWorkTransition(card.id, null, card.column);
+  // #587 — an agent-created card (card.py add) claims the pulse; a card added
+  // from another tab by a user does not.
+  applyActiveWorkTransition(card.id, null, card.column, _moveByUser(card, null, card.column));
   logEvent('add', `#${card.num} "${card.title}" → ${colLabel(card.column)}`, card);
 }
 
@@ -6113,7 +6136,9 @@ function simulateUserDragMove(card, fromColumn, toColumn, oldEl) {
       try { anim.cancel(); } catch (_) {}
       // Pulse follows live transitions. Card moved INTO In Progress → pulse;
       // OUT OF In Progress → pulse stops. Old stuck cards stay quiet.
-      applyActiveWorkTransition(card.id, fromColumn, toColumn);
+      // #587 — only an agent move (via != 'user') claims; a user move replayed
+      // from another tab must not steal the pulse here either.
+      applyActiveWorkTransition(card.id, fromColumn, toColumn, _moveByUser(card, fromColumn, toColumn));
     };
     anim.addEventListener('finish', land, { once: true });
     anim.addEventListener('cancel', land, { once: true });
@@ -6129,7 +6154,8 @@ function handleCardUpdated({ card, fromColumn, toColumn }) {
   if (isDragInProgress()) {
     // #503 — keep active-work id in sync (pure state) for an SSE move that
     // lands mid-drag; the drag-end render() then pulses/top-pins correctly.
-    setActiveWorkForMove(card.id, fromColumn, toColumn);
+    // #587 — only an agent-originated SSE move (via != 'user') claims the pulse.
+    setActiveWorkForMove(card.id, fromColumn, toColumn, _moveByUser(card, fromColumn, toColumn));
     _pendingResync = true; return;   // #494 — defer DOM until drag ends
   }
 
@@ -6220,10 +6246,14 @@ async function improveCard(id) {
   });
   card.lastTouchedSubtask = sid;
   card.updatedAt = now();
+  // #587 — record the reopen as a via:'user' move so OTHER tabs replaying this
+  // via SSE classify it as a user move (no recordMove here meant their
+  // _moveByUser read a stale ship event and wrongly stole the pulse).
+  recordMove(card, from, 'inprogress');
   closeModal();
   scheduleSave();
   render();
-  applyActiveWorkTransition(card.id, from, 'inprogress');
+  applyActiveWorkTransition(card.id, from, 'inprogress', true);   // #587 — user reopen never steals the pulse
   toast('✨ Reopened as improvement — ' + undoHint() + ' to undo', 3200);
 }
 
@@ -6238,11 +6268,15 @@ function reopenAsBug(id) {
   card.tags = card.tags || [];
   if (!card.tags.includes('bug')) card.tags.push('bug');
   card.updatedAt = now();
+  // #587 — record the reopen as a via:'user' move so other tabs' SSE replay
+  // classifies it as a user move (else _moveByUser reads a stale ship event
+  // and wrongly steals the pulse).
+  recordMove(card, from, 'inprogress');
   closeModal();
   scheduleSave();
   render();
-  // Manually trigger the pulse since render() doesn't (transition-based).
-  applyActiveWorkTransition(card.id, from, 'inprogress');
+  // #587 — user reopen never steals the pulse (agent-only); render() repaints.
+  applyActiveWorkTransition(card.id, from, 'inprogress', true);
   toast('🐞 Reopened as bug — ' + undoHint() + ' to undo', 3200);
 }
 
