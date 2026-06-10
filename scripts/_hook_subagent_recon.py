@@ -90,13 +90,23 @@ def _board_dict(board: Path) -> dict:
         return {}
 
 
-def active_card_num(board: Path) -> str | None:
+def active_card_num(board: Path, sid: str | None = None) -> str | None:
     """The card the work is currently flowing into = the active IP pulse.
-    Prefer board.activeWorkId (a card id); fall back to the most-recently-updated
-    inprogress card. None if nothing is in flight."""
+    #608 — pulses are per-session (board.activeWork = {sid: {cardId, ts}}): prefer
+    THIS session's active card, else the most-recently-claimed across sessions,
+    else the legacy scalar activeWorkId, else the most-recently-updated inprogress
+    card. None if nothing is in flight."""
     d = _board_dict(board)
     cards = d.get("cards") or []
-    awid = d.get("activeWorkId")
+    aw = d.get("activeWork") or {}
+    awid = None
+    if isinstance(aw, dict) and aw:
+        if sid and aw.get(sid):
+            awid = (aw.get(sid) or {}).get("cardId")
+        else:
+            awid = (max(aw.values(), key=lambda e: (e or {}).get("ts", 0)) or {}).get("cardId")
+    if not awid:
+        awid = d.get("activeWorkId")          # legacy pre-#608 fallback
     if awid:
         for c in cards:
             if c.get("id") == awid:
@@ -304,7 +314,7 @@ def do_spawn(payload: dict) -> None:
     if mode == "subtask":
         # (1c) Attach to the active In-Progress card as a subtask. No active card
         # => nothing to attach to => create NOTHING (internal helper = noise).
-        parent = active_card_num(board)
+        parent = active_card_num(board, payload.get("session_id"))
         if parent is None:
             queue_push(board, {"skip": True, "type": stype, "desc": desc,
                                "ts": _now(), "note": "no-active-card", "psig": psig})

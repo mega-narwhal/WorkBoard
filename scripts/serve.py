@@ -671,6 +671,10 @@ class BoardHandler(BaseHTTPRequestHandler):
             "rev": payload.get("rev", 0),
             "savedBy": payload.get("savedBy", "?"),
             "savedAt": payload.get("savedAt", ""),
+            # #608 — the per-session pulse map is a board-level field, so it is NOT
+            # in the per-card diff events; ride it on rev-bumped so every browser
+            # adopts the authoritative map (an agent claim in another session).
+            "activeWork": payload.get("activeWork", {}),
         })
 
         self._send(200, json.dumps({

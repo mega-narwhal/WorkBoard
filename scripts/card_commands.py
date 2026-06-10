@@ -241,22 +241,83 @@ def _find_subtask_anywhere(nodes, sid):
     return None
 
 
+# #608 — the active-work pulse is now PER SESSION (max one pulsing card per
+# Claude Code session) instead of a single global scalar. board.json holds
+#   activeWork: { "<sessionId>": {"cardId": "<id>", "ts": <epoch_ms>} }
+# so N concurrent sessions show N pulses; before, every session wrote the one
+# scalar activeWorkId (last-writer-wins → only one card could ever pulse).
+ACTIVE_WORK_TTL_MS = 12 * 60 * 60 * 1000  # ghost-pulse backstop for a hard-killed session
+
+
+def _now_ms():
+    return int(time.time() * 1000)
+
+
+def _session_id():
+    """Identify the calling session so its pulse is independent of other sessions.
+    A Bash tool call inside a Claude Code session exposes CLAUDE_CODE_SESSION_ID.
+    Automation (recon/e2e/sim/replay — they set BOARD_SKIP_DECOMPOSE_CHECK) shares
+    one synthetic '_auto' slot; a bare manual CLI run falls back to '_cli'."""
+    if os.environ.get("BOARD_SKIP_DECOMPOSE_CHECK") == "1":
+        return "_auto"
+    return os.environ.get("CLAUDE_CODE_SESSION_ID") or "_cli"
+
+
+def _migrate_active_work(d, now_ms):
+    """One-time lift of the legacy scalar activeWorkId into the per-session map
+    under a synthetic '_legacy' key, then drop the scalar (back-compat for a
+    board.json written before #608)."""
+    legacy = d.pop("activeWorkId", None)
+    if legacy:
+        aw = d.setdefault("activeWork", {})
+        if not any((e or {}).get("cardId") == legacy for e in aw.values()):
+            aw["_legacy"] = {"cardId": legacy, "ts": now_ms}
+
+
+def _prune_active_work(d, now_ms):
+    """Self-heal + TTL cleanup (#608). Drop any session's entry whose card has
+    left In-Progress / is done / no longer exists (self-heal, fires for every
+    session on every write), or whose ts is older than ACTIVE_WORK_TTL_MS (the
+    backstop for a session that died with its card still parked in IP)."""
+    aw = d.get("activeWork")
+    if not aw:
+        return
+    by_id = {c.get("id"): c for c in d.get("cards", [])}
+    for sid in list(aw.keys()):
+        ent = aw.get(sid) or {}
+        card = by_id.get(ent.get("cardId"))
+        if (card is None or card.get("column") != "inprogress"
+                or card.get("doneAt")
+                or (now_ms - ent.get("ts", 0)) > ACTIVE_WORK_TTL_MS):
+            del aw[sid]
+
+
 def _set_active_work(d, card, old_col, new_col):
-    """#254 — track the single active-work card = the last one MOVED INTO
-    In Progress. Persisted in board.json as activeWorkId so the pulse + top-pin
-    survive a page refresh. A card merely SITTING in In Progress never becomes
-    active (only a real transition does); moving the active card out clears it.
-    This is the old live-transition definition, made persistent."""
+    """#254/#587/#608 — track the active-work card (the pulse + top-pin), now keyed
+    PER SESSION. A card merely SITTING in In Progress never becomes active (only a
+    real transition does); moving the active card out clears it.
+
+    #587: every caller of this is the AGENT (card.py add/move/start), which is
+    "truly in progress" and claims the pulse. The asymmetry lives client-side: a
+    USER's browser drag/menu move never claims (board.html setActiveWorkForMove
+    byUser=true). #608: the claim now steals only THIS session's prior slot — other
+    sessions' pulses are untouched."""
+    now_ms = _now_ms()
+    _migrate_active_work(d, now_ms)
+    aw = d.setdefault("activeWork", {})
+    sid = _session_id()
     if new_col == "inprogress" and old_col != "inprogress":
-        # #587 — every caller of this is the AGENT (card.py add/move/start), which
-        # is "truly in progress" and ALWAYS claims the pulse, stealing from whatever
-        # was active. The asymmetry lives client-side: a USER's browser drag/menu
-        # move never claims (board.html setActiveWorkForMove byUser=true) — only
-        # agent moves like this one do. So this stays an unconditional claim.
-        d["activeWorkId"] = card["id"]
-    elif old_col == "inprogress" and new_col != "inprogress" \
-            and d.get("activeWorkId") == card["id"]:
-        d["activeWorkId"] = None
+        aw[sid] = {"cardId": card["id"], "ts": now_ms}
+    elif old_col == "inprogress" and new_col != "inprogress":
+        # A card leaving In-Progress stops pulsing for EVERY session pointing at
+        # it, no matter who moved it out.
+        for s in [s for s, e in aw.items() if (e or {}).get("cardId") == card["id"]]:
+            del aw[s]
+    # Heartbeat: keep this session's pulse fresh on any active-work activity so a
+    # long-lived session doesn't TTL-expire mid-flow.
+    if sid in aw:
+        aw[sid]["ts"] = now_ms
+    _prune_active_work(d, now_ms)
 
 
 def _record_move(card, old_col, new_col, via=None):
@@ -409,7 +470,11 @@ def cmd_fly(args, d, board):
             and not bug and not improve
             and not getattr(args, "force", False)
             and os.environ.get("BOARD_SKIP_DECOMPOSE_CHECK") != "1"):
-        _awid = d.get("activeWorkId")
+        # #608 — per-session: only THIS session's active card gates a new start,
+        # so another session's in-flight work never blocks you. (legacy scalar
+        # honored as a fallback for a not-yet-migrated board.)
+        _ent = (d.get("activeWork") or {}).get(_session_id())
+        _awid = _ent.get("cardId") if _ent else d.get("activeWorkId")
         _active = next((x for x in d.get("cards", []) if x.get("id") == _awid), None) if _awid else None
         if (_active and _active.get("id") != c.get("id")
                 and _active.get("column") == "inprogress" and not _active.get("doneAt")):

@@ -3250,9 +3250,12 @@ function _snapState() {
     title: state.title || '',
     columns: state.columns || [],
     cards: state.cards || [],
-    // #503 — the active-work pulse must roll back in lockstep with card
+    // #503/#608 — the active-work pulse must roll back in lockstep with card
     // positions, or undo/redo desyncs the glow from the genuinely-current IP
-    // card (the bug: move to IP → pulse, then undo → pulse stuck/lost).
+    // card. Snapshot the WHOLE per-session map (deep copy via the JSON round-trip
+    // this object already gets) so an undo restores every session's pulse, and a
+    // user undo never steals it (#589 falls out for free). Legacy scalar kept.
+    activeWork: state.activeWork || {},
     activeWorkId: state.activeWorkId || null,
   });
 }
@@ -3263,7 +3266,8 @@ function _restoreSnap(snap) {
   state.cards = o.cards;
   // Guard legacy/partial snapshots (e.g. an older entry without the key) so we
   // never blank the pulse on restore; refreshActiveWork() (called by render())
-  // re-derives it and keeps it unique to the one genuinely-IP card.
+  // re-derives which cards glow from the restored map.
+  if ('activeWork' in o) state.activeWork = o.activeWork || {};
   if ('activeWorkId' in o) state.activeWorkId = o.activeWorkId || null;
 }
 function pushUndo() {
@@ -4445,7 +4449,9 @@ function render() {
       // the TOP of the column so every session opens showing what you're
       // working on. Stable sort preserves the order of the rest.
       if (col.id === 'inprogress') {
-        const aid = activeWorkId();
+        // #608 — pin only THIS window's session card (?sid), else the
+        // most-recently-claimed; other sessions' cards pulse where they sit.
+        const aid = myActiveCardId();
         if (aid) cards = cards.slice().sort((a, b) =>
           a.id === aid ? -1 : b.id === aid ? 1 : 0);
       }
@@ -5882,22 +5888,53 @@ function refreshColumnCount(colId) {
 // #83, which was never transitioned in this scheme) are NOT active and stay
 // quiet — this is the old live-transition definition, just made persistent.
 // Guard: if the stored id isn't in In Progress anymore, nothing is active.
-function activeWorkId() {
-  if (!state || !state.activeWorkId) return null;
-  const c = state.cards.find(x => x.id === state.activeWorkId);
-  return (c && c.column === 'inprogress') ? c.id : null;
+// #608 — the board page can be bound to a Claude Code session via ?sid=<id> on
+// the auto-opened URL, so it knows which of the N per-session pulses is "mine"
+// for the float-to-top pin. No ?sid (board opened manually / shared window) ⇒
+// fall back to the most-recently-claimed card (reproduces single-session).
+const MY_SID = (() => { try { return new URLSearchParams(location.search).get('sid') || null; } catch (_) { return null; } })();
+
+function _cardInIP(id) {
+  const c = id && state && state.cards.find(x => x.id === id);
+  return !!(c && c.column === 'inprogress');
+}
+
+// #608 — every card that should pulse (one per session), from the per-session map
+// state.activeWork = {sid: {cardId, ts}}, filtered to those still in In-Progress.
+// Includes the legacy scalar activeWorkId as a fallback for a pre-#608 board.json.
+function activeWorkCardIds() {
+  const ids = new Set();
+  if (!state) return ids;
+  const aw = state.activeWork || {};
+  for (const sid of Object.keys(aw)) {
+    const cid = (aw[sid] || {}).cardId;
+    if (cid && _cardInIP(cid)) ids.add(cid);
+  }
+  if (state.activeWorkId && _cardInIP(state.activeWorkId)) ids.add(state.activeWorkId);
+  return ids;
+}
+
+// #608 — the ONE card this board window pins to the top of In-Progress: my own
+// session's active card (?sid), else the most-recently-claimed across sessions.
+function myActiveCardId() {
+  if (!state) return null;
+  const aw = state.activeWork || {};
+  let ent = MY_SID ? aw[MY_SID] : null;
+  if (!ent) {
+    const vals = Object.values(aw);
+    ent = vals.length ? vals.reduce((a, b) => (((b || {}).ts || 0) > ((a || {}).ts || 0) ? b : a)) : null;
+  }
+  const cid = ent ? ent.cardId : (state.activeWorkId || null);   // legacy fallback
+  return _cardInIP(cid) ? cid : null;
 }
 
 function refreshActiveWork() {
   if (!state || _view !== 'board') return;
-  const activeId = activeWorkId();
+  const ids = activeWorkCardIds();
   document.querySelectorAll('.card.active-work').forEach(c => {
-    if (c.dataset.cardId !== activeId) c.classList.remove('active-work');
+    if (!ids.has(c.dataset.cardId)) c.classList.remove('active-work');
   });
-  if (activeId) {
-    const el = findCardEl(activeId);
-    if (el) el.classList.add('active-work');
-  }
+  ids.forEach(id => { const el = findCardEl(id); if (el) el.classList.add('active-work'); });
 }
 
 // #258 — append a movement event {from, to, at} to a card's history so every
@@ -5912,32 +5949,25 @@ function recordMove(card, fromCol, toCol) {
   (card.history = card.history || []).push({ from: fromCol, to: toCol, at: now(), via: 'user' });
 }
 
-// Live transition handler — set/clear the persisted active-work id on a real
-// move in/out of In Progress, then repaint. Does NOT save: whichever writer
-// triggered the move (card.py, or the UI drop/modal handlers) persists
-// state.activeWorkId. This keeps the client's in-memory state correct for
-// SSE-driven moves where the board-level field wouldn't otherwise propagate.
-// #503/#587 — single source of truth for the active-work transition RULE.
-// SOURCE-AWARE steal: a card pushed into In-Progress by the AGENT (card.py:
-// add/move/start) is "truly in progress" and becomes the active (pulsing +
-// top-pinned) card, stealing from whatever was active. A card a USER manually
-// shifts into In-Progress (browser drag, kebab/select "Move to") is just
-// reorganizing — it NEVER claims the pulse (agent-only pulse), so the card the
-// agent is actually working on keeps glowing. Either way, the active card
-// MOVED OUT of In-Progress clears it. Pure state mutation, no repaint — every
-// move path routes through this one function instead of re-inlining the rule.
-// `byUser` = true for local browser moves, or for an SSE move whose latest
-// history event is via:'user' (see _moveByUser); false/undefined = agent.
+// Live transition handler — keep the client's in-memory pulse correct on a real
+// move in/out of In Progress. Pure state mutation, no repaint.
+// #608 — the per-session pulse map state.activeWork = {sid: {cardId, ts}} is
+// CLAIMED only by the agent (card.py, which knows its CLAUDE_CODE_SESSION_ID) and
+// reaches every browser AUTHORITATIVELY via the rev-bumped broadcast. So the
+// browser NEVER claims here (preserves #587 agent-only pulse + #589 undo-no-steal
+// for free — undo restores the whole snapshotted map). It only CLEARS: a card
+// LEAVING In-Progress stops pulsing for every session immediately, so the user
+// gets instant feedback on their own drag without waiting for the server echo.
+// `byUser` is now irrelevant to claiming (the browser never claims) — kept in the
+// signature so the many call sites don't change.
 function setActiveWorkForMove(cardId, fromCol, toCol, byUser) {
   if (!state) return;
-  if (toCol === 'inprogress' && fromCol !== 'inprogress') {
-    // #587 — only an AGENT push claims the pulse; a user drag/menu move never
-    // steals it (and never lights a card up on its own — agent-only pulse).
-    if (!byUser) state.activeWorkId = cardId;
-  } else if (fromCol === 'inprogress' && toCol !== 'inprogress'
-             && state.activeWorkId === cardId) {
-    // A card LEAVING In-Progress stops being active no matter who moved it.
-    state.activeWorkId = null;
+  if (fromCol === 'inprogress' && toCol !== 'inprogress') {
+    const aw = state.activeWork || (state.activeWork = {});
+    for (const sid of Object.keys(aw)) {
+      if ((aw[sid] || {}).cardId === cardId) delete aw[sid];
+    }
+    if (state.activeWorkId === cardId) state.activeWorkId = null;   // legacy
   }
 }
 
@@ -6533,12 +6563,20 @@ function handleColumnRenamed({ id, name }) {
   if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
 }
 
-function handleRevBumped({ rev, savedBy, savedAt }) {
+function handleRevBumped({ rev, savedBy, savedAt, activeWork }) {
   if (!state) return;
   state.rev = rev;
   state.savedBy = savedBy;
   state.savedAt = savedAt;
   lastRev = rev;
+  // #608 — adopt the authoritative per-session pulse map the server just wrote.
+  // This is how an AGENT's claim (card.py, in some other session) reaches this
+  // browser: the per-card SSE events don't carry the board-level field, so the
+  // browser never derives the claim — it takes the server's map as truth.
+  if (activeWork !== undefined) {
+    state.activeWork = activeWork || {};
+    if (_view === 'board') { if (isDragInProgress()) _pendingResync = true; else refreshActiveWork(); }
+  }
   // Cancel imminent poll since we have fresh data
   suppressPollUntil = Date.now() + 2000;
   setStatus('live');

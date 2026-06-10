@@ -20,6 +20,15 @@ project_dir="${2:-}"
 url="http://127.0.0.1:${port}"
 match="127.0.0.1:${port}"
 
+# #608 — bind the opened board window to THIS Claude Code session so it can pin
+# that session's active card to the top of In-Progress (other sessions' cards
+# still pulse, just aren't pinned here). match stays host:port-only so we don't
+# spawn a duplicate window per session; if a board tab is already open it's
+# reused (its opener owns the pin; the page falls back to most-recently-claimed
+# when its ?sid session has ended). Empty sid → no param, pure fallback behavior.
+open_url="${url}"
+[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && open_url="${url}/?sid=${CLAUDE_CODE_SESSION_ID}"
+
 # Don't open a dead URL — the board's server must be live.
 curl -s --max-time 0.4 "${url}/health" >/dev/null 2>&1 || exit 0
 
@@ -70,9 +79,9 @@ esac
 # Sweep stale #367 open-stamps for this project, then open (prefer Chrome).
 [ -n "$project_dir" ] && rm -f "${project_dir}"/board/.opened-* 2>/dev/null
 if command -v open >/dev/null 2>&1; then
-  { open -a "Google Chrome" "${url}" 2>/dev/null || open "${url}" 2>/dev/null ; } &
+  { open -a "Google Chrome" "${open_url}" 2>/dev/null || open "${open_url}" 2>/dev/null ; } &
 elif command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "${url}" >/dev/null 2>&1 &
+  xdg-open "${open_url}" >/dev/null 2>&1 &
 fi
 disown 2>/dev/null || true
 exit 0
