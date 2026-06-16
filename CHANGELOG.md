@@ -9,6 +9,24 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.24 — Drop the HUD "still working" tick + dedupe bootstrap harvest (#121) (2026-06-16)
+
+- **Removed the "still working… mm:ss" HUD tick (reverts #638).** The BOARD-SYNC HUD
+  appended a ticking timer to its sub-line whenever a stage went quiet; the running
+  clock read as noise. `progress_heartbeat()` is now a no-op context manager (no
+  daemon thread, no emit) and `_HudPulse.touch()` is inert, so its two callers need no
+  changes. The real per-chunk `N/M` count and "N card(s) emitted so far" sub-line are
+  untouched.
+- **Bootstrap parses each transcript window once (#121).** `harvest_jsonl` re-reads
+  every transcript line regardless of window, so `_flatten_events` cost ~6s/call and
+  `run()` paid it up to 3× — tier-1, tier-2, and the end-of-replay reconcile, where
+  reconcile re-parsed the *identical* window tier-2 had just read (the "long gap before
+  reconciliation"). A `run()`-scoped harvest memo (`@_bootstrap_harvest_cache`) reuses
+  an exact `(project, days, sources)` parse and is inert outside `run()` so the
+  long-lived server never serves stale events to a later SessionStart recon. Measured
+  on real transcripts (8-day window): the harvest pattern dropped 13.24s → 6.25s (~7s),
+  with a byte-identical 12954-event result set.
+
 ### 0.9.23 — Declutter flies cards in paced (2026-06-16)
 
 - **First-run declutter now glides cards into Discarded one at a time** instead of a
