@@ -13,9 +13,22 @@ without needing a daemon to scrub it.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import time
 from pathlib import Path
+
+try:
+    import fcntl  # POSIX
+    _HAVE_FCNTL = True
+    msvcrt = None
+except ImportError:  # Windows
+    _HAVE_FCNTL = False
+    try:
+        import msvcrt
+    except ImportError:
+        msvcrt = None
 
 
 REGISTRY_ENV = "BOARD_REGISTRY"
@@ -34,11 +47,23 @@ DEFAULT_PATH = Path.home() / ".board-steward" / "port-registry.json"
 # This survives the server dying (a project keeps its port across restarts);
 # the registry tracks who's live right now, this tracks who OWNS which port.
 ASSIGN_PATH = Path.home() / ".board-steward" / "port-assignments.json"
-# The single board the human last INTERACTED with (a card mutation, a serve, a
-# bootstrap). Used by the SessionStart hook to disambiguate when Claude opens at
-# $HOME with no cwd board and several boards exist: reopen the one in active
-# use, not whichever board.json happens to have the newest file mtime (#mb —
-# mtime picked the wrong board when two boards were edited the same session).
+# The board the human last INTERACTED with (a card mutation, a serve, a
+# bootstrap). Used by the SessionStart hook + card.py's find_board fallback to
+# disambiguate when Claude opens at $HOME with no cwd board and several boards
+# exist: reopen the one in active use, not whichever board.json happens to have
+# the newest file mtime (#mb — mtime picked the wrong board when two boards were
+# edited the same session).
+#
+# #611 — this is now SESSION-AWARE to stop concurrent sessions clobbering each
+# other's pointer. The file is JSON:
+#   {"global":   {"board": <dir>, "at": <iso>},          # most-recent, any session
+#    "sessions": {<session_id>: {"board": <dir>, "at": <iso>}, ...}}
+# A reader passes its CLAUDE_CODE_SESSION_ID → resolves ITS OWN board (so session
+# A at $HOME never lands on the board session B just touched, and a RESUMED
+# session reopens its own board). A fresh/unseen session falls back to `global`
+# (the previous single-pointer behaviour). The OLD single-line format is read
+# transparently as `global.board`, so no migration step is needed. The sessions
+# map is capped/pruned on write (see _prune_sessions) so it can't grow unbounded.
 ACTIVE_PATH = Path.home() / ".board-steward" / "last-active"
 
 
@@ -194,38 +219,149 @@ def set_port(board_dir: str | os.PathLike, port: int) -> None:
     _atomic_write_json(assignments_path(), a)
 
 
-def set_active(board_dir: str | os.PathLike) -> None:
-    """Record `board_dir` as the board the human last interacted with.
+_ACTIVE_KEEP = 32  # cap on the per-session map (size, not age — never evict a live session)
 
-    Best-effort and never raises — a failed write here must never break the
-    card mutation / serve / bootstrap that triggered it. The file holds one
-    line: the resolved absolute board dir."""
+
+@contextlib.contextmanager
+def _active_lock(timeout: float = 1.0):
+    """Best-effort cross-process lock for the last-active read-modify-write.
+
+    #611 — set_active does read→modify→write of a SHARED file from many sessions;
+    without a lock two writers race and one session's entry is lost (the exact
+    clobber this fix exists to kill). Mirrors _boardio.board_lock's proven flock
+    pattern but is inlined (port_registry is imported by lightweight hook
+    one-liners and must not pull in _boardio's backup machinery). Yields True if
+    acquired; on timeout yields False and the caller proceeds ANYWAY — degrading
+    to the old lossy behaviour beats blocking or raising inside a never-raise
+    write. The lock file is tiny and writes are sub-ms, so contention is rare."""
+    lock_path = active_path().with_suffix(".lock")
+    f = None
+    acquired = False
     try:
-        key = str(Path(board_dir).resolve())
-        p = active_path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(key + "\n")
-        os.replace(tmp, p)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        f = open(lock_path, "a+")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if _HAVE_FCNTL:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                elif msvcrt is not None:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    break  # proceed unlocked rather than block the write
+                time.sleep(0.02)
+        yield acquired
     except OSError:
-        pass
+        yield acquired  # couldn't even open the lock file → proceed best-effort
+    finally:
+        if f is not None:
+            if acquired:
+                try:
+                    if _HAVE_FCNTL:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    elif msvcrt is not None:
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            f.close()
 
 
-def get_active() -> str | None:
-    """Return the last-active board dir, or None if unset / gone from disk.
+def _read_active() -> dict:
+    """Parse the last-active file into the normalized {"global":..,"sessions":..}.
 
-    Self-heals: if the recorded board has since been deleted, returns None so
-    the caller falls back (e.g. to mtime) rather than pointing at a dead dir."""
+    Tolerant: the OLD single-line format (a bare board dir) reads as global.board
+    so no migration is needed; corrupt/hand-edited/missing → an empty shell.
+    Always returns a dict with both keys present."""
+    empty = {"global": {}, "sessions": {}}
     try:
         p = active_path()
         if not p.exists():
-            return None
-        val = p.read_text().strip()
+            return empty
+        raw = p.read_text().strip()
     except OSError:
+        return empty
+    if not raw:
+        return empty
+    try:
+        d = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        # Legacy single-line path (a bare dir never parses as JSON).
+        return {"global": {"board": raw, "at": None}, "sessions": {}}
+    if not isinstance(d, dict):
+        return empty
+    g = d.get("global") if isinstance(d.get("global"), dict) else {}
+    s = d.get("sessions") if isinstance(d.get("sessions"), dict) else {}
+    return {"global": g, "sessions": s}
+
+
+def _prune_sessions(sessions: dict, keep: int = _ACTIVE_KEEP) -> dict:
+    """Drop dead-on-disk session entries, then cap to the `keep` newest by `at`.
+
+    Size cap, not a TTL — a long-running multi-day session must keep its own
+    entry, so we never evict by age (only by being supplanted by newer sessions
+    or by its board vanishing)."""
+    live = {sid: e for sid, e in sessions.items()
+            if isinstance(e, dict) and e.get("board") and Path(e["board"]).exists()}
+    if len(live) <= keep:
+        return live
+    newest = sorted(live.items(), key=lambda kv: kv[1].get("at") or "", reverse=True)[:keep]
+    return dict(newest)
+
+
+def set_active(board_dir: str | os.PathLike, session_id: str | None = None) -> None:
+    """Record `board_dir` as the board last interacted with (#611 session-aware).
+
+    Always updates `global` (most-recent-wins, the fresh-session fallback) and,
+    when `session_id` is given, that session's own entry — so concurrent sessions
+    on different boards no longer clobber each other's pointer. Best-effort and
+    never raises: a failed write here must never break the card mutation / serve
+    / bootstrap that triggered it. The read-modify-write runs under a best-effort
+    flock so distinct-session entries survive concurrent writers.
+
+    NOTE: callers pass card_commands._session_id(), which collapses a bare CLI
+    run to "_cli" and all automation (recon/e2e/sim) to "_auto" — those are
+    intentionally COARSE shared slots: two concurrent "_auto" runs can still
+    clobber each other's slot, but real human sessions get distinct ids, which is
+    the case #611 targets, and `global` is always written regardless."""
+    try:
+        key = str(Path(board_dir).resolve())
+        now = _now_iso()
+        with _active_lock():
+            d = _read_active()
+            d["global"] = {"board": key, "at": now}
+            if session_id:
+                d["sessions"][session_id] = {"board": key, "at": now}
+            d["sessions"] = _prune_sessions(d["sessions"])
+            _atomic_write_json(active_path(), d)
+    except Exception:
+        # Broadened from OSError: a lock/json/prune bug must never break a write.
+        pass
+
+
+def get_active(session_id: str | None = None) -> str | None:
+    """Return the active board dir for `session_id`, or None if unset/gone.
+
+    Tiered self-heal (#611): (1) if `session_id` has its own entry and that board
+    still exists on disk → return it; else fall through. (2) `global.board` if it
+    exists → return it (the previous single-pointer behaviour, used by a fresh /
+    unseen session). (3) None, so the caller falls back (e.g. to mtime). A
+    deleted board at one tier never blanks the resolution if a lower tier is
+    live."""
+    try:
+        d = _read_active()
+        if session_id:
+            sb = (d["sessions"].get(session_id) or {}).get("board")
+            if sb and Path(sb).exists():
+                return sb
+        gb = (d["global"] or {}).get("board")
+        if gb and Path(gb).exists():
+            return gb
+    except Exception:
         return None
-    if not val or not Path(val).exists():
-        return None
-    return val
+    return None
 
 
 def _now_iso() -> str:

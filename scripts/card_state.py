@@ -62,7 +62,12 @@ def find_board(explicit: Path | None) -> Path:
     # cascade) just works instead of erroring out. (#596)
     try:
         import port_registry
-        active = port_registry.get_active()
+        # #611 — resolve THIS session's active board (not whichever board another
+        # concurrent session touched last). Read the env directly to keep
+        # card_state import-light; a missing id falls back to `global`, the
+        # correct default for an out-of-session call.
+        sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+        active = port_registry.get_active(sid)
         if active:
             c = Path(active) / "board.json"
             if c.is_file():

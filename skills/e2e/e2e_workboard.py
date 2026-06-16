@@ -133,7 +133,11 @@ def test_multiboard_routing_isolation(ctx: Ctx):
     tb = [c["title"] for c in json.loads(B.read_text())["cards"]]
     ctx.assert_eq("multiboard.routing: A isolated", ta, ["card for A"])
     ctx.assert_eq("multiboard.routing: B isolated", tb, ["card for B"])
-    active = Path(os.environ["BOARD_ACTIVE"]).read_text().strip()
+    # #611 — last-active is now session-aware JSON; resolve via the API (the file
+    # is no longer a bare path line). The two subprocess writes both update the
+    # global pointer, so global resolves to the last mutated board (B).
+    import importlib, port_registry as pr; importlib.reload(pr)
+    active = pr.get_active()
     ctx.assert_eq("multiboard.last-active = last mutated (B)",
                   Path(active).resolve(), B.parent.resolve())
     os.environ.pop("BOARD_NO_SERVER", None)
@@ -163,9 +167,41 @@ def test_multiboard_disambiguation(ctx: Ctx):
 
     ctx.assert_eq("multiboard.disambiguation: active (B) wins over mtime",
                   Path(pick()).resolve(), B.resolve())
+    # #611 — session-aware: each session resolves ITS OWN board even though the
+    # global pointer (used by pick()) was last set to B.
+    pr.set_active(abd, "sess-A"); pr.set_active(bbd, "sess-B")
+    ctx.assert_eq("multiboard.disambiguation: sess-A resolves A",
+                  Path(pr.get_active("sess-A")).resolve(), A.parent.resolve())
+    ctx.assert_eq("multiboard.disambiguation: sess-B resolves B",
+                  Path(pr.get_active("sess-B")).resolve(), B.parent.resolve())
+    ctx.assert_eq("multiboard.disambiguation: unseen session → global (B)",
+                  Path(pr.get_active("sess-fresh")).resolve(), B.parent.resolve())
     os.remove(os.environ["BOARD_ACTIVE"])               # clear active → mtime fallback
     ctx.assert_eq("multiboard.disambiguation: mtime fallback (A)",
                   Path(pick()).resolve(), A.resolve())
+
+
+def test_multiboard_concurrent_sessions(ctx: Ctx):
+    """#611 regression guard — two sessions on different boards don't clobber each
+    other's pointer. Each `card.py add` runs with a distinct CLAUDE_CODE_SESSION_ID;
+    afterwards each session resolves ITS board, while the global pointer (an unseen
+    session's fallback) is whichever ran last."""
+    os.environ["BOARD_NO_SERVER"] = "1"
+    A = ctx.board([]); B = ctx.board([])
+    for bj, title, sid in ((A, "A1", "sess-A"), (B, "B1", "sess-B")):
+        env = dict(os.environ, CLAUDE_CODE_SESSION_ID=sid)
+        env.pop("BOARD_SKIP_DECOMPOSE_CHECK", None)  # don't collapse to the shared _auto slot
+        subprocess.run([sys.executable, str(CARD_PY), "add", "--title", title,
+                        "--column", "task"], cwd=str(bj.parent.parent),
+                       capture_output=True, text=True, timeout=20, env=env)
+    import importlib, port_registry as pr; importlib.reload(pr)
+    ctx.assert_eq("multiboard.concurrent: sess-A → A (not clobbered by B)",
+                  Path(pr.get_active("sess-A")).resolve(), A.parent.resolve())
+    ctx.assert_eq("multiboard.concurrent: sess-B → B",
+                  Path(pr.get_active("sess-B")).resolve(), B.parent.resolve())
+    ctx.assert_eq("multiboard.concurrent: global → last writer (B)",
+                  Path(pr.get_active()).resolve(), B.parent.resolve())
+    os.environ.pop("BOARD_NO_SERVER", None)
 
 
 # ───────────────────────── recon tests (free) ─────────────────────────
@@ -348,7 +384,8 @@ def test_review_backfill_emit_stamp(ctx: Ctx):
 # ───────────────────────── runner ─────────────────────────
 
 GROUPS = {
-    "multiboard": [test_multiboard_routing_isolation, test_multiboard_disambiguation],
+    "multiboard": [test_multiboard_routing_isolation, test_multiboard_disambiguation,
+                   test_multiboard_concurrent_sessions],
     "recon": [test_recon_only_discovered_flag, test_recon_gates_short_circuit,
               test_recon_replay_gate, test_recon_claudecode_path],
     "review-backfill": [test_review_backfill_detect_extract, test_review_backfill_emit_stamp],

@@ -399,12 +399,18 @@ _READ_ONLY_CMDS = frozenset({
 
 def _mark_active(args, board) -> None:
     """Record the mutated board as last-active so SessionStart reopens it at
-    $HOME (replaces the mtime tie-break). Best-effort — never breaks a write."""
+    $HOME (replaces the mtime tie-break). Best-effort — never breaks a write.
+
+    #611 — keyed by the calling session so concurrent sessions on different
+    boards don't clobber each other's pointer. _session_id() collapses a bare CLI
+    run to '_cli' and automation to '_auto' (coarse shared slots; real sessions
+    get distinct CLAUDE_CODE_SESSION_IDs)."""
     if getattr(args, "cmd", None) in _READ_ONLY_CMDS:
         return
     try:
         import port_registry
-        port_registry.set_active(Path(board).parent)
+        from card_commands import _session_id  # underscore name — not via `import *`
+        port_registry.set_active(Path(board).parent, _session_id())
     except Exception:
         pass
 

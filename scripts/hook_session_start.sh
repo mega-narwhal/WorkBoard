@@ -12,6 +12,22 @@
 set +e
 set -u
 
+# #611 — capture the hook payload ONCE (stdin is consumable once) and extract the
+# session_id. SessionStart hooks receive {"session_id":..,"source":startup|resume|..}
+# on stdin. On RESUME the id matches the session that did the last-active writes, so
+# passing it into port_registry.get_active() reopens THIS session's own board even
+# if another concurrent session touched a different board meanwhile. Empty / non-JSON
+# stdin → empty id → the fresh-session global/mtime fallback (today's behaviour).
+# Never errors (|| true + except) so startup + exit 0 are preserved.
+hook_stdin="$(cat 2>/dev/null || true)"
+session_id="$(printf '%s' "${hook_stdin}" | python3 -c '
+import sys, json
+try:
+    print(json.load(sys.stdin).get("session_id", "") or "")
+except Exception:
+    pass
+' 2>/dev/null || true)"
+
 # Walk up from CWD looking for board/board.json (max 8 levels).
 dir="${PWD}"
 board_path=""
@@ -74,7 +90,8 @@ if [ -z "${board_path}" ]; then
 import sys; sys.path.insert(0, sys.argv[1])
 from pathlib import Path
 import port_registry as pr
-active = pr.get_active()
+sid = sys.argv[2] if len(sys.argv) > 2 else ''
+active = pr.get_active(sid or None)   # #611 — this session's board, else global
 if active:
     bj = Path(active) / 'board.json'
     if bj.exists():
@@ -87,7 +104,7 @@ for d in pr.assignments():
         if best is None or m > best[0]:
             best = (m, str(bj))
 print(best[1] if best else '')
-" "${hook_dir}" 2>/dev/null)"
+" "${hook_dir}" "${session_id}" 2>/dev/null)"
     # No registered board with a live board.json → nothing to open; stay silent.
     [ -n "${board_path}" ] && [ -f "${board_path}" ] || exit 0
     # Fall through to the shared probe/open/digest block below.
