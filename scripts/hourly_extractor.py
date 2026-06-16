@@ -16,6 +16,7 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import subprocess
@@ -60,11 +61,57 @@ import _boardio  # noqa: E402  (#645: recon_lock — serialize backfill vs concu
 
 # ---------- main driver ---------------------------------------------------
 
+# --- #121: per-bootstrap harvest cache -------------------------------------
+# harvest_jsonl reads + json.loads EVERY transcript line regardless of the
+# window (the `since` cutoff only drops events AFTER parsing), so _flatten_events
+# costs ~constant (~6s here) per call. run() calls it up to 3× per bootstrap —
+# tier-1 (off+1), tier-2 (off+days), and the end-of-replay reconcile (off+days).
+# The reconcile pass harvests the IDENTICAL window as tier-2, so that re-parse —
+# the "long gap before reconciliation" the user reported — is pure waste.
+#
+# This memo is scoped to a single run() via @_bootstrap_harvest_cache (set on
+# entry, cleared in finally). Outside run() the memo is None and _flatten_events
+# harvests fresh exactly as before — so the long-lived serve.py process NEVER
+# serves stale events to a later SessionStart --reconcile-only pass. The key is
+# the EXACT (project, days, sources), so only a genuinely identical window is
+# reused (no cross-window filtering) — each window's dedup result is unchanged.
+_HARVEST_MEMO: dict | None = None
+
+
+def _bootstrap_harvest_cache(fn):
+    """Decorator: give the wrapped call a fresh, isolated harvest memo for its
+    duration, then restore the prior state. Scopes _flatten_events caching to one
+    bootstrap run() without leaking across the long-lived server's later calls."""
+    @functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        global _HARVEST_MEMO
+        prev = _HARVEST_MEMO
+        _HARVEST_MEMO = {}
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _HARVEST_MEMO = prev
+    return _wrapped
+
+
 def _flatten_events(project: Path, days: int,
                     sources: set | None = None) -> list[dict]:
     """Harvest + merge all event streams. Pass `sources` (a subset of SOURCES)
     to TARGET specific streams — excluded harvests are skipped entirely, not
-    just filtered after, so targeting also saves the harvest cost."""
+    just filtered after, so targeting also saves the harvest cost.
+
+    #121: when a bootstrap harvest cache is active (inside run()), an identical
+    (project, days, sources) call returns the already-parsed events instead of
+    re-reading every transcript. Inert outside run() (memo is None)."""
+    memo = _HARVEST_MEMO
+    cache_key = None
+    if memo is not None:
+        cache_key = (str(project), days,
+                     frozenset(sources) if sources is not None else None)
+        hit = memo.get(cache_key)
+        if hit is not None:
+            return list(hit)   # fresh list; events are read-only downstream
+
     def want(src: str) -> bool:
         return sources is None or src in sources
     since = (datetime.now(timezone.utc) - timedelta(days=days)
@@ -108,6 +155,9 @@ def _flatten_events(project: Path, days: int,
             if head:
                 seen_asst.add(head)
         out.append(e)
+    if memo is not None and cache_key is not None:
+        memo[cache_key] = list(out)   # cache an isolated copy so a caller mutating
+                                      # the returned list can't corrupt the cache
     return out
 
 
@@ -929,6 +979,7 @@ def _run_window(project: Path, board: Path, card_py: Path, *,
                           cards_offset=cards_offset)
 
 
+@_bootstrap_harvest_cache   # #121: one transcript parse shared across this bootstrap's passes
 def run(project: Path, board: Path, port: int, days: int,
         show_lifecycle: bool, pace_s: float,
         max_buckets: int, workers: int = 8,
