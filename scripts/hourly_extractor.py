@@ -1075,11 +1075,16 @@ def run(project: Path, board: Path, port: int, days: int,
         # completed_card_replay=0 forever → every future SessionStart recon for
         # this board stands down permanently (the gate never flips back to 1).
         try:
+            n_moved = 0
             if reconcile:
                 events = _flatten_events(project, off + days, sources=sources)
                 events = _filter_events(events, project, date_filter, off) or []
                 if events:
-                    n_moved = reconcile_sweep(card_py, board, events)
+                    # #156 — final_hud=False: reconcile must NOT complete the HUD,
+                    # because declutter still runs after it. The single combined
+                    # final is emitted below, once declutter is done.
+                    n_moved = reconcile_sweep(card_py, board, events,
+                                              final_hud=False)
                     print(f"✓ end-of-replay reconcile: moved {n_moved} card(s)",
                           file=sys.stderr)
             # #630 — deterministic first-run declutter, AFTER reconcile (which may
@@ -1092,6 +1097,15 @@ def run(project: Path, board: Path, port: int, days: int,
             if n_swept:
                 print(f"✓ first-run declutter: swept {n_swept} low-signal card(s)",
                       file=sys.stderr)
+            # #156 — finalize the HUD ONCE, AFTER declutter, with the COMBINED tally
+            # (reconcile moved + declutter swept) so it never vanishes mid-sweep and
+            # the count reflects both phases. Skip when a partial failure will render
+            # its own degraded final below (avoid a double-complete).
+            if not failed_buckets and (reconcile or n_swept):
+                total = n_moved + n_swept
+                _emit_progress(card_py, board, 1, 1,
+                               f"✓ {total} card(s) brought up to date", "reconcile",
+                               final=True)
         finally:
             # #627: stamp the gate with the partial-failure record. Gate STILL
             # reopens (completed_card_replay=1) so recon isn't stuck (#384), but

@@ -391,7 +391,7 @@ def _emit_extraction_pending(board: Path, card_py: Path,
 def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
                      banner_num: int | None = None,
                      only_discovered: bool = True,
-                     gate=None) -> int:
+                     gate=None, final_hud: bool = True) -> int:
     """LLM sweep on non-done cards. Asks LLM if any should move based on the
     activity log. Applies moves. Returns count moved.
 
@@ -497,9 +497,16 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
             moves = _llm_reconcile(candidates, events, done_cards)
         if not moves:
             print("  recon: 0 moves", file=sys.stderr)
-            _emit_progress(card_py, board, 1, 1,
-                           "✓ already up to date — nothing to move", "reconcile",
-                           final=True)
+            if final_hud:
+                _emit_progress(card_py, board, 1, 1,
+                               "✓ already up to date — nothing to move", "reconcile",
+                               final=True)
+            else:
+                # Bootstrap: a declutter sweep follows — keep the HUD OPEN (done<total
+                # so the JS done>=total path doesn't auto-complete it) and let the
+                # caller emit the single combined final after declutter (#156).
+                _emit_progress(card_py, board, 0, 1,
+                               "✓ nothing to reconcile — tidying up…", "reconcile")
             return 0
 
         n_moved = 0
@@ -573,9 +580,15 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
                   f"(see SKIP lines above)", file=sys.stderr)
         else:
             print(f"  recon: {n_moved} card(s) moved", file=sys.stderr)
-        _emit_progress(card_py, board, 1, 1,
-                       f"✓ {n_moved} card(s) brought up to date", "reconcile",
-                       final=True)
+        if final_hud:
+            _emit_progress(card_py, board, 1, 1,
+                           f"✓ {n_moved} card(s) brought up to date", "reconcile",
+                           final=True)
+        else:
+            # Bootstrap: declutter follows — keep the HUD OPEN (done<total) and let
+            # the caller emit the single combined final after declutter (#156).
+            _emit_progress(card_py, board, 0, 1,
+                           f"reconciled {n_moved} — tidying up…", "reconcile")
         return n_moved
 
 
@@ -635,6 +648,12 @@ def declutter_sweep(card_py: Path, board: Path, today: str | None = None) -> int
 
     date_str = today or card_state.now_iso()[:10]  # YYYY-MM-DD
     py = sys.executable
+
+    # #156 — drive the (still-open) reconcile HUD so it shows declutter activity
+    # instead of lingering on the reconcile line. done<total keeps it in-progress;
+    # the bootstrap caller emits the single combined final once this returns.
+    _emit_progress(card_py, board, 0, 1,
+                   f"tidying {len(victims)} low-signal card(s)…", "reconcile")
 
     # 1) Dated, reversible header FIRST, so the swept cards glide in beneath it.
     #    board.html renders a 'section-header' card as a divider. --force: the tag
