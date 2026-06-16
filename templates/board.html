@@ -685,8 +685,26 @@
 
   .card-title {
     font-size: 13px; font-weight: 500; line-height: 1.35;
-    word-wrap: break-word; color: var(--ink);
+    word-wrap: break-word; overflow-wrap: anywhere; color: var(--ink);
   }
+  /* #632 — clamp very long titles (e.g. a writeup pasted into the title like
+     #631) to ~10 rows. The clamp draws its own '…'; an 'i' info icon next to
+     it (added in renderCardCompact only when actually truncated) reveals the
+     full text via the body-level tooltip / the card modal. */
+  .card-title.clamp {
+    display: -webkit-box; -webkit-line-clamp: 10; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card-title-more { margin-top: 3px; }
+  /* #632 — 'Read more…' text link (not the 'i' icon, which is already the
+     origin-tooltip affordance). Hover shows the full title in the body-level
+     tooltip; click opens the card modal. */
+  .card-readmore {
+    display: inline-block;
+    font-size: 11px; font-weight: 500; color: var(--accent);
+    cursor: pointer; user-select: none;
+  }
+  .card-readmore:hover { text-decoration: underline; }
   .card[data-col="done"] .card-title { text-decoration: line-through; opacity: .8; }
 
   .card-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
@@ -835,6 +853,7 @@
     padding: 10px 14px; border-radius: 6px;
     font-size: 11px; font-weight: 400; line-height: 1.5;
     max-width: 360px; white-space: pre-wrap;
+    max-height: 60vh; overflow: hidden;
     box-shadow: 0 6px 24px rgba(0,0,0,.32);
     pointer-events: none; opacity: 0;
     transition: opacity .12s ease;
@@ -3674,9 +3693,31 @@ function renderCardCompact(card) {
   el.appendChild(head);
 
   const title = document.createElement('div');
-  title.className = 'card-title';
+  title.className = 'card-title clamp';
   title.textContent = card.title || '(untitled)';
   el.appendChild(title);
+
+  // #632 — after layout, detect whether the 10-row clamp actually truncated
+  // the title. If so, surface a 'Read more…' text link (NOT the 'i' icon —
+  // that's already the origin-tooltip affordance): hovering it shows the full
+  // text in the body-level tooltip (escapes the column overflow), and clicking
+  // it opens the full card modal. Measured in rAF because the element isn't in
+  // the DOM yet when this builder runs (a stale node that got replaced before
+  // the frame measures 0/0 → harmless no-op).
+  requestAnimationFrame(() => {
+    if (!title.isConnected) return;
+    if (title.scrollHeight - title.clientHeight <= 1) return;  // not truncated
+    const more = document.createElement('div');
+    more.className = 'card-title-more';
+    const link = document.createElement('span');
+    link.className = 'card-readmore';
+    link.setAttribute('data-tip', card.title || '');
+    link.setAttribute('data-tip-placement', 'right');
+    link.textContent = 'Read more…';
+    link.onclick = (e) => { e.stopPropagation(); openModal(card.id); };
+    more.appendChild(link);
+    title.after(more);
+  });
 
   // Live progress bar for cards tagged 'banner' (e.g. hourly_extractor's
   // "🔄 extracting N/M chunks…"). Parses the first "N/M" from title or
