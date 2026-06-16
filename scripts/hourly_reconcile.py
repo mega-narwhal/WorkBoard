@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hourly_common import *  # noqa: E402,F401,F403  (build_digest, _CLAUDE_BIN, _LLM_MODEL)
 from hourly_emit import *     # noqa: E402,F401,F403  (_banner_update)
 import _boardio  # noqa: E402  (recon_lock — serialize concurrent reconcile passes)
+import card_state  # noqa: E402  (load/atomic_save/now_iso — #630 deterministic declutter)
 
 
 # ---------- post-extraction reconciliation sweep ----------
@@ -579,10 +580,103 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
 
 
 
+# Work-type tags that mark a 'discovered' card as REAL engineering work to keep.
+# Anything bootstrap-minted WITHOUT one of these is low-signal chatter.
+_KEEP_TAGS = frozenset({"bug", "feature", "refactor", "enhancement"})
+
+
+def declutter_sweep(card_py: Path, board: Path, today: str | None = None) -> int:
+    """#630 — DETERMINISTIC first-run declutter (NO LLM, NO subprocess-per-card).
+
+    A fresh bootstrap can mint 100+ cards, most of them low-value 'discovered'
+    chatter (assessments, explorations, notes-to-self) that overwhelm a brand-new
+    user. Move that noise to Discarded under a dated, reversible header so the
+    board lands calm.
+
+    RULE (deterministic) — a card is swept iff ALL hold:
+      • 'discovered' in tags  — only bootstrap mints this; a user's hand-made
+        card (via `card.py add`) is never tagged 'discovered', so it's immune.
+      • none of {bug,feature,refactor,enhancement} in tags — no real work-type.
+      • column not in {done, discarded} — never touch shipped/already-discarded.
+    Sweeps EVERY other non-Done column (task/backlog/inprogress/notes/…). Inserts
+    one '🧹 First-run sweep · <date> · N items' header card at the top of
+    Discarded. Returns the number of cards swept (0 if none / on any error).
+
+    GATE: the ONLY caller is the bootstrap end-of-replay block (hourly_extractor),
+    which invokes this exactly ONCE while the replay gate is still closed — NOT on
+    the recurring SessionStart recon. Combined with the 'discovered' key above,
+    that's belt-and-braces: a user's later untagged card is never swept.
+
+    Writes via card_state.atomic_save (one batch write, rev-CAS + SSE broadcast) —
+    the swept cards refresh into Discarded calmly, no 75 animated card.py flies.
+    """
+    try:
+        d = card_state.load(board)
+    except Exception:
+        return 0
+
+    cards = d.get("cards", [])
+    victims = [
+        c for c in cards
+        if c.get("column") not in (None, "done", "discarded")
+        and "discovered" in (c.get("tags") or [])
+        and not (_KEEP_TAGS & set(c.get("tags") or []))
+        and "banner" not in (c.get("tags") or [])
+        and "section-header" not in (c.get("tags") or [])
+    ]
+    if not victims:
+        return 0
+
+    ts = card_state.now_iso()
+    date_str = today or ts[:10]  # YYYY-MM-DD
+
+    # Dated, reversible header card pinned to the top of Discarded. board.html
+    # renders any 'section-header'-tagged card as a divider, not a normal card.
+    header_num = d.get("nextNum", 1)
+    d["nextNum"] = header_num + 1
+    cards.insert(0, {
+        "num": header_num,
+        "id": f"first-run-sweep-{date_str}",
+        "code": "",
+        "priority": None,
+        "title": f"🧹 First-run sweep · {date_str} · {len(victims)} items",
+        "column": "discarded",
+        "tags": ["section-header"],
+        "origin": "Auto: first-run declutter (#630) — low-signal 'discovered' cards "
+                  "with no work-type tag. Drag any card back out to restore it.",
+        "notes": "",
+        "writeup": "",
+        "createdAt": ts,
+        "updatedAt": ts,
+        "doneAt": None,
+        "lastTouchedSubtask": None,
+        "linkedCards": [],
+        "subtasks": [],
+        "history": [{"from": None, "to": "discarded", "at": ts, "via": "declutter"}],
+    })
+
+    for c in victims:
+        old = c.get("column")
+        c["column"] = "discarded"
+        c["updatedAt"] = ts
+        c.setdefault("history", []).append(
+            {"from": old, "to": "discarded", "at": ts, "via": "declutter"})
+
+    try:
+        card_state.atomic_save(board, d)
+    except Exception as e:
+        print(f"  declutter: save failed ({e}) — board untouched", file=sys.stderr)
+        return 0
+    print(f"  declutter: swept {len(victims)} low-signal card(s) → Discarded "
+          f"under '{date_str}' header", file=sys.stderr)
+    return len(victims)
+
+
 __all__ = [
     "_RECON_PROMPT", "_build_recon_card_block", "_build_activity_digest",
     "_build_done_block", "_resolve_commit_files", "_find_repo_root",
     "_safe_basenames",
     "_llm_reconcile", "_emit_recon_pending",
     "_emit_extraction_pending", "reconcile_sweep",
+    "declutter_sweep",
 ]

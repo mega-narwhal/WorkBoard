@@ -57,6 +57,11 @@ import _metrics  # noqa: E402  (velocity metrics — #114)
 _write_lock = threading.Lock()
 _clients_lock = threading.Lock()
 _clients: list[queue.Queue] = []
+# #150 — wall-clock (ms) of the most recent SSE connect. A DURABLE "a tab is
+# open" signal: an open board tab auto-reconnects within ~3s of any keepalive
+# flap, so this stays fresh even when the instantaneous len(_clients) blips to 0.
+# board_autoopen.sh reads it via /health to avoid opening spurious duplicate tabs.
+_last_sse_connect_ms: int = 0
 _cached_state: dict | None = None
 _cached_lock = threading.Lock()
 # #353/#318 — last extract_progress payload, so a freshly-connected client (hard
@@ -378,9 +383,11 @@ class BoardHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             return
 
+        global _last_sse_connect_ms
         q: queue.Queue = queue.Queue(maxsize=256)
         with _clients_lock:
             _clients.append(q)
+            _last_sse_connect_ms = int(time.time() * 1000)  # #150 durable viewer signal
         # #353/#318 — replay the last progress to THIS new client so a hard
         # refresh / backgrounded-tab reconnect paints the current X/Y-chunks HUD
         # immediately, rather than staying blank until the next chunk's event.
@@ -394,8 +401,15 @@ class BoardHandler(BaseHTTPRequestHandler):
                 try:
                     name, data = q.get(timeout=15)
                 except queue.Empty:
-                    self.wfile.write(b": keepalive\n\n")
-                    self.wfile.flush()
+                    # #150 — the keepalive write must be try/except'd like the
+                    # event write below. A dropped socket here used to throw
+                    # BrokenPipe/ConnectionReset UNCAUGHT, crashing the handler
+                    # (the .board-server.log flood) and flapping sseClients to 0.
+                    try:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        break
                     continue
                 line = f"event: {name}\ndata: {json.dumps(data)}\n\n".encode()
                 try:
@@ -564,6 +578,7 @@ class BoardHandler(BaseHTTPRequestHandler):
             rev, cards = -1, 0
         with _clients_lock:
             n_clients = len(_clients)
+            last_sse_connect_ms = _last_sse_connect_ms
         # #177 — include current git commit (short SHA + first line of
         # message) so the Logs HUD can show "running fde639b" without a
         # separate round-trip. Best-effort; silent fail if not a repo.
@@ -593,6 +608,11 @@ class BoardHandler(BaseHTTPRequestHandler):
             "rev": rev,
             "cards": cards,
             "sseClients": n_clients,
+            # #150 — durable viewer-detection inputs: board_autoopen.sh treats a
+            # tab as present if sseClients>0 OR (nowMs - lastSseConnectMs) is small,
+            # which survives the brief SSE flaps that used to spawn duplicate tabs.
+            "lastSseConnectMs": last_sse_connect_ms,
+            "nowMs": int(time.time() * 1000),
             "commit": commit_sha,
             "commitMsg": commit_msg,
             "ts": datetime.now(timezone.utc).isoformat(),

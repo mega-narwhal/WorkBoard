@@ -757,6 +757,29 @@
     100% { background-position: -200% 0; }
   }
 
+  /* #630 — first-run declutter divider: a slim, muted, non-draggable label that
+     groups swept low-signal cards under a dated header in Discarded. Quiet by
+     design (this is the column users glance at LAST), but clickable for the
+     explanation. */
+  .card.is-section-header {
+    cursor: pointer;
+    padding: 6px 10px;
+    min-height: 0;
+    background: color-mix(in srgb, var(--card-bg, #1b1f24) 80%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--fg, #cfd6df) 22%, transparent);
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: color-mix(in srgb, var(--fg, #cfd6df) 62%, transparent);
+    text-transform: none;
+    box-shadow: none;
+  }
+  .card.is-section-header:hover {
+    color: var(--fg, #cfd6df);
+    border-color: color-mix(in srgb, var(--fg, #cfd6df) 40%, transparent);
+  }
+
   .expand-hint {
     position: absolute; top: 6px; right: 6px;
     font-size: 9px; font-weight: 700; letter-spacing: .06em;
@@ -3582,6 +3605,20 @@ function makeBadge(card, editable=false) {
 
 // ===== Render: compact card (home view) =====
 function renderCardCompact(card) {
+  // #630 — a 'section-header' card is a dated divider (e.g. the first-run
+  // declutter banner in Discarded), not a real work card: render a slim,
+  // non-draggable label and bail before all the drag/modal machinery. Clicking
+  // it still opens the modal (so its origin/explanation is reachable).
+  if ((card.tags || []).includes('section-header')) {
+    const hdr = document.createElement('div');
+    hdr.className = 'card is-section-header';
+    hdr.dataset.cardId = card.id;
+    hdr.dataset.col = card.column;
+    hdr.textContent = card.title || '';
+    if (card.origin) hdr.title = card.origin;
+    hdr.addEventListener('click', () => openModal(card.id));
+    return hdr;
+  }
   const el = document.createElement('div');
   el.className = 'card';
   if (card.priority) el.classList.add('prio-' + card.priority);

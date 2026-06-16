@@ -9,6 +9,22 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.22 — Duplicate-tab fix + first-run declutter (2026-06-16)
+
+- **Duplicate board tabs, eliminated (#122, #150).** `board_autoopen.sh` now serializes
+  concurrent opens with a per-port atomic lock + cooldown stamp (kills the simultaneous
+  "7 tabs at once" burst) and detects an already-open tab durably: `serve.py` exposes
+  `lastSseConnectMs`/`nowMs` in `/health` and the opener treats a tab as present if an SSE
+  client connected within the last 20s — robust to the keepalive flap that used to read
+  `sseClients` as 0 and spawn a spurious tab. Root flap fixed too: the SSE keepalive write in
+  `serve.py._handle_sse` is now wrapped in try/except (was crashing the handler on dropped
+  sockets, flooding the log and dropping the client count).
+- **First-run declutter sweep (#630).** A fresh bootstrap can mint 100+ low-signal `discovered`
+  cards. A deterministic (no-LLM) end-of-replay pass moves cards that are `discovered` AND have
+  no work-type tag (`bug`/`feature`/`refactor`/`enhancement`) AND aren't Done to Discarded under
+  a dated, reversible `🧹 First-run sweep · <date> · N items` header, so a new user lands on a calm
+  board. Runs once at bootstrap, never on recurring recon.
+
 ### 0.9.21 — Per-session pulse + multi-session lost-update fix + adoption README (2026-06-10)
 - **Per-session active-work pulse (#608, `a6471a9`).** `activeWorkId` scalar → `activeWork`
   map `{sessionId:{cardId,ts}}` so N concurrent sessions show N pulsing cards (max one per

@@ -1031,6 +1031,16 @@ def run(project: Path, board: Path, port: int, days: int,
                     n_moved = reconcile_sweep(card_py, board, events)
                     print(f"✓ end-of-replay reconcile: moved {n_moved} card(s)",
                           file=sys.stderr)
+            # #630 — deterministic first-run declutter, AFTER reconcile (which may
+            # have promoted some discovered cards to done/backlog) and while the
+            # replay gate is STILL CLOSED — so a SessionStart recon firing in this
+            # window stands down rather than racing our batch write. Runs exactly
+            # once per bootstrap (this block is gated to fire once); NEVER on the
+            # recurring SessionStart path. Independent of `reconcile`.
+            n_swept = declutter_sweep(card_py, board)
+            if n_swept:
+                print(f"✓ first-run declutter: swept {n_swept} low-signal card(s)",
+                      file=sys.stderr)
         finally:
             # #627: stamp the gate with the partial-failure record. Gate STILL
             # reopens (completed_card_replay=1) so recon isn't stuck (#384), but

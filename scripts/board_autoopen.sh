@@ -32,6 +32,41 @@ open_url="${url}"
 # Don't open a dead URL — the board's server must be live.
 curl -s --max-time 0.4 "${url}/health" >/dev/null 2>&1 || exit 0
 
+# --- Dedupe concurrent / rapid opens (#122) ---------------------------------
+# Two failure modes this guards against:
+#  (1) BURST ("7 tabs at once"): several invocations — multiple session-starts
+#      during bootstrap replay — race the async `open` below. Each queries
+#      Chrome before any open has rendered a visible tab, so ALL of them open.
+#      An atomic mkdir lock lets exactly one proceed; the losers exit.
+#  (2) PERIODIC: a fresh open moments after a real one is suppressed by a short
+#      cooldown stamp, covering the window where the just-opened tab isn't yet
+#      visible to the Chrome/SSE check (SSE keepalive flap, async render).
+state_dir="${HOME}/.board-steward"
+mkdir -p "${state_dir}" 2>/dev/null || true
+stamp="${state_dir}/.opened-${port}"
+lock="${state_dir}/.opening-${port}.lock"
+cooldown=12
+
+# Cooldown: we opened (or tried) very recently → don't open again.
+if [ -f "${stamp}" ]; then
+  now="$(date +%s 2>/dev/null || echo 0)"
+  was="$(stat -f %m "${stamp}" 2>/dev/null || stat -c %Y "${stamp}" 2>/dev/null || echo 0)"
+  [ $(( now - was )) -lt "${cooldown}" ] && exit 0
+fi
+
+# Reap a stale lock (a previous invocation killed before releasing its trap),
+# else a dead lockdir would block every future open forever.
+if [ -d "${lock}" ]; then
+  now="$(date +%s 2>/dev/null || echo 0)"
+  lk="$(stat -f %m "${lock}" 2>/dev/null || stat -c %Y "${lock}" 2>/dev/null || echo 0)"
+  [ $(( now - lk )) -ge 30 ] && rmdir "${lock}" 2>/dev/null || true
+fi
+
+# Lock: serialize the check-and-open so a burst collapses to a single open.
+# mkdir is atomic across processes; the loser exits rather than piling on.
+mkdir "${lock}" 2>/dev/null || exit 0
+trap 'rmdir "${lock}" 2>/dev/null || true' EXIT
+
 # --- Is the board already visible in Chrome? --------------------------------
 # chrome_state: 0=yes (a tab has it → skip), 1=no (open it), 2=unknown (fallback)
 chrome_state=2
@@ -67,14 +102,34 @@ should_open=0
 case "$chrome_state" in
   0) should_open=0 ;;
   1) should_open=1 ;;
-  2) # Unknown → fall back to the old sseClients proxy.
-     sse="$(curl -s --max-time 0.4 "${url}/health" | python3 -c "import sys,json
-try: print(int(json.load(sys.stdin).get('sseClients',0)))
-except Exception: print(0)" 2>/dev/null || echo 0)"
-     [ "${sse:-0}" -eq 0 ] && should_open=1 ;;
+  2) # Unknown (no AppleScript / non-mac) → ask the server. #150: a single
+     # /health read, robust to SSE flaps. A tab is "present" if it has a live SSE
+     # client (sseClients>0) OR one connected within the last 20s — an open board
+     # tab auto-reconnects within ~3s of any flap, so the durable lastSseConnect
+     # age keeps the answer stable where the raw instantaneous count used to blip
+     # to 0 and spawn a duplicate tab. Open only if genuinely no recent viewer
+     # (or /health is unreachable).
+     present="$(curl -s --max-time 0.6 "${url}/health" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    n = int(d.get('sseClients', 0) or 0)
+    now = int(d.get('nowMs', 0) or 0)
+    last = int(d.get('lastSseConnectMs', 0) or 0)
+    fresh = bool(now and last and (now - last) < 20000)
+    print('1' if (n > 0 or fresh) else '0')
+except Exception:
+    print('0')
+" 2>/dev/null || echo 0)"
+     [ "${present:-0}" != "1" ] && should_open=1 ;;
 esac
 
 [ "$should_open" -eq 1 ] || exit 0
+
+# Arm the cooldown (#122): stamp NOW, before the async `open`, so any invocation
+# in the next ${cooldown}s — while this tab is still rendering and not yet
+# visible to the Chrome/SSE check — sees a fresh stamp and skips.
+touch "${stamp}" 2>/dev/null || true
 
 # Sweep stale #367 open-stamps for this project, then open (prefer Chrome).
 [ -n "$project_dir" ] && rm -f "${project_dir}"/board/.opened-* 2>/dev/null
