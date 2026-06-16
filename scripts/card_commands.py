@@ -254,13 +254,11 @@ def _now_ms():
 
 
 def _session_id():
-    """Identify the calling session so its pulse is independent of other sessions.
-    A Bash tool call inside a Claude Code session exposes CLAUDE_CODE_SESSION_ID.
-    Automation (recon/e2e/sim/replay — they set BOARD_SKIP_DECOMPOSE_CHECK) shares
-    one synthetic '_auto' slot; a bare manual CLI run falls back to '_cli'."""
-    if os.environ.get("BOARD_SKIP_DECOMPOSE_CHECK") == "1":
-        return "_auto"
-    return os.environ.get("CLAUDE_CODE_SESSION_ID") or "_cli"
+    """Calling-session identity for per-session pulses (activeWork). Delegates to
+    port_registry.session_id() — the single source of truth shared with last-active
+    routing — so the pulse key and the routing key can never diverge (#633)."""
+    import port_registry
+    return port_registry.session_id()
 
 
 def _migrate_active_work(d, now_ms):

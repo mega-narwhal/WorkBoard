@@ -195,17 +195,23 @@ def assign(board_dir: str | os.PathLike, preferred: int | None = None,
     else the lowest free port from `lo` upward. GCs designations whose board dir
     no longer exists so the window doesn't fill with dead projects."""
     key = str(Path(board_dir).resolve())
-    a = {k: v for k, v in assignments().items() if Path(k).exists()}
-    if key in a:
-        port = int(a[key])
-    else:
-        taken = {int(v) for v in a.values()}
-        if preferred is not None and lo <= preferred <= hi and preferred not in taken:
-            port = int(preferred)
+    # #633 — the read→scan→write below is a TOCTOU race: two sessions first-touching
+    # DIFFERENT new boards concurrently both read the map as empty and pick the SAME
+    # lowest-free port → collision. Serialize the RMW on the assignments lock and
+    # re-read INSIDE it so the port scan sees committed designations. Best-effort
+    # (degrades to the old unlocked behaviour on lock timeout).
+    with _file_lock(assignments_path().with_suffix(".lock")):
+        a = {k: v for k, v in assignments().items() if Path(k).exists()}
+        if key in a:
+            port = int(a[key])
         else:
-            port = next((p for p in range(lo, hi + 1) if p not in taken), lo)
-        a[key] = port
-    _atomic_write_json(assignments_path(), a)
+            taken = {int(v) for v in a.values()}
+            if preferred is not None and lo <= preferred <= hi and preferred not in taken:
+                port = int(preferred)
+            else:
+                port = next((p for p in range(lo, hi + 1) if p not in taken), lo)
+            a[key] = port
+        _atomic_write_json(assignments_path(), a)
     return port
 
 
@@ -214,27 +220,30 @@ def set_port(board_dir: str | os.PathLike, port: int) -> None:
     Used after a bind to record the port that actually came up (e.g. when the
     preferred designation was held by a stray process and we walked forward)."""
     key = str(Path(board_dir).resolve())
-    a = {k: v for k, v in assignments().items() if Path(k).exists()}
-    a[key] = int(port)
-    _atomic_write_json(assignments_path(), a)
+    with _file_lock(assignments_path().with_suffix(".lock")):  # #633 — same RMW race as assign()
+        a = {k: v for k, v in assignments().items() if Path(k).exists()}
+        a[key] = int(port)
+        _atomic_write_json(assignments_path(), a)
 
 
 _ACTIVE_KEEP = 32  # cap on the per-session map (size, not age — never evict a live session)
 
 
 @contextlib.contextmanager
-def _active_lock(timeout: float = 1.0):
-    """Best-effort cross-process lock for the last-active read-modify-write.
+def _file_lock(lock_path, timeout: float = 1.0):
+    """Best-effort cross-process exclusive lock keyed on `lock_path`.
 
-    #611 — set_active does read→modify→write of a SHARED file from many sessions;
-    without a lock two writers race and one session's entry is lost (the exact
-    clobber this fix exists to kill). Mirrors _boardio.board_lock's proven flock
-    pattern but is inlined (port_registry is imported by lightweight hook
-    one-liners and must not pull in _boardio's backup machinery). Yields True if
-    acquired; on timeout yields False and the caller proceeds ANYWAY — degrading
-    to the old lossy behaviour beats blocking or raising inside a never-raise
-    write. The lock file is tiny and writes are sub-ms, so contention is rare."""
-    lock_path = active_path().with_suffix(".lock")
+    Mirrors _boardio.board_lock's proven flock pattern but is inlined here so
+    port_registry (imported by lightweight hook one-liners) needn't pull in
+    _boardio's backup machinery. Used to serialize read→modify→write of the
+    SHARED registry files where two writers would otherwise lose each other's
+    entry — last-active sessions (#611) and port designations (#633 assign()
+    TOCTOU). Yields True if acquired; on timeout yields False and the caller
+    proceeds ANYWAY (degrading to lossy beats blocking or raising inside a
+    never-raise write). Lock files are tiny and writes sub-ms, so contention is
+    rare. Also re-usable cross-module (e.g. _hook_stop_recon's recon_pending
+    merge) — pass any lock path."""
+    lock_path = Path(lock_path)
     f = None
     acquired = False
     try:
@@ -267,6 +276,28 @@ def _active_lock(timeout: float = 1.0):
                 except OSError:
                     pass
             f.close()
+
+
+def _active_lock(timeout: float = 1.0):
+    """Back-compat thin wrapper: the last-active file's lock (#611)."""
+    return _file_lock(active_path().with_suffix(".lock"), timeout)
+
+
+def session_id() -> str:
+    """Canonical identity of the calling session — the SINGLE source of truth for
+    session-scoped routing (last-active) and pulses (activeWork).
+
+    Lives here, in the owner of all cross-board state, so the WRITE side
+    (card.py _mark_active → set_active) and the READ side (card_state.find_board →
+    get_active) key by the EXACT same value. Splitting it (raw env on read, this
+    on write) silently broke session routing for every automation path (#633
+    review). A Bash tool call in a Claude Code session exposes
+    CLAUDE_CODE_SESSION_ID; automation (recon/e2e/sim/replay — they set
+    BOARD_SKIP_DECOMPOSE_CHECK) shares one synthetic '_auto' slot; a bare manual
+    CLI run falls back to '_cli'."""
+    if os.environ.get("BOARD_SKIP_DECOMPOSE_CHECK") == "1":
+        return "_auto"
+    return os.environ.get("CLAUDE_CODE_SESSION_ID") or "_cli"
 
 
 def _read_active() -> dict:
@@ -321,11 +352,12 @@ def set_active(board_dir: str | os.PathLike, session_id: str | None = None) -> N
     / bootstrap that triggered it. The read-modify-write runs under a best-effort
     flock so distinct-session entries survive concurrent writers.
 
-    NOTE: callers pass card_commands._session_id(), which collapses a bare CLI
-    run to "_cli" and all automation (recon/e2e/sim) to "_auto" — those are
-    intentionally COARSE shared slots: two concurrent "_auto" runs can still
-    clobber each other's slot, but real human sessions get distinct ids, which is
-    the case #611 targets, and `global` is always written regardless."""
+    NOTE: callers pass session_id() (this module) — the SAME identity the read
+    side resolves by — which collapses a bare CLI run to "_cli" and all automation
+    (recon/e2e/sim) to "_auto". Those are intentionally COARSE shared slots: two
+    concurrent "_auto" runs can still clobber each other's slot, but real human
+    sessions get distinct ids, which is the case #611 targets, and `global` is
+    always written regardless."""
     try:
         key = str(Path(board_dir).resolve())
         now = _now_iso()

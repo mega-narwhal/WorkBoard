@@ -63,11 +63,12 @@ def find_board(explicit: Path | None) -> Path:
     try:
         import port_registry
         # #611 — resolve THIS session's active board (not whichever board another
-        # concurrent session touched last). Read the env directly to keep
-        # card_state import-light; a missing id falls back to `global`, the
+        # concurrent session touched last). MUST use the same identity the WRITE
+        # side (_mark_active → set_active) keys by — port_registry.session_id() —
+        # or automation (_auto) writes and raw-env reads disagree and routing
+        # silently falls back to global (#633 review). Missing id → global, the
         # correct default for an out-of-session call.
-        sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
-        active = port_registry.get_active(sid)
+        active = port_registry.get_active(port_registry.session_id())
         if active:
             c = Path(active) / "board.json"
             if c.is_file():

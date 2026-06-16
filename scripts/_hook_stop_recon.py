@@ -386,6 +386,80 @@ def detect_batched(cards: list, since) -> list:
     return out
 
 
+def _union_str(a, b) -> list:
+    """Order-preserving union of two string lists (dedup)."""
+    seen, out = set(), []
+    for x in list(a or []) + list(b or []):
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def _union_by_num(a, b) -> list:
+    """Union of two lists of {num,...} dicts, deduped by num (fallback: identity)."""
+    out, keys = [], set()
+    for x in list(a or []) + list(b or []):
+        n = x.get("num") if isinstance(x, dict) else None
+        key = ("n", n) if n is not None else ("j", json.dumps(x, sort_keys=True, default=str))
+        if key not in keys:
+            keys.add(key)
+            out.append(x)
+    return out
+
+
+def _write_recon_pending(board_path: Path, payload_out: dict) -> None:
+    """Write board/recon_pending.json, MERGING with any note a CONCURRENT session
+    already left (#633) so neither session's reasons are lost.
+
+    Two sessions ending on the SAME board near-simultaneously both wrote this file
+    with a bare `.write_text()` → last-writer-wins clobbered the other's recon
+    note. Now: serialize on a per-board lock (reuse port_registry._file_lock) and,
+    if an existing note is from a DIFFERENT session, union the reasons / inprogress
+    / batched (deduped) and accumulate a `sessions` list. Atomic (tmp+replace) so a
+    reader never sees a torn file. Best-effort — a Stop hook must never raise."""
+    target = board_path.parent / "recon_pending.json"
+    sid = payload_out.get("session_id")
+    base = dict(payload_out)
+    base["sessions"] = [sid] if sid else []
+
+    def _do() -> None:
+        try:
+            prev = json.loads(target.read_text()) if target.exists() else None
+        except Exception:
+            prev = None
+        out = base
+        # Merge whenever a DIFFERENT identity's note is already pending; only a
+        # re-write by the SAME session replaces its own contribution. Using `!= sid`
+        # (not `not in (None, sid)`) so a prior note with a missing/None session_id
+        # is still merged, not clobbered (#633 review).
+        if isinstance(prev, dict) and prev.get("session_id") != sid:
+            out = dict(base)
+            out["reasons"] = _union_str(prev.get("reasons"), base.get("reasons"))
+            out["inprogress"] = _union_by_num(prev.get("inprogress"), base.get("inprogress"))
+            out["batched"] = _union_by_num(prev.get("batched"), base.get("batched"))
+            prev_sessions = prev.get("sessions") or (
+                [prev.get("session_id")] if prev.get("session_id") else [])
+            out["sessions"] = _union_str(prev_sessions, base["sessions"])
+        try:
+            tmp = target.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(out, indent=2, ensure_ascii=False))
+            os.replace(tmp, target)
+        except OSError:
+            pass
+
+    try:
+        import port_registry as _pr
+        with _pr._file_lock(board_path.parent / ".recon_pending.lock"):
+            _do()
+    except Exception:
+        # Lock unavailable (import/fs failure) → still write best-effort, unlocked.
+        try:
+            _do()
+        except Exception:
+            pass
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -542,11 +616,7 @@ def main() -> int:
         "batched": [{"num": c.get("num"), "title": c.get("title"),
                      "why": why} for c, why in batched],
     }
-    try:
-        (board_path.parent / "recon_pending.json").write_text(
-            json.dumps(payload_out, indent=2, ensure_ascii=False))
-    except OSError:
-        pass
+    _write_recon_pending(board_path, payload_out)
 
     # BLOCKING backstop — ADVISORY BY DEFAULT (#592). The recon_pending.json note
     # above is always written, so a genuine un-carded miss is caught at the NEXT

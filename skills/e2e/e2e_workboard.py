@@ -31,6 +31,7 @@ EXTENDING (for the NEXT overhaul)
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import shutil
@@ -202,6 +203,161 @@ def test_multiboard_concurrent_sessions(ctx: Ctx):
     ctx.assert_eq("multiboard.concurrent: global → last writer (B)",
                   Path(pr.get_active()).resolve(), B.parent.resolve())
     os.environ.pop("BOARD_NO_SERVER", None)
+
+
+# ───────────────────── concurrency stress (#633) ─────────────────────
+# TRUE parallelism via real subprocesses. flock serializes across PROCESSES (not
+# same-process threads), so every test spawns subprocesses; ThreadPoolExecutor
+# just lets the parent block on each concurrently. BOARD_NO_SERVER=1 forces the
+# direct-write path so writes contend on _boardio.board_lock (no server needed).
+
+def _parallel(fns: list, max_workers: int | None = None) -> list:
+    """Run thunks concurrently, return results in submission order."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers or len(fns)) as ex:
+        return [f.result() for f in [ex.submit(fn) for fn in fns]]
+
+
+def _add_proc(board: Path, title: str, sid: str):
+    """A single `card.py add` as an independent session (own CLAUDE_CODE_SESSION_ID)."""
+    env = dict(os.environ, CLAUDE_CODE_SESSION_ID=sid, BOARD_NO_SERVER="1")
+    env.pop("BOARD_SKIP_DECOMPOSE_CHECK", None)  # keep distinct session slots (not _auto)
+    return subprocess.run([sys.executable, str(CARD_PY), "add", "--board", str(board),
+                           "--title", title, "--column", "task"],
+                          capture_output=True, text=True, timeout=30, env=env).returncode
+
+
+def test_concurrent_same_board(ctx: Ctx):
+    """N sessions add to the SAME board at once → no lost update (CAS/flock holds)."""
+    os.environ["BOARD_NO_SERVER"] = "1"
+    N = 12
+    bj = ctx.board([])
+    base_rev = json.loads(bj.read_text())["rev"]
+    rcs = _parallel([(lambda i=i: _add_proc(bj, f"concurrent card {i}", f"same-{i}"))
+                     for i in range(N)])
+    d = json.loads(bj.read_text())
+    titles = [c["title"] for c in d["cards"]]
+    ctx.assert_eq("concurrent.same: all procs ok", all(rc == 0 for rc in rcs), True)
+    ctx.assert_eq("concurrent.same: no lost card (count==N)", len(d["cards"]), N)
+    ctx.assert_eq("concurrent.same: titles unique (no dup/overwrite)",
+                  len(set(titles)), N)
+    ctx.assert_eq("concurrent.same: rev advanced by N", d["rev"] - base_rev, N)
+    os.environ.pop("BOARD_NO_SERVER", None)
+
+
+def test_concurrent_different_boards(ctx: Ctx):
+    """N sessions each on its OWN board, in parallel → each card lands on its own
+    board (no cross-pollution) and the #611 flock keeps EVERY session's last-active
+    entry (no clobber under real concurrent set_active)."""
+    os.environ["BOARD_NO_SERVER"] = "1"
+    N = 8
+    boards = [ctx.board([]) for _ in range(N)]
+    rcs = _parallel([(lambda i=i: _add_proc(boards[i], f"own card {i}", f"diff-{i}"))
+                     for i in range(N)])
+    ctx.assert_eq("concurrent.diff: all procs ok", all(rc == 0 for rc in rcs), True)
+    isolated = all(
+        [c["title"] for c in json.loads(boards[i].read_text())["cards"]] == [f"own card {i}"]
+        for i in range(N))
+    ctx.assert_eq("concurrent.diff: each card on its own board only", isolated, True)
+    import importlib, port_registry as pr; importlib.reload(pr)
+    routed = {i: Path(pr.get_active(f"diff-{i}") or "/∅").resolve() == boards[i].parent.resolve()
+              for i in range(N)}
+    ctx.assert_eq("concurrent.diff: every session routes to its own board (flock held)",
+                  all(routed.values()), True)
+
+
+def test_concurrent_mixed(ctx: Ctx):
+    """Mixed: several sessions share 2 boards while others are solo → per-board card
+    counts exact and every session resolves the board it actually wrote."""
+    os.environ["BOARD_NO_SERVER"] = "1"
+    A = ctx.board([]); B = ctx.board([]); C = ctx.board([])
+    # (board, session_id) work items: 3 on A, 2 on B, 1 on C — all at once.
+    work = [(A, "mix-a0"), (A, "mix-a1"), (A, "mix-a2"),
+            (B, "mix-b0"), (B, "mix-b1"), (C, "mix-c0")]
+    rcs = _parallel([(lambda bj=bj, sid=sid: _add_proc(bj, f"{sid} card", sid))
+                     for bj, sid in work])
+    ctx.assert_eq("concurrent.mixed: all procs ok", all(rc == 0 for rc in rcs), True)
+    ctx.assert_eq("concurrent.mixed: A has 3", len(json.loads(A.read_text())["cards"]), 3)
+    ctx.assert_eq("concurrent.mixed: B has 2", len(json.loads(B.read_text())["cards"]), 2)
+    ctx.assert_eq("concurrent.mixed: C has 1", len(json.loads(C.read_text())["cards"]), 1)
+    import importlib, port_registry as pr; importlib.reload(pr)
+    want = {sid: bj.parent.resolve() for bj, sid in work}
+    routed = all(Path(pr.get_active(sid) or "/∅").resolve() == want[sid] for _, sid in work)
+    ctx.assert_eq("concurrent.mixed: every session routes correctly", routed, True)
+
+
+def test_session_key_consistency(ctx: Ctx):
+    """#633 review — the WRITE key (_mark_active → set_active) and the READ key
+    (find_board → get_active) must be the SAME identity, or automation paths
+    (BOARD_SKIP_DECOMPOSE_CHECK=1 → '_auto') write under one key and read under
+    another and routing silently falls to global. Exercise the real card.py write
+    (which stamps last-active) then resolve via find_board's logic from $HOME."""
+    import importlib, port_registry as pr; importlib.reload(pr)
+    bj = ctx.board([])
+    # Automation context: BOTH the write (card.py _mark_active) and a read must key '_auto'.
+    env = dict(os.environ, BOARD_SKIP_DECOMPOSE_CHECK="1", BOARD_NO_SERVER="1")
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    subprocess.run([sys.executable, str(CARD_PY), "add", "--board", str(bj),
+                    "--title", "auto card", "--column", "task"],
+                   capture_output=True, text=True, timeout=20, env=env)
+    # find_board reads via port_registry.session_id(); replicate that identity here.
+    os.environ["BOARD_SKIP_DECOMPOSE_CHECK"] = "1"
+    os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+    ctx.assert_eq("session-key: identity is _auto under automation", pr.session_id(), "_auto")
+    ctx.assert_eq("session-key: write key == read key (resolves own board, not global)",
+                  Path(pr.get_active(pr.session_id()) or "/∅").resolve(), bj.parent.resolve())
+    os.environ.pop("BOARD_SKIP_DECOMPOSE_CHECK", None)
+    os.environ.pop("BOARD_NO_SERVER", None)
+
+
+def test_concurrent_port_assign(ctx: Ctx):
+    """#633 — N sessions first-touching N DISTINCT new boards concurrently must get
+    N DISTINCT ports. Pre-fix the unlocked assign() TOCTOU collided them. Uses
+    subprocesses (flock is cross-process, not cross-thread)."""
+    N = 16
+    projs = [tempfile.mkdtemp(prefix="e2e-port-") for _ in range(N)]
+    ctx._tmp.extend(projs)
+    def _assign(p):
+        bd = str(Path(p) / "board")
+        os.makedirs(bd, exist_ok=True)
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "import sys;sys.path.insert(0,sys.argv[1]);import port_registry as pr;"
+             "print(pr.assign(sys.argv[2]))", str(SCRIPTS), bd],
+            capture_output=True, text=True, timeout=30, env=dict(os.environ)).stdout.strip()
+        return int(out) if out.isdigit() else -1
+    ports = _parallel([(lambda p=p: _assign(p)) for p in projs])
+    ctx.assert_eq("concurrent.port: no assign failed", all(p > 0 for p in ports), True)
+    ctx.assert_eq("concurrent.port: N distinct ports (no collision)",
+                  len(set(ports)), N)
+
+
+def test_concurrent_recon_pending(ctx: Ctx):
+    """#633 — two sessions ending on the SAME board concurrently must not clobber
+    each other's recon note; the merge unions both sessions' reasons."""
+    bj = ctx.board([])
+    bdir = bj.parent
+    def _recon(sid, reason):
+        payload = {"session_id": sid, "source": "stop_recon", "board": str(bj),
+                   "reasons": [reason], "inprogress": [], "batched": []}
+        return subprocess.run(
+            [sys.executable, "-c",
+             "import sys,json;sys.path.insert(0,sys.argv[1]);"
+             "import _hook_stop_recon as h;from pathlib import Path;"
+             "h._write_recon_pending(Path(sys.argv[2]), json.loads(sys.argv[3]))",
+             str(SCRIPTS), str(bj), json.dumps(payload)],
+            capture_output=True, text=True, timeout=30, env=dict(os.environ)).returncode
+    _parallel([(lambda: _recon("recon-A", "reason from session A")),
+               (lambda: _recon("recon-B", "reason from session B"))])
+    rp = bdir / "recon_pending.json"
+    ctx.assert_eq("concurrent.recon: file written", rp.exists(), True)
+    merged = json.loads(rp.read_text()) if rp.exists() else {}
+    reasons = merged.get("reasons", [])
+    ctx.assert_eq("concurrent.recon: session A reason kept",
+                  "reason from session A" in reasons, True)
+    ctx.assert_eq("concurrent.recon: session B reason kept (no clobber)",
+                  "reason from session B" in reasons, True)
+    ctx.assert_eq("concurrent.recon: both sessions recorded",
+                  set(merged.get("sessions", [])) == {"recon-A", "recon-B"}, True)
 
 
 # ───────────────────────── recon tests (free) ─────────────────────────
@@ -386,6 +542,9 @@ def test_review_backfill_emit_stamp(ctx: Ctx):
 GROUPS = {
     "multiboard": [test_multiboard_routing_isolation, test_multiboard_disambiguation,
                    test_multiboard_concurrent_sessions],
+    "concurrency": [test_concurrent_same_board, test_concurrent_different_boards,
+                    test_concurrent_mixed, test_session_key_consistency,
+                    test_concurrent_port_assign, test_concurrent_recon_pending],
     "recon": [test_recon_only_discovered_flag, test_recon_gates_short_circuit,
               test_recon_replay_gate, test_recon_claudecode_path],
     "review-backfill": [test_review_backfill_detect_extract, test_review_backfill_emit_stamp],
@@ -405,7 +564,8 @@ def main(argv: list[str]) -> int:
 
     selected: list = []
     if group == "all":
-        selected = GROUPS["multiboard"] + GROUPS["recon"] + GROUPS["review-backfill"]
+        selected = (GROUPS["multiboard"] + GROUPS["concurrency"]
+                    + GROUPS["recon"] + GROUPS["review-backfill"])
         if "--haiku" in flags:
             selected += GROUPS["recon-haiku"]
     elif group in GROUPS:
