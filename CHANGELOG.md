@@ -9,6 +9,24 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.25 — First-run declutter: faster, HUD-correct, settles in place (#155/#156/#157) (2026-06-17)
+
+- **Declutter glides at 45ms/card (#155)** instead of the inherited 400ms `--pause-ms`
+  default + a 250ms loop dwell (~0.65s/card). A `_DECLUTTER_PACE_MS=45` constant drives
+  the single fly call; the separate loop sleep is gone. A 12-item sweep's dwell drops
+  from ~7.8s to ~0.5s.
+- **The bootstrap HUD stays up until declutter finishes, and its count tallies both
+  phases (#156).** Previously `reconcile_sweep` emitted the `final` HUD event (→ ✓ COMPLETE
+  + auto-hide) before `declutter_sweep` ran, so the HUD vanished mid-sweep and the count
+  was reconcile-only. `reconcile_sweep` gained `final_hud` (bootstrap passes `False`);
+  declutter shows a "tidying N…" line; and `run()` emits the single combined final —
+  "✓ (reconcile + declutter) card(s) brought up to date" — once, after declutter.
+- **The 🧹 First-run sweep header settles above its swept cards live (#157).** During the
+  one-by-one declutter the header sinks as cards glide in on top of it (only a refresh
+  fixed it). The end-of-bootstrap `flipResort` now runs FIRST so the header glides into
+  place, then the ✓ COMPLETE HUD shows once the sort settles — so the final HUD is the
+  genuine last step.
+
 ### 0.9.24 — Drop the HUD "still working" tick + dedupe bootstrap harvest (#121) (2026-06-16)
 
 - **Removed the "still working… mm:ss" HUD tick (reverts #638).** The BOARD-SYNC HUD
