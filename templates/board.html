@@ -3416,28 +3416,16 @@ function pushUndo() {
   if (_undoStack.length > _UNDO_CAP) _undoStack.shift();
   _redoStack.length = 0;
 }
-// #610 — undo/redo restore a whole-state snapshot and POST it last-writer-wins
-// (browser stays LWW by design, #609). If another session advanced the board since
-// we last synced, applying the snapshot silently clobbers their work. Light-touch
-// guard: probe the cheap /rev BEFORE restoring; if it moved past our lastRev, confirm
-// (default = cancel). Probe failure → proceed (never block undo when /rev is down).
-async function _confirmRestoreIfBoardMoved(action) {
-  try {
-    const r = await fetch(REV_URL, { cache: 'no-store' });
-    if (r.ok) {
-      const j = await r.json();
-      if ((j.rev || 0) !== lastRev) {
-        return window.confirm(
-          'Board changed in another session — ' + action +
-          ' may overwrite their work. Proceed?');
-      }
-    }
-  } catch (_) { /* /rev down → don't block undo */ }
-  return true;
-}
+// #610 — the undo/redo "Board changed in another session — may overwrite their
+// work. Proceed?" window.confirm was REMOVED: it probed /rev and fired on ANY rev
+// delta, but the agent's own card.py writes bump rev constantly, so it false-fired
+// on nearly every Cmd/Ctrl+Z (worse with multiple ?sid sessions). The board is
+// last-writer-wins by design (#609) and undo is reversible (it pushes the prior
+// state onto the redo stack), so the guard was belt-and-suspenders, not load-
+// bearing — auto-accept to kill the popup. (Dropping it also removes a per-undo
+// /rev fetch.)
 async function undo() {
   if (!_undoStack.length) { toast('Nothing to undo'); return; }
-  if (!(await _confirmRestoreIfBoardMoved('undo'))) return;   // #610
   // Blur any focused editor so its post-edit state isn't re-committed onto
   // the restored snapshot.
   if (document.activeElement && document.activeElement.blur) {
@@ -3476,7 +3464,6 @@ function _tagRestoreMoves(snap, via) {
 }
 async function redo() {
   if (!_redoStack.length) { toast('Nothing to redo'); return; }
-  if (!(await _confirmRestoreIfBoardMoved('redo'))) return;   // #610
   if (document.activeElement && document.activeElement.blur) {
     try { document.activeElement.blur(); } catch (_) {}
   }
@@ -3516,6 +3503,23 @@ document.addEventListener('keydown', e => {
     const sel = window.getSelection && window.getSelection();
     if (sel && sel.removeAllRanges) sel.removeAllRanges();
   }
+}, true);
+// #659 — clicking a column title (a contentEditable) focuses it and, once you
+// drag-select, leaves a blue text-selection the browser won't clear on the next
+// click: the card/column mousedown handlers preventDefault (same root as #555),
+// so a background click never collapses it — you had to open+close a card to
+// reset. On any mousedown OUTSIDE the currently-focused editable, blur it (its
+// own blur handler commits the rename) and clear the stray selection, so clicking
+// the background returns the title to normal. Capture phase so we run before the
+// drag handlers swallow the event; scoped to only fire when an editable is
+// actually focused, so normal text-selection elsewhere is untouched.
+document.addEventListener('mousedown', e => {
+  const a = document.activeElement;
+  if (!a || !a.isContentEditable) return;   // nothing focused → nothing to clear
+  if (a.contains(e.target)) return;         // click inside the field → leave it be
+  a.blur();                                 // commit + un-focus the title
+  const sel = window.getSelection && window.getSelection();
+  if (sel && sel.removeAllRanges) sel.removeAllRanges();
 }, true);
 let _pollTick = 0;
 function startPoll() {
@@ -6919,10 +6923,22 @@ function startSSE() {
       // "done>=total" — a stage hitting 100% (replay/speedup/solo) is NOT the end,
       // it hands off to the next stage on the SAME HUD (no flash/disappear/race).
       if (d.final) {
+        // #385 — CONSUME the bootstrap-fill flag on EVERY final, not only inside
+        // the reconcile branch below. The old code reset it solely when
+        // `phase==='reconcile' && _bootstrapFillSeen`, so a fill whose final was a
+        // non-reconcile phase (e.g. a solo fill with no reconcile) left the flag
+        // stuck true → a later STANDALONE live recon (same un-reloaded page) was
+        // then misclassified as a bootstrap and fired a spurious full-board
+        // flipResort. Capture the value, then clear unconditionally so it can never
+        // outlive the run that set it. (Residual: a reconcile that ABNORMALLY bails
+        // emitting zero `final` can't be cleared here — that needs the backend
+        // `after_fill` signal; tracked as a follow-up.)
+        const afterBootstrapFill = _bootstrapFillSeen;
+        _bootstrapFillSeen = false;
         // #92/#601 — after bootstrap fill (and after reconcile, if any): glide
         // every card into time order with the SAME animated FLIP sort as the
         // ⇅ Sort Time button (flipResort). One unified effect — no silent snap.
-        if (d.phase === 'reconcile' && _bootstrapFillSeen) {
+        if (d.phase === 'reconcile' && afterBootstrapFill) {
           // #157 — this is the END of the whole bootstrap (reconcile + declutter).
           // SORT FIRST so the 🧹 First-run sweep header settles above its swept
           // cards (during the live one-by-one declutter the header sinks as cards
@@ -6930,7 +6946,6 @@ function startSSE() {
           // ✓ COMPLETE HUD once sorting has glided into place — so final_hud is the
           // true last step. By the time this `final` event arrives, SSE ordering
           // guarantees every declutter card-move is already in the DOM.
-          _bootstrapFillSeen = false;
           flipResort();
           setTimeout(() => BoardLoadHUD.done(d.label, d.phase), 750);  // ✓ after the sort settles
         } else {
