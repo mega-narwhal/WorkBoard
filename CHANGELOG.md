@@ -9,6 +9,22 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.30 — Calendar filter logic + header overlap fix (#722/#731) (2026-06-17)
+
+- **Calendar filters now AND between groups, OR within a group (#722).** The
+  filter chips were a flat OR, so selecting *Done + Critical* surfaced every
+  done card plus every open-critical card — the Critical chip looked like it
+  didn't register. Now status (`done`/`open`) and priority
+  (`critical`/`mid`/`low`) are separate groups: OR within a group, AND between
+  them, so *Done + Critical* shows only done-critical cards. Centralized in one
+  `_calCardMatchesFilter()` helper; dropped the quirky `column !== done` guard
+  so Critical alone now includes done cards too.
+- **Header title no longer overlaps the toolbar buttons on narrow windows
+  (#731).** The dead-center absolutely-positioned title floated on top of the
+  right-side buttons once the window got narrow. Below 860px the title now
+  drops into normal flow, left-aligns, and ellipsis-truncates instead of
+  colliding; wide screens keep the centered look.
+
 ### 0.9.29 — Priority chip first-click fix (#683) (2026-06-17)
 
 - **Priority chip cycles on a single click again (#683).** The `unset → C → M

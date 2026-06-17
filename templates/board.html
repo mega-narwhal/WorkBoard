@@ -68,6 +68,19 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   header h1:hover { background: rgba(217,119,87,.10); }
+  /* #731 — the absolutely-centered title floats on top of the right-side
+     buttons and overlaps them once the window gets narrow. Below a breakpoint,
+     drop the title out of absolute-center and let it be a normal flex item on
+     the LEFT: it then shares the row with the buttons (spacer pushes them
+     right) and ellipsis-truncates instead of colliding. Wide screens keep the
+     dead-center look. */
+  @media (max-width: 860px) {
+    header .title-wrap {
+      position: static; transform: none; left: auto; top: auto;
+      max-width: none; min-width: 0; flex: 0 1 auto; z-index: auto;
+    }
+    header h1 { min-width: 0; }   /* let the h1 ellipsis engage inside the flex item */
+  }
   header h1[contenteditable="true"] {
     cursor: text; background: rgba(217,119,87,.10);
     outline: 1px solid var(--accent); outline-offset: 2px;
