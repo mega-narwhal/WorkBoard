@@ -9,6 +9,21 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.29 — Priority chip first-click fix (#683) (2026-06-17)
+
+- **Priority chip cycles on a single click again (#683).** The `unset → C → M
+  → L → unset` cycle in `makePrioChip` was correct, but `handleCardUpdated`'s
+  unconditional `Object.assign(state.cards[idx], card)` ran on every SSE
+  `card-updated` event, including those arriving during the 400 ms
+  `scheduleSave` debounce after a local click. If the server's payload carried
+  the pre-click priority, the merge reverted the local change — looking like
+  "first click did nothing." Fix mirrors the existing `_localMoveLog` precedent
+  (#518): a per-card `_localEditLog` timestamp lets `handleCardUpdated` strip
+  `priority` from the incoming payload for 2 seconds after a local click;
+  other fields merge normally. The in-place re-render now reads from merged
+  `state.cards[idx]` instead of the raw SSE payload, so the protected priority
+  isn't visually re-painted with the stale server value.
+
 ### 0.9.28 — README showcase + Apache-2.0 license + small UX fixes (2026-06-17)
 
 - **License: MIT → Apache-2.0.** Deliberate switch for a primitive that
