@@ -8,8 +8,9 @@
 
 ![Version](https://img.shields.io/badge/version-0.9.27-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![For Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2) ![Runs locally](https://img.shields.io/badge/runs-100%25%20local-success) ![No account](https://img.shields.io/badge/account-none-lightgrey)
 
-<!-- Drop a screenshot or GIF of the live board here: docs/assets/board-screenshot.png -->
-<!-- ![The WorkBoard live board](docs/assets/board-screenshot.png) -->
+![Watch a fresh board fill itself — History Replay flying past work onto the board on install](docs/assets/workflow-bootstrap.gif)
+
+<sub>↑ A fresh install: the board mines your past Claude Code sessions and flies them on as cards — `task → in-progress → done`. You open the board on day one and *already see your recent work*.</sub>
 
 </div>
 
@@ -48,6 +49,10 @@ This is the headline. Four Claude Code hooks keep the agent honest in real time,
 | **Stop** | agent ends its turn | Made real edits but ran no `card.py`? It records the gap so the next session reconciles it. Advisory by default (0 tokens, invisible); opt-in strict mode forces same-turn carding. |
 
 The net effect: **the user never has to ask "did you update the board?"** — and that question is the exact failure mode the whole project exists to kill.
+
+![A card pulsating in the In Progress column — at a glance, you can see which task Claude is currently working on](docs/assets/inprogress-pulsating.gif)
+
+<sub>↑ The active card *throbs* in In Progress, so you always know which task Claude is on right now — even with multiple sessions running at once, each has its own pulse.</sub>
 
 ### 🔗 Just say *"Do #123."*
 Every card has a number. Reference it any time — today, next week, next month — and Claude picks the work up exactly where it left off. No re-explaining context.
