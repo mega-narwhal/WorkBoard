@@ -617,8 +617,11 @@ def declutter_sweep(card_py: Path, board: Path, today: str | None = None) -> int
       • none of {bug,feature,refactor,enhancement} in tags — no real work-type.
       • column not in {done, discarded} — never touch shipped/already-discarded.
     Sweeps EVERY other non-Done column (task/backlog/inprogress/notes/…). Inserts
-    one '🧹 First-run sweep · <date> · N items' header card at the top of
-    Discarded. Returns the number of cards swept (0 if none / on any error).
+    one '🧹 First-run sweep · <date>' header card at the top of Discarded.
+    (#50 — the '· N items' count was dropped: it confused users who suspected
+    the divider was counting itself, and the count adds no value on a divider
+    whose swept cards sit immediately below it.) Returns the number of cards
+    swept (0 if none / on any error).
 
     GATE: the ONLY caller is the bootstrap end-of-replay block (hourly_extractor),
     which invokes this exactly ONCE while the replay gate is still closed — NOT on
@@ -661,7 +664,7 @@ def declutter_sweep(card_py: Path, board: Path, today: str | None = None) -> int
     try:
         subprocess.run(
             [py, str(card_py), "--board", str(board), "add",
-             "--title", f"🧹 First-run sweep · {date_str} · {len(victims)} items",
+             "--title", f"🧹 First-run sweep · {date_str}",
              "--column", "discarded", "--tag", "section-header",
              "--force", "--no-auto-urgent",
              "--origin", "Auto: first-run declutter (#630) — low-signal "
