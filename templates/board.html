@@ -2862,6 +2862,21 @@ function commitCardDrag() {
     }
   }
   state.cards.splice(insertIdx, 0, card);
+  // #653 — dropping into a date-grouped Done day that's COLLAPSED leaves the card
+  // wherever it was dropped (outside its group) with the day still folded. Expand
+  // the card's day and re-render so it lands under its date header. Only this case
+  // renders; normal drops keep the glide-preserving no-render path below.
+  if (targetCol === 'done') {
+    const _dts = _doneGroupTs(card);
+    const _day = _dts ? localYmd(_dts) : 'unknown';
+    if (_collapsedDays.has(_day)) {
+      _collapsedDays.delete(_day); _saveCollapsedDays();
+      _cardDrag = null;
+      scheduleSave();
+      render();
+      return;
+    }
+  }
   // DOM is already correct (preview did the insertBefore). Don't render() —
   // it would rebuild the DOM from scratch and kill the in-flight FLIPs that
   // are still settling, making the card "snap" instead of glide. Just patch
@@ -6348,6 +6363,22 @@ function simulateUserDragMove(card, fromColumn, toColumn, oldEl) {
   if (!dstColEl) { render(); return; }
   const dstBody = dstColEl.querySelector('.column-body');
   if (!dstBody) { render(); return; }
+
+  // #653 — Done is date-grouped. The ghost-flight below anchors the landing slot on
+  // an existing destination .card; flying a card into Done when the target day is
+  // folded (or has no rendered card to anchor on — e.g. ALL days collapsed) leaves
+  // no anchor, so the raw insert dumps the card at the very bottom, outside its date
+  // group, and never opens the day. For Done: auto-expand the card's day and, when
+  // its slot isn't currently rendered, do a full grouped render() so it lands under
+  // its date header. (Normal "ship into today (open)" keeps the glide below.)
+  const _dstCol = (state && state.columns || []).find(c => c.id === toColumn);
+  if (_dstCol && (_dstCol.id === 'done' || /^done$/i.test(_dstCol.name || ''))) {
+    const _ts = _doneGroupTs(card);
+    const _day = _ts ? localYmd(_ts) : 'unknown';
+    const _reopened = _collapsedDays.delete(_day);
+    if (_reopened) _saveCollapsedDays();
+    if (_reopened || !dstBody.querySelector('.card')) { render(); return; }
+  }
 
   // PICKUP — mirrors dragstart.
   if (srcColEl) srcColEl.classList.add('card-src-col');
