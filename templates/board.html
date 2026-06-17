@@ -757,27 +757,62 @@
     100% { background-position: -200% 0; }
   }
 
-  /* #630 — first-run declutter divider: a slim, muted, non-draggable label that
-     groups swept low-signal cards under a dated header in Discarded. Quiet by
-     design (this is the column users glance at LAST), but clickable for the
-     explanation. */
+  /* #630/#158 — first-run declutter divider. A refined, quiet SECTION DIVIDER
+     (not a boxy card): structured parts — icon · label · count · trailing rule ·
+     date — with tabular figures and an SVG icon (no emoji). Subtle by design
+     (Discarded is glanced at LAST) but clickable for the explanation modal. */
   .card.is-section-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
     cursor: pointer;
-    padding: 6px 10px;
+    padding: 7px 9px;
+    margin: 2px 0 5px;
     min-height: 0;
-    background: color-mix(in srgb, var(--card-bg, #1b1f24) 80%, transparent);
-    border: 1px dashed color-mix(in srgb, var(--fg, #cfd6df) 22%, transparent);
-    border-radius: 8px;
+    background: transparent;
+    border: 0;
+    border-radius: 7px;
+    box-shadow: none;
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.02em;
-    color: color-mix(in srgb, var(--fg, #cfd6df) 62%, transparent);
-    text-transform: none;
-    box-shadow: none;
+    letter-spacing: 0.015em;
+    color: var(--muted, #7A6F66);     /* real warm token (NOT the undefined --fg) */
+    transition: color 0.15s ease, background-color 0.15s ease;
   }
   .card.is-section-header:hover {
-    color: var(--fg, #cfd6df);
-    border-color: color-mix(in srgb, var(--fg, #cfd6df) 40%, transparent);
+    color: var(--ink, #2C2620);
+    background: color-mix(in srgb, var(--ink, #2C2620) 5%, transparent);
+  }
+  .card.is-section-header .sh-icon {
+    width: 13px; height: 13px; flex: none; opacity: 0.85;
+    color: var(--accent, #D97757);   /* a quiet warm-coral tint so it reads as intentional */
+  }
+  .card.is-section-header .sh-label { flex: none; white-space: nowrap; }
+  .card.is-section-header .sh-count {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--neutral, #ECE6DD);
+    color: color-mix(in srgb, var(--ink, #2C2620) 70%, transparent);
+  }
+  .card.is-section-header .sh-rule {
+    flex: 1 1 auto;
+    height: 1px;
+    min-width: 10px;
+    background: linear-gradient(to right,
+      color-mix(in srgb, var(--ink, #2C2620) 14%, transparent), transparent 90%);
+  }
+  .card.is-section-header .sh-date {
+    flex: none;
+    font-weight: 500;
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in srgb, var(--muted, #7A6F66) 78%, transparent);
   }
 
   .expand-hint {
@@ -3193,6 +3228,7 @@ function _absorbState(incoming) {
     state.nextNum = (state.cards || []).reduce((m, c) => Math.max(m, c.num || 0), 0) + 1;
   }
   migrateStackUnder(state);
+  ensureDiscardColumnIfNeeded();   // #650 — guarantee the Discarded col exists on every state load (hard refresh + SSE replace)
   lastRev = state.rev || 0;
   pendingDirty = false;
   if (document.getElementById('board-title')) applyBoardTitle();
@@ -3614,8 +3650,43 @@ function renderCardCompact(card) {
     hdr.className = 'card is-section-header';
     hdr.dataset.cardId = card.id;
     hdr.dataset.col = card.column;
-    hdr.textContent = card.title || '';
     if (card.origin) hdr.title = card.origin;
+    hdr.setAttribute('role', 'button');
+    hdr.setAttribute('aria-label', card.title || '');   // #158 full text for screen readers
+    // #158 — structure the dated divider into parts (icon · label · count · rule
+    // · date) instead of one flat emoji string. Parse the canonical
+    // "🧹 First-run sweep · YYYY-MM-DD · N items" title; fall back to the raw
+    // title (in the label slot) if the format ever changes.
+    const raw = card.title || '';
+    const parts = raw.replace(/^[^\p{L}\d]+/u, '').split(' · ');
+    const label = (parts[0] || raw).trim();
+    let dateTxt = '', countTxt = '';
+    for (const p of parts.slice(1)) {
+      const t = p.trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(t)) {
+        const d = new Date(t.slice(0, 10) + 'T00:00:00');
+        if (!isNaN(d)) dateTxt = d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+      } else {
+        const m = t.match(/\d+/);
+        if (m) countTxt = m[0];
+      }
+    }
+    // Broom icon (SVG, not emoji — §no-emoji-icons): diagonal handle + fanned head.
+    hdr.innerHTML =
+      '<svg class="sh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M19.5 4.5 13 11"/>' +
+        '<path d="m10 8 6 6"/>' +
+        '<path d="M13.5 11.5 7 18a3 3 0 0 1-3-3l6.5-6.5"/>' +
+        '<path d="m6 14 4 4"/>' +
+      '</svg>' +
+      '<span class="sh-label"></span>' +
+      (countTxt ? '<span class="sh-count"></span>' : '') +
+      '<span class="sh-rule"></span>' +
+      (dateTxt ? '<span class="sh-date"></span>' : '');
+    hdr.querySelector('.sh-label').textContent = label;
+    if (countTxt) hdr.querySelector('.sh-count').textContent = countTxt;
+    if (dateTxt) hdr.querySelector('.sh-date').textContent = dateTxt;
     hdr.addEventListener('click', () => openModal(card.id));
     return hdr;
   }
@@ -4532,6 +4603,7 @@ function _restoreScroll(m) {
 }
 function render() {
   if (!state) return;
+  ensureDiscardColumnIfNeeded();   // #650 — materialize Discarded col so discarded cards render on load
   closeCardMenu();   // #333 — a rebuild invalidates any open card menu
   const _scroll = _captureScroll();   // #345 — preserve scroll across the rebuild
   if (_view === 'board') {
@@ -6575,6 +6647,28 @@ function discardColumn() {
     if (typeof handleColumnAdded === 'function') { /* state already mutated */ }
   }
   return col;
+}
+
+// #650 — the Discarded column is NOT persisted in board.json (it's lazily created
+// on the first soft-delete, in discardColumn()). But the BOOTSTRAP declutter adds
+// cards with column:'discarded' server-side, WITHOUT going through that path — so
+// on a fresh load (_absorbState → render) there was no Discarded column for those
+// cards to render into, and every discarded card (incl. the 🧹 First-run sweep
+// header) silently vanished until a manual soft-delete recreated the column. Called
+// at the top of render() so the column always exists whenever discarded cards do.
+// Idempotent (no-op if the column already exists or there are no discarded cards);
+// stacks under super-urgent to match the canonical layout (SPEC). Client-side only —
+// next scheduleSave persists it, and a fresh load re-materializes it regardless.
+function ensureDiscardColumnIfNeeded() {
+  if (!state || !Array.isArray(state.cards)) return;
+  if (!state.cards.some(c => c.column === 'discarded')) return;
+  const cols = state.columns || (state.columns = []);
+  if (cols.some(c => c.id === 'discarded' || /^discarded$/i.test(c.name || ''))) return;
+  const parent = cols.find(
+    c => c.id === 'super-urgent' || /super.?urgent$/i.test(c.name || '') ||
+         c.id === 'mandatory' || /mandatory$/i.test(c.name || ''));
+  cols.push({ id: 'discarded', name: 'Discarded', kind: 'custom',
+              stackUnder: parent ? parent.id : null });
 }
 
 // #358 — Soft-delete. "Delete" no longer destroys a card: it flies it to the
