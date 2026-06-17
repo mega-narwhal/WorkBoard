@@ -2,9 +2,9 @@
 
 # 🗂️ WorkBoard
 
-### A live kanban board your Claude Code agent keeps up to date — *on its own*.
+### A live knowledge graph of your work.
 
-**So you never lose an idea, never forget a half-finished task, and never have to ask *"did you update the board?"* again.**
+**Never lose an idea. Never lose a workflow.**
 
 ![Version](https://img.shields.io/badge/version-0.9.29-blue) ![License](https://img.shields.io/badge/license-Apache--2.0-green) ![For Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2) ![Runs locally](https://img.shields.io/badge/runs-100%25%20local-success) ![No account](https://img.shields.io/badge/account-none-lightgrey)
 
