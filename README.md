@@ -6,7 +6,7 @@
 
 **So you never lose an idea, never forget a half-finished task, and never have to ask *"did you update the board?"* again.**
 
-![Version](https://img.shields.io/badge/version-0.9.27-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![For Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2) ![Runs locally](https://img.shields.io/badge/runs-100%25%20local-success) ![No account](https://img.shields.io/badge/account-none-lightgrey)
+![Version](https://img.shields.io/badge/version-0.9.27-blue) ![License](https://img.shields.io/badge/license-Apache--2.0-green) ![For Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2) ![Runs locally](https://img.shields.io/badge/runs-100%25%20local-success) ![No account](https://img.shields.io/badge/account-none-lightgrey)
 
 ![Watch a fresh board fill itself — History Replay flying past work onto the board on install](docs/assets/workflow-bootstrap.gif)
 
@@ -204,4 +204,10 @@ But **they're complements, not competitors**: claude-mem is your memory; WorkBoa
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Runs 100% on your machine; your boards and chat history never leave it.
+WorkBoard is licensed under the **Apache License 2.0**.
+
+Apache-2.0 was chosen deliberately. WorkBoard isn't a standalone app — it embeds into your developer workflow, sits inside other people's repos, and runs as a Claude Code plugin that production tooling may rely on. For a primitive like that, the explicit **patent grant** Apache-2.0 provides (which MIT lacks) is the more responsible default: contributors can't later assert patents against the code they shipped, and downstream users get a clear, enterprise-friendly license that's broadly accepted in dev-tool ecosystems (MCP servers, IDE plugins, agent harnesses).
+
+It remains a permissive license — commercial use, modification, and redistribution are all allowed, with attribution preserved.
+
+See [`LICENSE`](LICENSE) for the full text. WorkBoard runs 100% on your machine; your boards and chat history never leave it.
