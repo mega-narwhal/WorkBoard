@@ -16,13 +16,7 @@
       "id": "notes",
       "name": "📝 Notes",
       "kind": "intake",
-      "stackUnder": null
-    },
-    {
-      "id": "ideas",
-      "name": "💡 Ideas",
-      "kind": "intake",
-      "stackUnder": "notes"
+      "stackUnder": "task"
     },
     {
       "id": "backlog",
@@ -31,10 +25,10 @@
       "stackUnder": null
     },
     {
-      "id": "inprogress",
-      "name": "In Progress",
-      "kind": "active",
-      "stackUnder": null
+      "id": "ideas",
+      "name": "💡 Ideas",
+      "kind": "intake",
+      "stackUnder": "backlog"
     },
     {
       "id": "super-urgent",
@@ -47,6 +41,12 @@
       "name": "Discarded",
       "kind": "custom",
       "stackUnder": "super-urgent"
+    },
+    {
+      "id": "inprogress",
+      "name": "In Progress",
+      "kind": "active",
+      "stackUnder": null
     },
     {
       "id": "done",

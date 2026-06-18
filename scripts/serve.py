@@ -748,8 +748,8 @@ _DEFAULT_COLS = [
     {"id": "backlog",    "name": "Backlog",      "kind": "todo",   "stackUnder": None},
     {"id": "inprogress", "name": "In Progress",  "kind": "active", "stackUnder": None},
     {"id": "done",       "name": "Done",         "kind": "done",   "stackUnder": None},
-    {"id": "notes",      "name": "📝 Notes",     "kind": "intake", "stackUnder": None},
-    {"id": "ideas",      "name": "💡 Ideas",     "kind": "intake", "stackUnder": "notes"},
+    {"id": "notes",      "name": "📝 Notes",     "kind": "intake", "stackUnder": "task"},
+    {"id": "ideas",      "name": "💡 Ideas",     "kind": "intake", "stackUnder": "backlog"},
     {"id": "super-urgent", "name": "🚨 SUPER URGENT", "kind": "todo", "stackUnder": None},
 ]
 

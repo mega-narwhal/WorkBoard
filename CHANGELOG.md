@@ -9,6 +9,21 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.31 — Laptop-fit default layout + 92% bootstrap zoom (2026-06-18)
+
+- **Narrower default column layout so "Done" stays on-screen on a laptop.**
+  Bootstrap and *Reset Columns* now arrange columns as
+  `Task+Notes · Backlog+Ideas · 🚨 Super-Urgent+Discarded · In Progress · Done`
+  — five horizontal columns with three vertical stacks. Notes stacks under Task,
+  Ideas moves under Backlog, and Super-Urgent becomes its own column ahead of In
+  Progress. Applied consistently across the seed template
+  (`templates/board.json`), the migration defaults (`serve.py _DEFAULT_COLS`),
+  and the *Reset Columns* SPEC (`board.html`).
+- **Default zoom is now 92% on a fresh board.** `_ZOOM_DEFAULT = 0.92` is the
+  fallback when no zoom is saved yet, so all columns fit out of the box; the
+  Ctrl/Cmd+0 reset and *Reset Columns* both snap back to 92% (was 100%). A
+  user's own zoom adjustment is still persisted.
+
 ### 0.9.30 — Calendar filter logic + header overlap fix (#722/#731) (2026-06-17)
 
 - **Calendar filters now AND between groups, OR within a group (#722).** The

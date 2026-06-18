@@ -1674,7 +1674,7 @@
   </span>
   <span class="sp"></span>
   <span id="cols-pill" class="header-pill seg-pill" style="display:none">
-    <button id="reset-cols-btn" class="seg" title="Restore default layout: Task · Notes+Ideas · Backlog · In Progress · Mandatory+Discarded · Done (with stacks), then extras by recency. Also snaps the Logs + recon HUDs back to their default positions.">↺ Reset Columns</button>
+    <button id="reset-cols-btn" class="seg" title="Restore default layout: Task+Notes · Backlog+Ideas · 🚨 Super-Urgent+Discarded · In Progress · Done (with stacks), then extras by recency. Also snaps the zoom back to the 92% fit-to-screen view and the Logs + recon HUDs back to their default positions.">↺ Reset Columns</button>
     <span class="seg-div"></span>
     <button id="sort-time-btn" class="seg" title="Sort the cards inside every column by time (newest first). Column positions don't change — this just re-orders cards within each column, undoing any manual drag-reorder.">⇅ Sort Time</button>
   </span>
@@ -2413,7 +2413,10 @@ document.addEventListener('contextmenu', e => { if (e.ctrlKey) e.preventDefault(
 // only the board content zooms.
 const _ZOOM_KEY = 'workboard.zoom';
 const _ZOOM_MIN = 0.4, _ZOOM_MAX = 2.5;
-let _zoom = parseFloat(localStorage.getItem(_ZOOM_KEY)) || 1;
+// Default 92% on a fresh board (no saved zoom yet) so all columns fit a laptop
+// screen out of the box; once the user adjusts, their choice is persisted.
+const _ZOOM_DEFAULT = 0.92;
+let _zoom = parseFloat(localStorage.getItem(_ZOOM_KEY)) || _ZOOM_DEFAULT;
 function applyZoom() {
   const b = document.getElementById('board');
   if (b) b.style.zoom = _zoom;
@@ -4450,10 +4453,11 @@ function enterApp() {
   setView(_view);
 }
 
-// #125 — Reset columns to default order: Task → Backlog → In Progress →
-// Done → Notes (matched by id OR case-insensitive name so it works across
-// boards with migrated column ids), then remaining columns by latest card
-// activity desc (empty columns last). Clears stackUnder. One undo entry.
+// #125 — Reset columns to default order: Task(+Notes) → Backlog(+Ideas) →
+// 🚨 Super-Urgent(+Discarded) → In Progress → Done (matched by id OR
+// case-insensitive name so it works across boards with migrated column ids),
+// then remaining columns by latest card activity desc (empty columns last).
+// Stacks are re-created from the SPEC; one undo entry.
 // #105 — conform a legacy 'mandatory' column to the canonical 'super-urgent' (post
 // #104 unify): rename it in place (and move its cards), or if a super-urgent column
 // already exists, merge the mandatory cards into it and drop the legacy column. Cards
@@ -4484,24 +4488,24 @@ function _conformLegacyColumns() {
 async function resetColumnsToDefault() {
   if (!state) return;
   if (!(await miniConfirm('Reset column order?', {
-    sub: 'Reorders to: Task · Notes+Ideas · Backlog · In Progress · 🚨 Super-Urgent+Discarded · Done. No cards deleted — ' + undoHint() + ' to undo.',
+    sub: 'Reorders to: Task+Notes · Backlog+Ideas · 🚨 Super-Urgent+Discarded · In Progress · Done, and snaps the zoom to 92%. No cards deleted — ' + undoHint() + ' to undo.',
     okText: 'Reset',
     okClass: 'primary',
   }))) return;
   pushUndo();
   _conformLegacyColumns();   // #105 — upgrade a legacy 'mandatory' column → 'super-urgent' first
-  // #103 — restore the canonical bootstrap layout (matches templates/board.json #94):
-  // Task · Notes(+Ideas) · Backlog · In Progress · Mandatory(+Discarded) · Done.
-  // Stacks are RE-CREATED (Ideas under Notes, Discarded under Mandatory), not flattened.
-  // Extra/custom columns follow, ordered by latest activity.
+  // #103 — restore the canonical bootstrap layout (matches templates/board.json):
+  // Task(+Notes) · Backlog(+Ideas) · Super-Urgent(+Discarded) · In Progress · Done.
+  // Stacks are RE-CREATED (Notes under Task, Ideas under Backlog, Discarded under
+  // Super-Urgent), not flattened. Extra/custom columns follow, ordered by latest activity.
   const SPEC = [
     { key:'task',       stack:null,        match:c => c.id==='task'       || /^task$/i.test(c.name||'') },
-    { key:'notes',      stack:null,        match:c => c.id==='notes'      || /notes$/i.test(c.name||'') },
-    { key:'ideas',      stack:'notes',     match:c => c.id==='ideas'      || /ideas$/i.test(c.name||'') },
+    { key:'notes',      stack:'task',      match:c => c.id==='notes'      || /notes$/i.test(c.name||'') },
     { key:'backlog',    stack:null,        match:c => c.id==='backlog'    || /^backlog$/i.test(c.name||'') },
-    { key:'inprogress', stack:null,        match:c => c.id==='inprogress' || /^in\s*progress$/i.test(c.name||'') },
+    { key:'ideas',      stack:'backlog',   match:c => c.id==='ideas'      || /ideas$/i.test(c.name||'') },
     { key:'super-urgent', stack:null,           match:c => c.id==='super-urgent' || /super.?urgent$/i.test(c.name||'') || c.id==='mandatory' || /mandatory$/i.test(c.name||'') },
     { key:'discarded',    stack:'super-urgent', match:c => c.id==='discarded'    || /^discarded$/i.test(c.name||'') },
+    { key:'inprogress', stack:null,        match:c => c.id==='inprogress' || /^in\s*progress$/i.test(c.name||'') },
     { key:'done',       stack:null,        match:c => c.id==='done'       || /^done$/i.test(c.name||'') },
   ];
   const cols = state.columns.map(c => ({ ...c, stackUnder: null }));
@@ -4538,6 +4542,7 @@ async function resetColumnsToDefault() {
   scheduleSave();
   render();
   requestAnimationFrame(() => flipPlayColumns(old));
+  setZoom(_ZOOM_DEFAULT, true);   // snap the board back to the 92% fit-to-screen view
   resetHudsToDefault();   // #488 — also snap the floating HUDs back to default
   logEvent('col', '↺ reset columns to default');   // #522 — log structural ops
   toast('Columns + HUDs reset — ' + undoHint() + ' to undo', 3200);
@@ -7095,7 +7100,7 @@ async function init() {
     const k = e.key.toLowerCase();
     if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
-    else if (k === '0') { e.preventDefault(); setZoom(1, true); }   // #523 — reset zoom to 100%
+    else if (k === '0') { e.preventDefault(); setZoom(_ZOOM_DEFAULT, true); }   // #523 — reset zoom to the fit-to-screen default (92%)
   });
   $('#modal-overlay').addEventListener('click', e => {
     if (e.target === e.currentTarget) closeModal();
