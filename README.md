@@ -119,6 +119,61 @@ The 130 KB+ `board.json` is **never auto-loaded** — context stays clean no mat
 
 ---
 
+## 🥊 Controversy — claims vs. what we measured
+
+Every memory tool markets a big efficiency number. We reproduced their setups on the **same corpus and tokenizer**, with settings that *favour the peer* — and several headline claims don't survive a real run. **Reproduce any of it yourself** ([harness + receipts](Research/token_comparison/MASTER_SUMMARY.md)); show us where we're wrong and we'll fix the number.
+
+- **The "90% / 95%" headlines are measured against the _dumbest possible baseline_ — not a rival.** mem0's *"90% fewer tokens"* and claude-mem's *"~95%"* are both vs **pasting your entire history into every prompt**. Head-to-head against a structured ledger, the real gap is **34–53% on the loop** — and on *building* memory WorkBoard is **~98–99% lighter**.
+- **claude-mem can't actually remember your past.** A real sandboxed run (node 22 + Bun + uv + Chroma worker) found **no bulk / backfill command** — it only compresses *forward* from install. To "remember" 100 past sessions it would run 100 compression calls. WorkBoard mines your history.
+- **claude-mem compresses on your full subscription tier — every session.** Not a cheap or detached tier: it spends full-price model compute each session just to remember.
+- **graphify ships no hook, despite its docs describing one.** Its docs describe a `PreToolUse` hook that fires on every file read; the real install (`graphifyy 0.8.41`) writes **no `settings.json` and no hook entry**. *(In graphify's favour that means 0 per-prompt cost — but the advertised integration isn't what installs.)*
+
+<details>
+<summary><b>Head-to-head, by competitor</b> — click to expand (same tokenizer; settings favour the peer)</summary>
+
+**WorkBoard vs mem0**
+
+| Axis | WorkBoard | mem0 | Winner |
+|---|--:|--:|:--|
+| Build the memory *(input tok)* | 64,162 | 5,095,769 | 🟢 **WorkBoard −98.7%** |
+| Persist / session | **0 model calls** | 1 LLM extract call (~5,462 tok) + embed | 🟢 **WorkBoard (free)** |
+| Live loop *(100 sessions × 3)* | 719,700 | 1,086,200 | 🟢 **WorkBoard −33.7%** |
+| Per single recall | 2,399 | 1,800 | mem0 *(leaner)* |
+| Recall vs full-context *(26K)* | 90.8% fewer | 93.1% fewer | ~tie |
+
+**WorkBoard vs claude-mem**
+
+| Axis | WorkBoard | claude-mem | Winner |
+|---|--:|--:|:--|
+| Build the memory *(input tok)* | ~10,546 | 5,095,769 | 🟢 **WorkBoard ~−99%** |
+| Persist / session | **0 model calls** | 1 compression call *(full tier)* | 🟢 **WorkBoard (free)** |
+| Live loop *(100 sessions × 3)* | 719,700 | 1,517,300 | 🟢 **WorkBoard −52.6%** |
+| Per single recall | 2,399 | 3,237 | 🟢 **WorkBoard −25.9%** |
+| Backfill past history | mines your history | forward-only *(no bulk command)* | 🟢 **WorkBoard** |
+
+**WorkBoard vs Letta (MemGPT)**
+
+| Axis | WorkBoard | Letta | Winner |
+|---|--:|--:|:--|
+| In-context memory / turn | 306 *(0 carried)* | 3,444 *(blocks + tool schemas + prompt)* | 🟢 **WorkBoard** |
+| Persist / session | **0 model calls** | LLM tool-call per write + compaction | 🟢 **WorkBoard** |
+| Live loop *(100 × 50 × 3)* | 2,259,400 *(929,400 trimmed)* | 11,909,200 | 🟢 **WorkBoard −81.0%** |
+| Per single recall | 2,399 | 1,064 | Letta *(leaner)* |
+
+**WorkBoard vs graphify** *(code knowledge-graph — different domain)*
+
+| Axis | WorkBoard | graphify | Winner |
+|---|--:|--:|:--|
+| Always-on / prompt | 306 | 61 *(cached)* | graphify |
+| SKILL.md on engage | 5,898 | 8,245 *(+9,704 refs)* | 🟢 **WorkBoard −28.5%** |
+| Per recall | 2,399 *(work Qs)* | 1,374 *(code Qs)* | different questions |
+| Write / keep current | 0 | 0 | tie |
+| Big artifact autoload | never | never | tie |
+
+</details>
+
+---
+
 ## Under the hood
 
 ### 🔒 Hook-enforced — the board literally can't drift

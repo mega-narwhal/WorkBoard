@@ -58,6 +58,71 @@ the dedicated `graphify-comparison/` study (real `graphifyy 0.8.41` install).
 
 ---
 
+## Head-to-head by competitor
+
+Each peer on its own axes (same tokenizer, `tiktoken cl100k`; settings favor the peer).
+
+### WorkBoard vs mem0
+| Axis | WorkBoard | mem0 | Winner |
+|---|--:|--:|:--|
+| Build the memory *(input tok)* | 64,162 | 5,095,769 | 🟢 **WorkBoard −98.7%** |
+| Persist / session | **0 model calls** | 1 LLM extract call (~5,462 tok) + embed | 🟢 **WorkBoard (free)** |
+| Live loop *(100 sessions × 3)* | 719,700 | 1,086,200 | 🟢 **WorkBoard −33.7%** |
+| Per single recall | 2,399 | 1,800 | mem0 *(leaner)* |
+| Recall vs full-context *(26K)* | 90.8% fewer | 93.1% fewer | ~tie *(both ≈90%)* |
+| Per-turn injection | 306 *(trim 40)* | 0 | mem0 |
+
+### WorkBoard vs claude-mem
+| Axis | WorkBoard | claude-mem | Winner |
+|---|--:|--:|:--|
+| Build the memory *(input tok)* | ~10,546 | 5,095,769 | 🟢 **WorkBoard ~−99%** |
+| Persist / session | **0 model calls** | 1 compression call *(full subscription tier)* | 🟢 **WorkBoard (free)** |
+| Live loop *(100 sessions × 3)* | 719,700 | 1,517,300 | 🟢 **WorkBoard −52.6%** |
+| Per single recall | 2,399 | 3,237 | 🟢 **WorkBoard −25.9%** |
+| Backfill past history | mines your history | forward-only *(no bulk command)* | 🟢 **WorkBoard** |
+
+### WorkBoard vs Letta (MemGPT)
+| Axis | WorkBoard | Letta | Winner |
+|---|--:|--:|:--|
+| In-context memory / turn | 306 *(0 carried)* | 3,444 *(blocks + tool schemas + system prompt)* | 🟢 **WorkBoard** |
+| Persist / session | **0 model calls** | LLM tool-call per write + Haiku compaction | 🟢 **WorkBoard** |
+| Live loop *(100 × 50 × 3)* | 2,259,400 *(929,400 trimmed)* | 11,909,200 | 🟢 **WorkBoard −81.0% (−92.2%)** |
+| Per single recall | 2,399 | 1,064 | Letta *(leaner)* |
+
+### WorkBoard vs graphify
+| Axis | WorkBoard | graphify | Winner |
+|---|--:|--:|:--|
+| Always-on / prompt | 306 | 61 *(cached)* | graphify |
+| SKILL.md on engage | 5,898 | 8,245 *(+9,704 refs)* | 🟢 **WorkBoard −28.5%** |
+| Per recall | 2,399 *(work Qs)* | 1,374 *(code Qs)* | different questions |
+| Write / keep current | 0 | 0 | tie |
+| Big artifact autoload | never | never | tie |
+
+> graphify is a **code** knowledge-graph (different domain) — a complement, not a memory rival.
+> *WorkBoard's build cost varies with harvest config (hourly bucket size); both figures are <1.3% of the peer's compression total — the **reduction %** is the robust number.*
+
+---
+
+## ⚡ Controversy — claims vs. what we actually measured
+
+> Every figure below is from a **real run** or the vendor's **own** published numbers, on the same corpus and tokenizer, with settings that *favor the peer*. We'll correct anything demonstrably wrong — **reproduce it yourself**; each study folder ships the harness.
+
+**1. The "90% / 95%" headlines are measured against the *dumbest possible baseline* — not a competitor.**
+mem0's *"90% fewer tokens"* and claude-mem's *"~95% / ~10×"* are both vs **full-context / full-transcript reload** — i.e. pasting your *entire* history into every prompt. That isn't "more efficient than the alternatives"; it's "cheaper than the worst possible approach." Run it head-to-head and the real gaps are **34–53% on the loop**, and on *building* memory WorkBoard is **~98–99% lighter** than both.
+
+**2. claude-mem can't actually remember your past — it only records forward from install.**
+Our real, fully-sandboxed run (node 22 + Bun + uv + Chroma worker) found **no bulk / bootstrap / backfill command** anywhere in claude-mem's CLI or worker routes. It compresses *new* sessions via a live hook; to "remember" 100 past sessions you'd replay each through the summarize hook = **100 compression calls**. WorkBoard explicitly mines your history. *(`claude-mem/REAL_RUN_FINDINGS.md`)*
+
+**3. claude-mem's "memory" runs on your full-price model tier — every session.**
+That compression call goes through the Claude Agent SDK on your **main subscription tier**, *not* a cheap or detached tier. Every session silently spends full-tier compute to compress — measured in the same run, and it makes WorkBoard's *0 model calls* look even better.
+
+**4. graphify ships no hook — despite its docs describing one.**
+graphify's rendered docs describe a **PreToolUse hook that fires on every file read**. The real sandboxed install (`graphifyy 0.8.41`) writes **no `settings.json` and no hook entry** — that hook never runs. *(To graphify's credit, this makes its per-prompt cost 0 — but the advertised integration isn't what installs.)* *(`graphify-comparison/REPORT.md`)*
+
+**The pattern:** the splashy efficiency numbers in this space are measured against naive baselines, never head-to-head — and at least one tool's docs describe an integration its installer doesn't ship. WorkBoard publishes the head-to-head, the harness, and the corpus fingerprints, so nobody has to take our word for it. **Show us where we're wrong and we'll fix the number.**
+
+---
+
 ## How to read this (the recurring gotcha)
 
 The two "recall" rows look contradictory but aren't:
