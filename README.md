@@ -209,7 +209,7 @@ The net effect: **the user never has to ask "did you update the board?"** — an
 
 - **Crash-safe by construction** — `flock` + rolling backups + a `recover` CLI to restore from any backup; `repair-links` to fix broken cross-card references; `migrate` to evolve the schema. Three months in, your board self-heals.
 
-- **Token-cheap by design** — the lightest per-prompt of the five peer memory tools benchmarked. See [`docs/TOKEN_BUDGET.md`](docs/TOKEN_BUDGET.md) for the measurements, and [`docs/COMPARISON.md`](docs/COMPARISON.md) for the knowledge-graph-vs-memory-store framing in full.
+- **Token-cheap by design** — among the cheapest to **build and maintain**: **0 model calls** to persist your work, and the 130 KB+ `board.json` is **never auto-loaded** into context. See [`docs/TOKEN_BUDGET.md`](docs/TOKEN_BUDGET.md) for the measurements, and [`docs/COMPARISON.md`](docs/COMPARISON.md) for the knowledge-graph-vs-memory-store framing in full.
 
 ---
 
