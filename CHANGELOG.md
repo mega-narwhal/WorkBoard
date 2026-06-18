@@ -9,6 +9,22 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.32 — Quiet bootstrap: no session-refresh clutter, no stuck pulse (2026-06-18)
+
+- **No "session refresh" dividers during bootstrap.** The Logs HUD persists to a
+  *global* (cross-board, 7-day) localStorage key, so a fresh first-run board
+  replayed every prior session's `──── session refresh ────` divider. Now the
+  buffer is cleared once on the first bootstrap-fill tick
+  (`replay`/`speedup`/`solo` phase — bootstrap-only), and the SessionStart hook
+  skips emitting a new divider while `just_bootstrapped=1`. Live sessions still
+  draw the divider normally.
+- **The last bootstrapped card no longer pulses forever.** Cards flown into In
+  Progress during the fill left `state.activeWork` pointing at the last one, so it
+  kept pulsing. On bootstrap completion (`final` after a fill) `activeWork` is now
+  cleared so nothing pulses. Tied strictly to bootstrap — live carding re-claims
+  the pulse on the next real move into In Progress (`_set_active_work`).
+- Files: `scripts/hook_session_start.sh`, `templates/board.html`.
+
 ### 0.9.31 — Laptop-fit default layout + 92% bootstrap zoom (2026-06-18)
 
 - **Narrower default column layout so "Done" stays on-screen on a laptop.**

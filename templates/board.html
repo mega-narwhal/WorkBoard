@@ -6989,7 +6989,18 @@ function startSSE() {
       // #92 — remember a bootstrap FILL ran this HUD session (replay/speedup/solo),
       // so we only auto-reorder after a reconcile that FOLLOWED a fill (i.e. a
       // bootstrap), not after a standalone live SessionStart recon.
-      if (d.phase === 'replay' || d.phase === 'speedup' || d.phase === 'solo') _bootstrapFillSeen = true;
+      if (d.phase === 'replay' || d.phase === 'speedup' || d.phase === 'solo') {
+        // On the FIRST fill tick of this load, wipe the persisted Logs buffer.
+        // It's a GLOBAL (cross-board, 7-day) localStorage key, so a fresh bootstrap
+        // would otherwise replay every prior session's 'session refresh' divider.
+        // Bootstrap-only (these phases never fire on a live reconcile).
+        if (!_bootstrapFillSeen) {
+          _logsBuf = [];
+          try { localStorage.removeItem(_LOGS_BUF_KEY); } catch (_) {}
+          const _lb = document.getElementById('logs-hud-body'); if (_lb) _lb.innerHTML = '';
+        }
+        _bootstrapFillSeen = true;
+      }
       // #327 single-HUD: completion is driven by the backend `final` flag, NOT by
       // "done>=total" — a stage hitting 100% (replay/speedup/solo) is NOT the end,
       // it hands off to the next stage on the SAME HUD (no flash/disappear/race).
@@ -7006,6 +7017,15 @@ function startSSE() {
         // `after_fill` signal; tracked as a follow-up.)
         const afterBootstrapFill = _bootstrapFillSeen;
         _bootstrapFillSeen = false;
+        if (afterBootstrapFill) {
+          // Bootstrap done: the last card flown into In Progress is parked mined
+          // history, not active work — clear the active-work pulse so nothing
+          // pulses forever. Live carding re-claims on the next real move into
+          // In Progress (_set_active_work), so normal pulsing is unaffected.
+          state.activeWork = {}; state.activeWorkId = null;
+          refreshActiveWork();   // derives .active-work from the now-empty state → removes it
+          scheduleSave();        // persist so a poll/reload can't resurrect the pulse
+        }
         // #92/#601 — after bootstrap fill (and after reconcile, if any): glide
         // every card into time order with the SAME animated FLIP sort as the
         // ⇅ Sort Time button (flipResort). One unified effect — no silent snap.

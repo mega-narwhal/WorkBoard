@@ -301,18 +301,22 @@ if [ -n "${server_health}" ]; then
   # bounded so it never delays startup; waits (≤4s) for a connected SSE client
   # because the pulse isn't retained — a divider fired into an empty room is lost
   # (board_autoopen may have JUST opened the tab, which connects asynchronously).
-  (
-    for _ in $(seq 1 16); do
-      h="$(curl -s --max-time 0.3 "http://127.0.0.1:${server_port}/health" 2>/dev/null)"
-      case "${h}" in
-        *'"sseClients": '[1-9]*)
-          curl -s --max-time 0.3 "http://127.0.0.1:${server_port}/divider" >/dev/null 2>&1
-          break ;;
-      esac
-      sleep 0.25
-    done
-  ) >/dev/null 2>&1 &
-  disown 2>/dev/null || true
+  # Skip during a bootstrap session: the fresh first-run board has no prior
+  # activity to separate from, and the divider would just clutter the fly-in.
+  if [ "${just_bootstrapped:-0}" != "1" ]; then
+    (
+      for _ in $(seq 1 16); do
+        h="$(curl -s --max-time 0.3 "http://127.0.0.1:${server_port}/health" 2>/dev/null)"
+        case "${h}" in
+          *'"sseClients": '[1-9]*)
+            curl -s --max-time 0.3 "http://127.0.0.1:${server_port}/divider" >/dev/null 2>&1
+            break ;;
+        esac
+        sleep 0.25
+      done
+    ) >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+  fi
 fi
 
 # Smart reconciliation (SessionStart, #recon): bring the board to truth BEFORE
