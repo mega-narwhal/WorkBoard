@@ -108,40 +108,40 @@ Measured head-to-head on real history — **same corpus, same tokenizer** (`tikt
 
 #### WorkBoard vs mem0
 
-| Axis | WorkBoard | mem0 | Winner |
+| Axis | WB | mem0 | Winner |
 |---|--:|--:|:--|
-| Build the memory *(input tok)* | 64,162 | 5,095,769 | 🟢 **WorkBoard −98.7%** |
-| Persist / session | **0 model calls** | 1 LLM extract call (~5,462 tok) + embed | 🟢 **WorkBoard (free)** |
-| Live loop *(100 sessions × 3)* | 719,700 | 1,086,200 | 🟢 **WorkBoard −33.7%** |
-| Per single recall | 2,399 | 1,800 | mem0 *(leaner)* |
+| Build the memory | 64,162 tok | 5,095,769 tok | 🟢 **WB 98.7% cheaper** |
+| Persist / session | **0 model calls** | 1 LLM extract call (~5,462 tok) + embed | 🟢 **WB (free)** |
+| Live loop *(100 sessions × 3)* | 719,700 tok | 1,086,200 tok | 🟢 **WB 33.7% cheaper** |
+| Per single recall | 2,399 tok | 1,800 tok | mem0 *(leaner)* |
 | Recall vs full-context *(26K)* | 90.8% fewer | 93.1% fewer | ~tie |
 
 #### WorkBoard vs claude-mem
 
-| Axis | WorkBoard | claude-mem | Winner |
+| Axis | WB | claude-mem | Winner |
 |---|--:|--:|:--|
-| Build the memory *(input tok)* | ~10,546 | 5,095,769 | 🟢 **WorkBoard ~−99%** |
-| Persist / session | **0 model calls** | 1 compression call *(full tier)* | 🟢 **WorkBoard (free)** |
-| Live loop *(100 sessions × 3)* | 719,700 | 1,517,300 | 🟢 **WorkBoard −52.6%** |
-| Per single recall | 2,399 | 3,237 | 🟢 **WorkBoard −25.9%** |
-| Backfill past history | mines your history | forward-only *(no bulk command)* | 🟢 **WorkBoard** |
+| Build the memory | ~10,546 tok | 5,095,769 tok | 🟢 **WB ~99% cheaper** |
+| Persist / session | **0 model calls** | 1 compression call *(full tier)* | 🟢 **WB (free)** |
+| Live loop *(100 sessions × 3)* | 719,700 tok | 1,517,300 tok | 🟢 **WB 52.6% cheaper** |
+| Per single recall | 2,399 tok | 3,237 tok | 🟢 **WB 25.9% cheaper** |
+| Backfill past history | mines your history | forward-only *(no bulk command)* | 🟢 **WB** |
 
 #### WorkBoard vs Letta (MemGPT)
 
-| Axis | WorkBoard | Letta | Winner |
+| Axis | WB | Letta | Winner |
 |---|--:|--:|:--|
-| In-context memory / turn | 306 *(0 carried)* | 3,444 *(blocks + tool schemas + prompt)* | 🟢 **WorkBoard** |
-| Persist / session | **0 model calls** | LLM tool-call per write + compaction | 🟢 **WorkBoard** |
-| Live loop *(100 × 50 × 3)* | 2,259,400 *(929,400 trimmed)* | 11,909,200 | 🟢 **WorkBoard −81.0%** |
-| Per single recall | 2,399 | 1,064 | Letta *(leaner)* |
+| In-context memory / turn | 306 tok *(0 carried)* | 3,444 tok *(blocks + tool schemas + prompt)* | 🟢 **WB** |
+| Persist / session | **0 model calls** | LLM tool-call per write + compaction | 🟢 **WB** |
+| Live loop *(100 × 50 × 3)* | 2,259,400 tok *(929,400 trimmed)* | 11,909,200 tok | 🟢 **WB 81.0% cheaper** |
+| Per single recall | 2,399 tok | 1,064 tok | Letta *(leaner)* |
 
 #### WorkBoard vs graphify *(code knowledge-graph — different domain)*
 
-| Axis | WorkBoard | graphify | Winner |
+| Axis | WB | graphify | Winner |
 |---|--:|--:|:--|
-| Always-on / prompt | 306 | 61 *(cached)* | graphify |
-| SKILL.md on engage | 5,898 | 8,245 *(+9,704 refs)* | 🟢 **WorkBoard −28.5%** |
-| Per recall | 2,399 *(work Qs)* | 1,374 *(code Qs)* | different questions |
+| Always-on / prompt | 306 tok | 61 tok *(cached)* | graphify |
+| SKILL.md on engage | 5,898 tok | 8,245 tok *(+9,704 refs)* | 🟢 **WB 28.5% cheaper** |
+| Per recall | 2,399 tok *(work Qs)* | 1,374 tok *(code Qs)* | different questions |
 | Write / keep current | 0 | 0 | tie |
 | Big artifact autoload | never | never | tie |
 
