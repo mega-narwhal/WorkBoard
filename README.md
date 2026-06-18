@@ -97,11 +97,12 @@ See what shipped — and what's **still open** — laid out by date. Catch misse
 
 ---
 
-## 🤔 How is this different from claude-mem / mem0 / letta?
+## 📊 Token-Efficiency Summary — WorkBoard vs mem0 · claude-mem · Letta · graphify
 
 **They remember your conversations. WorkBoard remembers your _work_.**
 
-> **mem0, claude-mem, and Letta store memory. WorkBoard is a structured knowledge-graph of what you shipped.**
+1. **WorkBoard is a structured knowledge-graph of the _products & features you shipped_** — mem0, claude-mem, and Letta just store memory.
+2. **It deterministically identifies what's in memory** — a precise, structured lookup, not a probabilistic *"full dump."*
 
 Those tools embed past chat into a vector store and recall fuzzy chunks by similarity. WorkBoard records the **outcomes** as a graph you can walk. Measured head-to-head on real history — same corpus, same tokenizer ([**full receipts**](Research/token_comparison/MASTER_SUMMARY.md)):
 
@@ -114,8 +115,6 @@ Those tools embed past chat into a vector store and recall fuzzy chunks by simil
 | **Read it yourself** | a live kanban — what shipped, why, what's open | opaque embeddings | 🟢 **WorkBoard** |
 
 The 130 KB+ `board.json` is **never auto-loaded** — context stays clean no matter how big the board grows.
-
-**Honest:** for vague, cross-project *"what did I once say about X?"* recall, a vector memory wins — and nothing stops you running both. Where each wins, and when to pick which: **[`docs/COMPARISON.md`](docs/COMPARISON.md)** and the full study in **[`Research/token_comparison/`](Research/token_comparison/MASTER_SUMMARY.md)**.
 
 ---
 
