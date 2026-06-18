@@ -1,4 +1,4 @@
-# graphify-comparison — WorkBoard vs Letta, mem0 & claude-mem efficiency study
+# letta-comparison — WorkBoard vs Letta, mem0 & claude-mem efficiency study
 
 Standalone, reproducible benchmark comparing **WorkBoard** to **Letta** (MemGPT),
 **mem0**, and **claude-mem**, focused on the **live memory loop**.
@@ -23,7 +23,7 @@ corroboration against a local Letta server (Docker `letta/letta` + Ollama).
 
 ## Safety — in-repo but non-invasive
 
-This folder now lives **inside** the repo (`WorkBoard/graphify-comparison/`) as a
+This folder now lives **inside** the repo (`WorkBoard/Research/token_comparison/letta-comparison/`) as a
 tracked sub-project, but it **never mutates the rest of the product**: it reads
 frozen copies and writes exclusively under this subfolder.
 
@@ -37,7 +37,7 @@ frozen copies and writes exclusively under this subfolder.
 
 ## Layout
 ```
-graphify-comparison/
+letta-comparison/
 ├── README.md            (this file)
 ├── REPORT.md            ← auto-generated study report (the deliverable)
 ├── tokencount.py        single shared tokenizer used for ALL counts (fairness)

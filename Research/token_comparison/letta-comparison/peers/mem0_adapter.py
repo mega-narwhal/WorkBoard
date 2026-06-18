@@ -1,4 +1,4 @@
-"""mem0 adapter for the graphify-comparison study.
+"""mem0 adapter for the letta-comparison study.
 
 Three surfaces, mirroring claude_mem_adapter:
 

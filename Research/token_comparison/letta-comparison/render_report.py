@@ -57,7 +57,7 @@ def main():
     w(f"> Tokenizer: `{tok}` — the SAME tokenizer applied to all three systems "
       "(the core fairness control). Card #730.")
     w(f"> Board snapshot: `{snap['sha256']}` ({snap['bytes']:,} B), a frozen COPY. "
-      "This study lives **inside the repo at `WorkBoard/graphify-comparison/`** as a "
+      "This study lives **inside the repo at `WorkBoard/Research/token_comparison/letta-comparison/`** as a "
       "tracked sub-project, but is **non-invasive**: it reads frozen copies "
       "(`board_snapshot.json`, `lib/product_scripts_ro/`) and writes ONLY under this "
       "subfolder — never the live board (`board/board.json`) or product source "
@@ -108,7 +108,7 @@ def main():
     # ---------------------------------------------------------------- Method
     w("## Method")
     w("")
-    w("- **In-repo & non-invasive.** Lives at `WorkBoard/graphify-comparison/`; reads "
+    w("- **In-repo & non-invasive.** Lives at `WorkBoard/Research/token_comparison/letta-comparison/`; reads "
       "a frozen `board_snapshot.json` + a read-only copy of `card.py`; writes only "
       "under this subfolder. A `lib/safety.py` guard refuses to write the live board "
       "or product source elsewhere.")

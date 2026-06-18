@@ -81,7 +81,7 @@ def main():
     if cal:
         w(f"| graphify version | `{cal['_meta'].get('graphify_version')}` |")
     w(f"| WorkBoard recall | REAL — `card.py` against frozen snapshot |")
-    w("| Location | `WorkBoard/graphify-comparison/` (in-repo, non-invasive) |")
+    w("| Location | `WorkBoard/Research/token_comparison/letta-comparison/` (in-repo, non-invasive) |")
     w("")
     w("The single most important fairness control: **one tokenizer "
       f"(`{tok}`) counts every token for every system.** It is the tokenizer the "
@@ -419,7 +419,7 @@ def main():
     w("## 13. Exact reproduction")
     w("")
     w("```bash")
-    w("cd WorkBoard/graphify-comparison")
+    w("cd WorkBoard/Research/token_comparison/letta-comparison")
     w("python3 build_fixtures.py        # freeze corpora from ~/.claude (once; reads only)")
     w("python3 run_recall.py            # Study 2 (3-way recall)")
     w("python3 run_live.py              # Study 1 (mem0 / claude-mem live loop)")

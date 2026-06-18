@@ -18,7 +18,10 @@ peers/_cm_home/
 .letta-venv/
 .letta-state/
 
-# Per-run raw outputs. Aggregate JSON committed via the report; raw stays local.
+# Per-run raw outputs stay local (repo-wide convention: parent .gitignore ignores
+# */results/raw/). Every number is preserved in the COMMITTED REPORT.md /
+# REPORT_DETAILED.md / CONTEXT.md, so a future session retrieves full context
+# without re-running. Re-derive raw JSON via the drivers (see CONTEXT.md §6).
 results/raw/
 
 __pycache__/

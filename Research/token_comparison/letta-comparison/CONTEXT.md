@@ -8,7 +8,7 @@ If the session that built this has closed, start here.
 
 ## 1. What this is (one paragraph)
 
-`WorkBoard/graphify-comparison/` is a standalone, reproducible benchmark that
+`WorkBoard/Research/token_comparison/letta-comparison/` is a standalone, reproducible benchmark that
 proves **WorkBoard** (this repo's kanban-of-work memory) is more token-efficient
 than the shipping AI-memory systems — **mem0**, **claude-mem**, and **Letta
 (MemGPT)** — on the **live memory loop** (the steady-state cost of persisting +
@@ -40,7 +40,7 @@ This study runs the missing head-to-head.
 - **#734** — **mem0** extension (built the standalone `~/Desktop/graphify-comparison/`).
 - **#735** — **Letta** extension (4th peer, REAL measurement).
 - **#738** — **THIS task:** transferred the whole folder into
-  `WorkBoard/graphify-comparison/`, made `REPORT_DETAILED.md`, wrote this doc.
+  `WorkBoard/Research/token_comparison/letta-comparison/`, made `REPORT_DETAILED.md`, wrote this doc.
 
 Full detail also in memory: `project-workboard-vs-clauedmem-study`.
 
@@ -69,7 +69,7 @@ vs **graphify** (graphifyy 0.8.40, a code knowledge-graph).
 
 **Session D (#738) — THIS one:**
 1. `rsync`'d the whole folder `~/Desktop/graphify-comparison/` →
-   `WorkBoard/graphify-comparison/`, **excluding** `.letta-venv/` (891MB, regen),
+   `WorkBoard/Research/token_comparison/letta-comparison/`, **excluding** `.letta-venv/` (891MB, regen),
    `__pycache__/`, `peers/_wb_ingest_home/`.
 2. Rewrote `lib/safety.py`: the folder is now INSIDE the repo by design, so the
    guard changed from "must be outside product" to "writes confined to this
@@ -118,7 +118,7 @@ The computed numbers already live in `results/raw/*.json` and both reports are
 written. To just **re-read the results**: open `REPORT_DETAILED.md`. To
 **re-render** the reports from existing JSON (no model calls, instant):
 ```bash
-cd WorkBoard/graphify-comparison
+cd WorkBoard/Research/token_comparison/letta-comparison
 python3 render_report.py && python3 render_report_detailed.py
 ```
 
@@ -130,7 +130,7 @@ python3 build_fixtures.py && python3 run_recall.py && python3 run_live.py \
 
 To re-derive **Letta** (Study 1b) — the venv was NOT transferred (891MB):
 ```bash
-python3.11 -m venv .letta-venv && .letta-venv/bin/pip install letta
+/opt/homebrew/bin/python3.13 -m venv .letta-venv  # Letta needs py>=3.11 && .letta-venv/bin/pip install letta
 .letta-venv/bin/python letta_incontext_real.py && python3 run_live_letta.py
 ```
 

@@ -1,4 +1,4 @@
-"""Letta adapter for the graphify-comparison study.
+"""Letta adapter for the letta-comparison study.
 
 Unlike the mem0 / claude-mem peers (modeled from each vendor's own published
 numbers), Letta is measured by a **REAL local run** — the user asked for it, and

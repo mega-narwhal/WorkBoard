@@ -2,7 +2,7 @@
 
 > **Auto-generated** by `render_report.py` from `results/raw/*.json`. Do not hand-edit the numbers — re-run the drivers and this renderer.
 > Tokenizer: `tiktoken-cl100k_base` — the SAME tokenizer applied to all three systems (the core fairness control). Card #730.
-> Board snapshot: `7c49f1314c6b87d4` (1,155,340 B), a frozen COPY. This study lives **inside the repo at `WorkBoard/graphify-comparison/`** as a tracked sub-project, but is **non-invasive**: it reads frozen copies (`board_snapshot.json`, `lib/product_scripts_ro/`) and writes ONLY under this subfolder — never the live board (`board/board.json`) or product source elsewhere (`lib/safety.py` enforces it). A more exhaustive companion report is in `REPORT_DETAILED.md`.
+> Board snapshot: `7c49f1314c6b87d4` (1,155,340 B), a frozen COPY. This study lives **inside the repo at `WorkBoard/Research/token_comparison/letta-comparison/`** as a tracked sub-project, but is **non-invasive**: it reads frozen copies (`board_snapshot.json`, `lib/product_scripts_ro/`) and writes ONLY under this subfolder — never the live board (`board/board.json`) or product source elsewhere (`lib/safety.py` enforces it). A more exhaustive companion report is in `REPORT_DETAILED.md`.
 
 ## TL;DR
 
@@ -14,7 +14,7 @@
 
 ## Method
 
-- **In-repo & non-invasive.** Lives at `WorkBoard/graphify-comparison/`; reads a frozen `board_snapshot.json` + a read-only copy of `card.py`; writes only under this subfolder. A `lib/safety.py` guard refuses to write the live board or product source elsewhere.
+- **In-repo & non-invasive.** Lives at `WorkBoard/Research/token_comparison/letta-comparison/`; reads a frozen `board_snapshot.json` + a read-only copy of `card.py`; writes only under this subfolder. A `lib/safety.py` guard refuses to write the live board or product source elsewhere.
 - **Same tokenizer for all systems** (`tokencount.py`) — the fairness control that matters most.
 - **WorkBoard = real, measured.** Recall via the actual `card.py` against the frozen snapshot (never the live board); bootstrap via the real harvest/bucketize path in a sandboxed `$HOME`.
 - **mem0 = its own published numbers.** Retrieval ~1.8K tok/query and a single-pass ADD extraction call per session, from the Mem0 paper (arXiv:2504.19413) and mem0.ai/research-3. mem0 needs an OpenAI key + Qdrant to run; modeling it from its *own* marketed figures means we cannot be accused of mis-configuring or sandbagging it — the defaults FAVOR mem0 (flat 1.8K regardless of answer fan-out is its best case).

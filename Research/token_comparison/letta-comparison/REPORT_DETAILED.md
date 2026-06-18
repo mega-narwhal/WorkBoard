@@ -12,7 +12,7 @@
 | Letta version | `0.16.8` (real measurement) |
 | graphify version | `graphifyy 0.8.40` |
 | WorkBoard recall | REAL — `card.py` against frozen snapshot |
-| Location | `WorkBoard/graphify-comparison/` (in-repo, non-invasive) |
+| Location | `WorkBoard/Research/token_comparison/letta-comparison/` (in-repo, non-invasive) |
 
 The single most important fairness control: **one tokenizer (`tiktoken-cl100k_base`) counts every token for every system.** It is the tokenizer the peers use for their own published figures, and it is documented to run ~10–15% *under* Claude's true tokenizer — so absolute token counts are if anything conservative, and the *ratios* (which is what we report) are tokenizer-invariant.
 
@@ -241,7 +241,7 @@ graphify has no per-prompt injection (no nudge); WorkBoard's recall is cheaper t
 ## 13. Exact reproduction
 
 ```bash
-cd WorkBoard/graphify-comparison
+cd WorkBoard/Research/token_comparison/letta-comparison
 python3 build_fixtures.py        # freeze corpora from ~/.claude (once; reads only)
 python3 run_recall.py            # Study 2 (3-way recall)
 python3 run_live.py              # Study 1 (mem0 / claude-mem live loop)

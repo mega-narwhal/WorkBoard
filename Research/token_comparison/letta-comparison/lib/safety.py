@@ -1,6 +1,6 @@
 """Safety guard — proves this study never mutates the rest of the product.
 
-The study now lives INSIDE the product repo (WorkBoard/graphify-comparison/) by
+The study now lives INSIDE the product repo (WorkBoard/Research/token_comparison/letta-comparison/) by
 the user's request, as a tracked sub-project. The non-invasiveness guarantee
 therefore shifts from "outside the product" to: **all writes are confined to this
 study subfolder; the live board and product source elsewhere are never written.**
