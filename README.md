@@ -165,6 +165,18 @@ The 130 KB+ `board.json` is **never auto-loaded** — context stays clean no mat
 
 ---
 
+## ⚖️ But what's the disadvantage?
+
+WorkBoard is cheaper because it **only records what gets carded** — structured *outcomes* (what shipped, why, how), **not your entire raw conversation**. That's a real trade-off:
+
+- **It can't recall what was never carded.** If a detail only ever lived in chat and was never written to a card, the board doesn't hold it. In our 20-query test, **1 was an off-board fact** WorkBoard simply couldn't answer — a vector store could.
+- **For vague or single-fact recall, a vector memory can win.** On the recall test WorkBoard beat claude-mem on **16/19** queries — but lost **3/19** (tight single-fact pinpoints), and mem0 / Letta inject a smaller bundle per single lookup. WorkBoard wins the *loop* and the multi-card *lifecycle* questions, **not every individual lookup.**
+- **It needs the carding habit, and it's project-scoped.** The work has to actually get carded (hook-enforced, but still discipline), and a board is per-project — not cross-project memory.
+
+**So run both.** WorkBoard is the structured project ledger; pair it with a vector memory (mem0, claude-mem, Letta) for the vague *"what did I once say about X?"* recall it doesn't try to cover. They're complements, not substitutes.
+
+---
+
 ## 🥊 Controversy — claims vs. what we measured
 
 Every memory tool markets a big efficiency number. We reproduced their setups on the **same corpus and tokenizer**, with settings that *favour the peer* — and several headline claims don't survive a real run. **Reproduce any of it yourself** ([harness + receipts](Research/token_comparison/MASTER_SUMMARY.md)); show us where we're wrong and we'll fix the number.
