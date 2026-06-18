@@ -161,6 +161,8 @@ See what shipped — and what's **still open** — laid out by date. Catch misse
 | Write / keep current | 0 | 0 | tie |
 | Big artifact autoload | never | never | tie |
 
+> *WorkBoard's "Build the memory" figure varies with harvest config (hourly bucket size) — both shown are **under 1.3% of the peer's** per-session compression total, so the **reduction %** is the robust number.*
+
 The 130 KB+ `board.json` is **never auto-loaded** — context stays clean no matter how big the board grows.
 
 ---
