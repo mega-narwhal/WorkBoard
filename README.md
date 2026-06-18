@@ -39,9 +39,10 @@ cd WorkBoard
 
 | # | Problem | How WorkBoard solves it |
 |---|---|---|
-| 1 | We **can't keep track of our code**. | WorkBoard **tracks live what Claude is working on** and what it just shipped — without you typing anything. |
-| 2 | You're **generating ideas faster** than you can act on them. | Card them on the spot — as cards or subtasks. Later, just say *"Do #426"* — or chain them: *"Do #426, #123 and #99."* Each one picks up exactly where it was left. |
-| 3 | You're getting more done than ever — but **how do you remember what shipped**, why, which files? | Every card has a **title** (the gist) and a **short description**; the deeper work (subtasks, writeup, files, commits) hangs off as leaf nodes. Future Claude reads a tiny digest first and **traverses only the leaves it needs** — answering "what did we do on OAuth in May?" costs a handful of tokens, not a re-read of every chat log. |
+| 1 | **Agent memory is for the agent only — invisible to you.** | WorkBoard is a **visual knowledge-graph for both users *and* agents** — you *see* your work as a live board; the agent walks the same graph. |
+| 2 | We **can't keep track of our code**. | WorkBoard **tracks live what Claude is working on** and what it just shipped — without you typing anything. |
+| 3 | You're **generating ideas faster** than you can act on them. | Card them on the spot — as cards or subtasks. Later, just say *"Do #426"* — or chain them: *"Do #426, #123 and #99."* Each one picks up exactly where it was left. |
+| 4 | You're getting more done than ever — but **how do you remember what shipped**, why, which files? | Every card has a **title** (the gist) and a **short description**; the deeper work (subtasks, writeup, files, commits) hangs off as leaf nodes. Future Claude reads a tiny digest first and **traverses only the leaves it needs** — answering "what did we do on OAuth in May?" costs a handful of tokens, not a re-read of every chat log. |
 
 ## The workflow
 
