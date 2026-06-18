@@ -7,7 +7,8 @@ sessions). Peers are measured/modeled from their **own** published numbers, with
 settings that **favor the peer**, so WorkBoard's margins are conservative floors.
 
 > Per-study detail: [`mem0-comparison/`](mem0-comparison/) ·
-> [`claude-mem/`](claude-mem/) · [`letta-comparison/`](letta-comparison/) (Letta).
+> [`claude-mem/`](claude-mem/) · [`letta-comparison/`](letta-comparison/) (Letta) ·
+> [`graphify-comparison/`](graphify-comparison/) (graphify).
 
 ---
 
