@@ -89,11 +89,30 @@ def main():
         print(f"archived {len(cards)} cards → {afp.name}")
 
     board["cards"] = keep
-    board["rev"] = board.get("rev", 0) + 1
-    board["savedAt"] = _iso_now()
-    board["savedBy"] = "claude"
-    p.write_text(json.dumps(board, indent=2, ensure_ascii=False) + "\n")
-    print(f"active board now {len(keep)} cards · rev → {board['rev']}")
+    # Save via card_state.atomic_save: POST through the running board server (so
+    # its cache stays consistent and SSE animates the removal) with rev-CAS, or a
+    # locked direct write + CAS when no server owns the board. Writing board.json
+    # directly here used to RACE a live server — it would re-POST its stale cache
+    # and resurrect the just-archived cards.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import card_state
+    except ImportError:
+        card_state = None
+    if card_state is not None:
+        try:
+            new_rev = card_state.atomic_save(p, board)
+        except card_state.BoardConflict:
+            print("board moved during archive — skipping this pass (retries next run)")
+            return
+    else:
+        # Standalone fallback: direct write (no card_state importable).
+        board["rev"] = board.get("rev", 0) + 1
+        board["savedAt"] = _iso_now()
+        board["savedBy"] = "claude"
+        p.write_text(json.dumps(board, indent=2, ensure_ascii=False) + "\n")
+        new_rev = board["rev"]
+    print(f"active board now {len(keep)} cards · rev → {new_rev}")
 
 
 if __name__ == "__main__":

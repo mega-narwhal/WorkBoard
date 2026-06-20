@@ -342,6 +342,23 @@ if [ "${just_bootstrapped:-0}" != "1" ] && [ "${BOARD_NO_RECON:-0}" != "1" ] \
   fi
 fi
 
+# Auto-archive Done: move Done cards older than N days into board/archive/
+# board-YYYY-MM.json so the active board stays small (~15-25 cards) WITHOUT ever
+# deleting work (archives are served on /archive/ and pulled when a #N is asked
+# for). Runs DETACHED so the digest stays instant, and server-aware (POSTs
+# through the live server, so no race / no resurrected cards). Threshold via
+# BOARD_ARCHIVE_DAYS (default 14); opt out with BOARD_NO_ARCHIVE=1 or a per-board
+# board/.no-archive marker. Idempotent — silent no-op when nothing is old enough.
+if [ "${just_bootstrapped:-0}" != "1" ] && [ "${BOARD_NO_ARCHIVE:-0}" != "1" ] \
+   && [ ! -f "$(dirname "${board_path}")/.no-archive" ] && [ -f "${board_path}" ]; then
+  archiver="$(dirname "$0")/archive_done.py"
+  if [ -f "${archiver}" ]; then
+    nohup python3 "${archiver}" "${board_path}" --days "${BOARD_ARCHIVE_DAYS:-14}" \
+      >"$(dirname "${board_path}")/.board-archive.log" 2>&1 </dev/null &
+    disown 2>/dev/null || true
+  fi
+fi
+
 # Build digest: counts by column + last shipped card (with relative time).
 digest="$(python3 - "${board_path}" <<'PY' 2>/dev/null
 import json, sys
