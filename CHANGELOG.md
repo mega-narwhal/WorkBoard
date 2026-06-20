@@ -9,6 +9,30 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.36 — CSRF guard on the board server + first unit suite (2026-06-20)
+
+- **Block cross-site writes to the local board server** (`scripts/serve.py`, new
+  `BoardHandler._csrf_ok`). `POST /board.json` (full board replace) and
+  `/progress` were reachable by any web page the user's browser opens — a foreign
+  site could POST to `127.0.0.1:7891` and wipe the board (the auth gate is a no-op
+  on the tokenless localhost default). The guard requires same-origin when an
+  `Origin` header is present (kills classic CSRF) and a loopback `Host` when bound
+  to loopback (kills DNS-rebinding), relaxed only for an explicit non-loopback
+  `--host`. Local CLI writers (`card.py`, hooks) send no `Origin` and are
+  unaffected.
+- **First hermetic unit suite + CI** (`tests/`, `pytest.ini`,
+  `.github/workflows/tests.yml`). 82 tests (81 pass, 1 xfail) pinning the
+  pure-logic and security invariants most prone to silent regression: the CSRF
+  guard, `/archive` containment (the xfail documents a known sibling-dir prefix
+  bypass), `diff_states`, rev compare-and-swap, tag taxonomy + urgency,
+  `need_detect`, digest building / card-array salvage, and sticky port
+  assignment. No live board/server/registry/network/LLM — state is isolated per
+  test. Runs on push/PR (Python 3.11/3.12).
+- **Deprecation sweep:** `datetime.utcnow()` → `datetime.now(timezone.utc)` across
+  all 7 UTC-timestamp sites (output byte-identical). Files: `scripts/serve.py`,
+  `scripts/port_registry.py`, `scripts/log_event.py`, `scripts/regen_index.py`,
+  `scripts/archive_done.py`, `scripts/_render.py`, `scripts/card_state.py`.
+
 ### 0.9.35 — Faster LLM-reconcile card animation (2026-06-19)
 
 - **LLM reconcile per-card glide 150ms → 60ms** (`scripts/hourly_reconcile.py`,
