@@ -9,6 +9,19 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.38 — Fix /archive path-containment bypass (2026-06-20)
+
+- **Close the `/archive/` sibling-dir bypass** (audit finding).
+  `BoardHandler._handle_archive` confined reads with
+  `str(target).startswith(str(archive_dir))` — no path-segment boundary — so a
+  sibling like `<board>/archive-secrets/secret.json` (string-prefixed by
+  `<board>/archive`) slipped the guard. Containment is now anchored on a segment
+  boundary (`base == target or base in target.parents`). The unit test that
+  documented this as an `xfail` is now a normal passing test → suite is
+  **92 passed, 0 xfailed**. Files: `scripts/serve.py`,
+  `tests/test_archive_path_safety.py`. Also adds `tests/test_archive_done.py`
+  (10 tests) for the auto-archive backstop shipped in 0.9.37.
+
 ### 0.9.37 — Auto-archive old Done cards on SessionStart (2026-06-20)
 
 - **Done no longer grows unbounded.** `archive_done.py` (Done older than
