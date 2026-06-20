@@ -230,6 +230,7 @@ def _gated_stream(fn, *fn_args) -> None:
 class BoardHandler(BaseHTTPRequestHandler):
     board_dir: Path = None  # set by main()
     auth_token: str | None = None  # set by main() — #116 LAN-AUTH; None = open
+    bind_host: str = "127.0.0.1"  # set by main() — used by the CSRF/rebind guard
     protocol_version = "HTTP/1.1"
 
     def _check_auth(self) -> tuple[bool, str | None]:
@@ -273,6 +274,41 @@ class BoardHandler(BaseHTTPRequestHandler):
             {"Set-Cookie": f"bs_auth={cookie_tok}; Path=/; SameSite=Strict; Max-Age=2592000"}
             if cookie_tok else {}
         )
+        return True
+
+    def _csrf_ok(self) -> bool:
+        """CSRF / DNS-rebinding guard for state-changing POSTs.
+
+        A loopback server is reachable by ANY page the user's browser opens, so a
+        foreign site can `fetch('http://127.0.0.1:<port>/board.json', {method:'POST'})`
+        and wipe the board. The auth gate is a no-op on the tokenless localhost
+        default, so it doesn't stop this. Block cross-site writes without breaking
+        legit writers (card.py / hooks / the board page itself):
+
+          - same-origin — every cross-site browser POST carries an `Origin`; if one
+            is present its host:port must equal `Host`. The board page and a LAN
+            phone are same-origin (Origin == Host); card.py and the hooks use
+            urllib and send NO Origin at all, so they're unaffected.
+          - loopback Host — when bound to loopback (the default), `Host` must name a
+            loopback authority, so a rebound attacker domain (Host: evil.example
+            resolved to 127.0.0.1, which would pass the same-origin test) is still
+            rejected. Relaxed only when the user explicitly bound a non-loopback
+            --host (the documented LAN/phone flow, paired with --auth-token, which
+            then gates writes via _gate()).
+        """
+        host = (self.headers.get("Host") or "").strip()
+        origin = self.headers.get("Origin")
+        if origin:
+            try:
+                if urllib.parse.urlsplit(origin).netloc.lower() != host.lower():
+                    return False
+            except ValueError:
+                return False
+        bind = (type(self).bind_host or "").strip("[]").lower()
+        if bind in ("", "127.0.0.1", "localhost", "::1"):
+            host_name = host.rsplit(":", 1)[0].strip("[]").lower() if host else ""
+            if host_name not in ("127.0.0.1", "localhost", "::1", ""):
+                return False
         return True
 
     def log_message(self, fmt, *args):
@@ -633,6 +669,9 @@ class BoardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self._gate():
+            return
+        if not self._csrf_ok():
+            self._send(403, b'{"error":"cross-origin POST refused"}')
             return
         path = self.path.split("?", 1)[0].rstrip("/")
         # #318 — extraction progress relay. Inline (card.py progress) and haiku
@@ -1019,6 +1058,7 @@ def _run_server(board_dir, args):
     """Configure the handler, register our port, and serve until interrupted."""
     BoardHandler.board_dir = board_dir
     BoardHandler.auth_token = args.auth_token or None
+    BoardHandler.bind_host = args.host or "127.0.0.1"
     _load_initial_cache(board_dir)
     # Resolve THIS board's designated port (#374). Idempotent + sticky: the
     # board keeps the same port across restarts, and a second project whose
