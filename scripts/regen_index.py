@@ -55,7 +55,7 @@ def build_index(board):
     col_counts = Counter(c.get("column", "?") for c in cards)
     return {
         "rev": board.get("rev"),
-        "generatedAt": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generatedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "totalCards": len(cards),
         "columns": [{"id": k, "count": v} for k, v in col_counts.most_common()],
         "cards": idx_cards,

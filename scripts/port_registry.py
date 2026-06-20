@@ -398,4 +398,4 @@ def get_active(session_id: str | None = None) -> str | None:
 
 def _now_iso() -> str:
     import datetime
-    return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -243,7 +243,7 @@ def atomic_save(p: Path, d: dict, regen: bool = True) -> int:
     """
     base_rev = d.get("rev", 0)          # #609 — the rev we loaded; sent for CAS
     d["rev"] = base_rev + 1
-    d["savedAt"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    d["savedAt"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     d["savedBy"] = "claude"
 
     data = json.dumps(d, indent=2, ensure_ascii=False).encode()
@@ -297,7 +297,7 @@ def find_card(d: dict, ref: str) -> dict:
 
 
 def now_iso() -> str:
-    return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def maybe_stdin(literal: str | None, stdin_flag: bool) -> str | None:

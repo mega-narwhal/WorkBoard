@@ -54,7 +54,7 @@ def write_event(event: dict) -> dict:
     The SINGLE writer for the events file — CLI main() and in-process callers
     (card.py verb counting) both go through here so the path + schema live in
     one place. Caller is responsible for catching errors if it must not fail."""
-    event.setdefault("ts", datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+    event.setdefault("ts", datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
     EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with EVENTS_FILE.open("a") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
