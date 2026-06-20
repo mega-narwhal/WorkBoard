@@ -9,6 +9,22 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.37 — Auto-archive old Done cards on SessionStart (2026-06-20)
+
+- **Done no longer grows unbounded.** `archive_done.py` (Done older than
+  `--days` → `board/archive/board-YYYY-MM.json`, never deleting) existed but was
+  never wired to run, so the active board accumulated forever. It now fires
+  detached from the SessionStart hook, keeping the active board small (~15-25
+  cards) while archives stay retrievable via `/archive/` and `#N` lookups.
+  Tunable with `BOARD_ARCHIVE_DAYS` (default 14); opt out with
+  `BOARD_NO_ARCHIVE=1` or a per-board `board/.no-archive` marker.
+- **Fix a latent archive race.** `archive_done.py` wrote `board.json` directly,
+  which a live server would clobber from its stale in-memory cache —
+  resurrecting just-archived cards. It now persists via
+  `card_state.atomic_save` (POST-through-server with rev-CAS, or a locked direct
+  write + CAS when no server owns the board), matching how `card.py` writes.
+  Files: `scripts/archive_done.py`, `scripts/hook_session_start.sh`.
+
 ### 0.9.36 — CSRF guard on the board server + first unit suite (2026-06-20)
 
 - **Block cross-site writes to the local board server** (`scripts/serve.py`, new
