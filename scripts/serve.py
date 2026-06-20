@@ -658,8 +658,12 @@ class BoardHandler(BaseHTTPRequestHandler):
     def _handle_archive(self, path):
         """GET /archive/<rel> — serve an archived board snapshot (path-safe)."""
         rel = path[len("/archive/"):].lstrip("/")
+        base = (self.board_dir / "archive").resolve()
         target = (self.board_dir / "archive" / rel).resolve()
-        if not str(target).startswith(str((self.board_dir / "archive").resolve())):
+        # Containment must be anchored on a PATH-SEGMENT boundary, not a raw string
+        # prefix: a bare startswith let a sibling dir like `archive-secrets/` (whose
+        # path string starts with `<board>/archive`) escape the archive dir.
+        if base != target and base not in target.parents:
             self._send(403, b'{"error":"forbidden"}')
             return
         if target.is_file():

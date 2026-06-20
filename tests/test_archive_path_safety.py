@@ -8,8 +8,6 @@ the two output methods so we can record what status / file the handler chose.
 
 import json
 
-import pytest
-
 import serve
 
 
@@ -98,17 +96,11 @@ def test_archive_directory_relative_traversal_blocked(tmp_path):
     assert status == 403
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="audit: startswith guard has no trailing sep, so sibling-dir "
-    "prefix 'archive-secrets/' bypasses containment and is served",
-)
 def test_archive_sibling_dir_prefix_bypass(tmp_path):
-    """SECURITY INVARIANT (currently violated): a sibling dir sharing the
-    'archive' name prefix must NOT be readable. The real code uses
-    str(target).startswith(str(archive.resolve())) with no trailing os.sep,
-    so '<board>/archive-secrets/secret.json' passes the prefix check and is
-    served. Captured as xfail to document the vuln while keeping the suite green.
+    """SECURITY INVARIANT: a sibling dir sharing the 'archive' name prefix must
+    NOT be readable. The old guard used str(target).startswith(archive) with no
+    segment boundary, so '<board>/archive-secrets/secret.json' slipped through;
+    containment is now anchored on a path-segment boundary (base in parents).
     """
     _, sib = _seed_archive(tmp_path)
     h, calls = _make_handler(tmp_path)
