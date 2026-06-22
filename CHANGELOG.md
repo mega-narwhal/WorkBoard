@@ -9,6 +9,17 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.39 — Calendar shows archived history (small board, full calendar) (2026-06-21)
+
+- **The calendar now spans the full history, even though the active board stays
+  small.** Auto-archive (0.9.37) moves old Done cards out of `board.json`, which
+  also dropped them from the calendar (it read only `board.json`). `renderCalendar`
+  now lazily fetches `/archive/board-YYYY-MM.json` for the month(s) on screen and
+  merges them into the calendar **view only** — `state.cards` (the active board,
+  drag/sort) is never mutated. Archived cards are badged 📦 and open a read-only
+  detail overlay (they're not in the live board, so the editable card modal can't
+  load them). Verified end-to-end in a browser. File: `templates/board.html`.
+
 ### 0.9.38 — Fix /archive path-containment bypass (2026-06-20)
 
 - **Close the `/archive/` sibling-dir bypass** (audit finding).
