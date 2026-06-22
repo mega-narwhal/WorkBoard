@@ -388,6 +388,25 @@ def _emit_extraction_pending(board: Path, card_py: Path,
     return len(staged)
 
 
+def _autoship_block_reason(card: dict) -> str | None:
+    """Why the background reconcile must NOT auto-ship this card to `done`.
+
+    The reconcile decides "shipped" from file/noun-cluster overlap with recent
+    activity, which is too weak to conclude a DEFECT is fixed: it false-shipped a
+    "Fix /archive…" card merely because nearby activity mentioned "archive". Two
+    deterministic stop-signals override that guess — an OPEN bug needs a real
+    fix, and unchecked subtasks mean the work isn't finished. Either way, leave
+    the card for the in-session agent (or human) to close with explicit evidence.
+    Returns the reason to skip, or None when auto-ship is allowed.
+    """
+    tags = [str(t).lower() for t in (card.get("tags") or [])]
+    if "bug" in tags:
+        return "open bug — needs an explicit fix, not a noun-cluster match"
+    if any(not st.get("done") for st in (card.get("subtasks") or [])):
+        return "has unchecked subtasks — work isn't finished"
+    return None
+
+
 def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
                      banner_num: int | None = None,
                      only_discovered: bool = True,
@@ -534,6 +553,16 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
                 continue
             if cur["column"] == target:
                 continue
+            # SAFETY: never let the background sweep auto-ship an OPEN bug or a
+            # card with unchecked subtasks (it once false-shipped a "Fix /archive…"
+            # bug on a bare noun-cluster match). Bugs / open subtasks need an
+            # explicit fix by the in-session agent, not a harvest guess.
+            if target == "done":
+                block = _autoship_block_reason(cur)
+                if block:
+                    n_skipped += 1
+                    print(f"  recon: SKIP #{num} → done — {block}", file=sys.stderr)
+                    continue
             # #574 — a corrective done-move must glide task→IP→done, not jump
             # straight to done. If the card isn't already in inprogress, fly it
             # there first (--force to bypass the #103 decompose guard, since
