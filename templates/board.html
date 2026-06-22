@@ -5163,6 +5163,39 @@ function _calCardMatchesFilter(card) {
   return true;
 }
 
+// ===== Calendar archive merge — small board, FULL calendar =====
+// Old Done cards are archived out of board.json into board/archive/board-YYYY-MM.json
+// (archive_done.py) so the active board stays small. The calendar still shows the
+// FULL history: it lazily fetches the archive month(s) it displays and merges them
+// into the calendar VIEW ONLY — never into state.cards, so the board columns and
+// drag/sort are untouched. Archived cards are tagged `_archived` and open read-only.
+let _calArchive = {};               // 'YYYY-MM' -> archived card objects (tagged _archived)
+let _calArchiveFetching = new Set();
+function _calMonthKey(d) {           // UTC month — matches archive_done's bucket key
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
+}
+function _calEnsureArchive(keys) {
+  keys.forEach(key => {
+    if (key in _calArchive || _calArchiveFetching.has(key)) return;
+    _calArchiveFetching.add(key);
+    fetch('/archive/board-' + key + '.json', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : { cards: [] }))
+      .then(o => { _calArchive[key] = (o.cards || []).map(c => ({ ...c, _archived: true })); })
+      .catch(() => { _calArchive[key] = []; })
+      .finally(() => { _calArchiveFetching.delete(key); renderCalendar(); });
+  });
+}
+function _calCards() {
+  // Active board cards + archived cards for already-loaded months, deduped (an
+  // active card always wins over a same-id archived copy).
+  const seen = new Set((state.cards || []).map(c => c.id));
+  const out = (state.cards || []).slice();
+  for (const key in _calArchive) {
+    for (const c of _calArchive[key]) if (!seen.has(c.id)) { seen.add(c.id); out.push(c); }
+  }
+  return out;
+}
+
 function renderCalendar() {
   const cal = $('#calendar');
   // Save scroll from the about-to-be-clobbered DOM before innerHTML wipe.
@@ -5177,6 +5210,13 @@ function renderCalendar() {
   const monthStart = new Date(_calCursor);
   const monthName  = monthStart.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const todayStr   = localYmd(new Date());
+
+  // Load the archive month(s) this view spans (prev/this/next, to cover the grid's
+  // adjacent-month days), then build the merged active+archived card list for the
+  // calendar view. Empty archives (the common case) make calCards == state.cards.
+  _calEnsureArchive([-1, 0, 1].map(off =>
+    _calMonthKey(new Date(Date.UTC(monthStart.getFullYear(), monthStart.getMonth() + off, 15)))));
+  const calCards = _calCards();
 
   // ----- Topbar: month name + nav + month-at-a-glance stats -----
   const topbar = document.createElement('div');
@@ -5218,7 +5258,7 @@ function renderCalendar() {
   const monthYear  = monthStart.getFullYear();
   const inMonth = (d) => { const x = new Date(d); return x.getMonth() === monthMonth && x.getFullYear() === monthYear; };
   let shippedCount = 0, createdCount = 0, openCount = 0;
-  (state.cards || []).forEach(c => {
+  calCards.forEach(c => {
     if (c.column === 'ideas') return;
     if (c.doneAt && inMonth(c.doneAt)) shippedCount++;
     if (c.createdAt && inMonth(c.createdAt)) createdCount++;
@@ -5332,7 +5372,7 @@ function renderCalendar() {
       dayEl.appendChild(num);
 
       // Pull cards landing on this day. Apply filter.
-      const dayCards = state.cards.filter(card => {
+      const dayCards = calCards.filter(card => {
         if (!card.createdAt) return false;
         if (card.column === 'ideas') return false;
         const refTs = card.doneAt || card.createdAt;
@@ -5419,6 +5459,7 @@ function makeCalendarChip(card) {
   chip.className = 'cal-event-chip';
   if (card.column === 'done') chip.classList.add('done');
   else if (card.priority) chip.classList.add('prio-' + card.priority);
+  if (card._archived) chip.classList.add('archived');
 
   const dot = document.createElement('span');
   dot.className = 'event-dot';
@@ -5445,9 +5486,72 @@ function makeCalendarChip(card) {
   // #243 — right-side placement so the tip doesn't cover the row below.
   chip.setAttribute('data-tip-placement', 'right');
   // Open the modal in-place — don't switch to Board view, so closing the
-  // modal (Esc / × / overlay) leaves the user on Calendar.
-  chip.onclick = () => { openModal(card.id); };
+  // modal (Esc / × / overlay) leaves the user on Calendar. Archived cards aren't
+  // in state.cards, so they get a read-only detail view instead of the editor.
+  chip.onclick = () => { card._archived ? openArchivedCard(card) : openModal(card.id); };
   return chip;
+}
+
+// Read-only detail for an ARCHIVED card. It lives in board/archive/, not in the
+// live board.json, so the editable openModal can't find it — show its title,
+// done date, tags and writeup in a lightweight read-only overlay instead.
+let _archCardEl = null;
+function _ensureArchStyle() {
+  if (document.getElementById('arch-card-style')) return;
+  const s = document.createElement('style');
+  s.id = 'arch-card-style';
+  s.textContent =
+    '.cal-event-chip.archived,.cal-day-modal-card.archived{opacity:.66}' +
+    '.cal-event-chip.archived .event-text::after{content:" 📦";opacity:.7}' +
+    '.arch-card-overlay{position:fixed;inset:0;background:rgba(44,38,32,.45);' +
+      'display:flex;align-items:center;justify-content:center;z-index:300}' +
+    '.arch-card{position:relative;max-width:520px;width:calc(100% - 48px);max-height:80vh;' +
+      'overflow:auto;background:var(--card-bg);color:var(--ink);border:1px solid var(--card-border);' +
+      'border-radius:12px;padding:20px 22px;box-shadow:var(--shadow-hover);font:14px/1.5 system-ui,sans-serif}' +
+    '.arch-badge{display:inline-block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;' +
+      'color:var(--muted);margin-bottom:8px}' +
+    '.arch-close{position:absolute;top:10px;right:12px;background:none;border:none;font-size:22px;' +
+      'line-height:1;cursor:pointer;color:var(--muted)}' +
+    '.arch-close:hover{color:var(--ink)}' +
+    '.arch-title{font-size:16px;font-weight:500;margin-bottom:6px}' +
+    '.arch-num{color:var(--muted)}.arch-code{font-weight:600}' +
+    '.arch-meta,.arch-tags{font-size:12px;color:var(--muted);margin-bottom:6px}' +
+    '.arch-detail{white-space:pre-wrap;margin:10px 0;padding:10px 12px;background:var(--neutral);border-radius:8px}' +
+    '.arch-foot{font-size:11px;color:var(--muted);margin-top:12px}';
+  document.head.appendChild(s);
+}
+function _onArchCardKey(e) { if (e.key === 'Escape') closeArchivedCard(); }
+function closeArchivedCard() {
+  if (_archCardEl) { _archCardEl.remove(); _archCardEl = null; }
+  document.removeEventListener('keydown', _onArchCardKey);
+}
+function openArchivedCard(card) {
+  _ensureArchStyle();
+  closeArchivedCard();
+  const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+  const ov = document.createElement('div');
+  ov.className = 'arch-card-overlay';
+  ov.onclick = (e) => { if (e.target === ov) closeArchivedCard(); };
+  const when = card.doneAt || card.createdAt;
+  const detail = (card.writeup || card.notes || card.origin || '').trim();
+  const tags = (card.tags || []).map(t => '#' + t).join(' ');
+  const box = document.createElement('div');
+  box.className = 'arch-card';
+  box.innerHTML =
+    '<div class="arch-badge">📦 archived</div>' +
+    '<button class="arch-close" aria-label="Close">×</button>' +
+    '<div class="arch-title"><span class="arch-num">#' + esc(card.num) + '</span> ' +
+      (card.code ? '<span class="arch-code">' + esc(card.code) + '</span> ' : '') + esc(card.title) + '</div>' +
+    (when ? '<div class="arch-meta">✓ done ' + esc(fmtTime(when)) + ' (' + esc(relativeTime(when)) + ')</div>' : '') +
+    (tags ? '<div class="arch-tags">' + esc(tags) + '</div>' : '') +
+    (detail ? '<div class="arch-detail"></div>' : '') +
+    '<div class="arch-foot">Read-only — archived out of the active board. Reference it by #' + esc(card.num) + '.</div>';
+  if (detail) box.querySelector('.arch-detail').textContent = detail;
+  box.querySelector('.arch-close').onclick = closeArchivedCard;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  _archCardEl = ov;
+  document.addEventListener('keydown', _onArchCardKey);
 }
 
 // #235 — Day-detail modal: full-width readable view of a multi-day window
@@ -5458,8 +5562,9 @@ let _calDayModalCenter = null;
 
 function _cardsForDay(ds) {
   // Mirrors the filter logic in renderCalendar but keeps it self-contained
-  // so the modal still applies the user's active _calFilter set.
-  return state.cards.filter(card => {
+  // so the modal still applies the user's active _calFilter set. Uses the merged
+  // active+archived list so the day modal shows full history too.
+  return _calCards().filter(card => {
     if (!card.createdAt) return false;
     if (card.column === 'ideas') return false;
     const refTs = card.doneAt || card.createdAt;
@@ -5490,6 +5595,7 @@ function _makeCalDayModalCard(card) {
   row.className = 'cal-day-modal-card';
   if (card.column === 'done') row.classList.add('done');
   else if (card.priority) row.classList.add('prio-' + card.priority);
+  if (card._archived) row.classList.add('archived');
 
   const r1 = document.createElement('div');
   r1.className = 'cm-row1';
@@ -5519,7 +5625,7 @@ function _makeCalDayModalCard(card) {
 
   // #236 — don't close the day modal; layer the card modal on top of it
   // so Esc unwinds back to the day modal (Esc again closes day modal).
-  row.onclick = () => { openModal(card.id); };
+  row.onclick = () => { card._archived ? openArchivedCard(card) : openModal(card.id); };
   return row;
 }
 
