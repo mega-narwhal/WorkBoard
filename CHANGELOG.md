@@ -9,6 +9,18 @@ uses date-stamped pre-1.0 development entries until the first tagged release.
 
 Pre-release hardening toward `v1.0.0-rc.1`. Built across Plan v2 phases 0–6.
 
+### 0.9.40 — Reconcile no longer false-ships open bugs (2026-06-21)
+
+- **The background reconcile won't auto-ship a defect on weak evidence.** It
+  decides "shipped" from file/noun-cluster overlap with recent activity, which is
+  too loose for a bug — it once moved an open `Fix /archive…` card straight to
+  done because nearby activity merely mentioned "archive". A deterministic guard
+  (`_autoship_block_reason`) in the apply loop now refuses to auto-move a card to
+  `done` when it still carries a `bug` tag or has any unchecked subtask; those are
+  left for the in-session agent to close with explicit evidence. + 7 unit tests
+  (suite: 99 passed). Files: `scripts/hourly_reconcile.py`,
+  `tests/test_reconcile_autoship_guard.py`.
+
 ### 0.9.39 — Calendar shows archived history (small board, full calendar) (2026-06-21)
 
 - **The calendar now spans the full history, even though the active board stays
