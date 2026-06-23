@@ -6088,69 +6088,67 @@ function renderColumn(col, cards) {
   }
   el.appendChild(body);
 
-  const addBtn = document.createElement('button');
-  addBtn.className = 'add-card-btn';
-  addBtn.textContent = col.id === 'ideas' ? '+ Add idea' : '+ Add card';
-  addBtn.onclick = () => {
-    const n = (state.nextNum || 1);
-    state.nextNum = n + 1;
-    const card = {
-      num: n,
-      id: uid('c'),
-      code: '',
-      priority: null,
-      title: 'New ' + (col.id === 'ideas' ? 'idea' : 'card'),
-      column: col.id,
-      tags: [],
-      notes: '',
-      writeup: '',
-      createdAt: now(),
-      updatedAt: now(),
-      doneAt: col.id === 'done' ? now() : null,
-      subtasks: []
-    };
-    state.cards.push(card);
-    scheduleSave();
-    openModal(card.id);
-    // #186 — for newly-added cards: focus + select-all the title so the
-    // user can type over "New card" immediately. First blur (caused by
-    // Enter — see title keydown handler — or by clicking outside the
-    // title) commits the title and closes the modal. One-shot so it
-    // doesn't fire on later edits.
-    requestAnimationFrame(() => {
-      const titleEl = document.querySelector('#modal-overlay .modal-title');
-      if (!titleEl) return;
-      titleEl.focus();
-      try {
-        const range = document.createRange();
-        range.selectNodeContents(titleEl);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } catch (_) {}
-      titleEl.addEventListener('blur', () => {
-        // #547 — if nothing was written (title left empty or still the default
-        // "New card"/"New idea" placeholder), don't persist an empty card.
-        const t = (titleEl.textContent || '').trim();
-        const placeholder = 'New ' + (col.id === 'ideas' ? 'idea' : 'card');
-        if (!t || t === placeholder) {
-          state.cards = state.cards.filter(c => c.id !== card.id);
-          if (state.nextNum === n + 1) state.nextNum = n;   // reclaim the number
+  // #16 — "+ Add card" only on the intake lanes (Backlog / To Do). In Progress
+  // and Done are entered by MOVING a card there, not creating one in place.
+  if (col.id === 'backlog' || col.id === 'task') {
+    const addBtn = document.createElement('button');
+    addBtn.className = 'add-card-btn';
+    addBtn.textContent = '+ Add card';
+    addBtn.onclick = () => {
+      const n = (state.nextNum || 1);
+      state.nextNum = n + 1;
+      const card = {
+        num: n,
+        id: uid('c'),
+        code: '',
+        priority: null,
+        title: 'New card',
+        column: col.id,
+        tags: [],
+        notes: '',
+        writeup: '',
+        createdAt: now(),
+        updatedAt: now(),
+        doneAt: null,
+        subtasks: []
+      };
+      state.cards.push(card);
+      scheduleSave();
+      openModal(card.id);
+      // #186 — for newly-added cards: focus + select-all the title so the
+      // user can type over "New card" immediately. First blur (caused by
+      // Enter — see title keydown handler — or by clicking outside the
+      // title) commits the title and closes the modal. One-shot so it
+      // doesn't fire on later edits.
+      requestAnimationFrame(() => {
+        const titleEl = document.querySelector('#modal-overlay .modal-title');
+        if (!titleEl) return;
+        titleEl.focus();
+        try {
+          const range = document.createRange();
+          range.selectNodeContents(titleEl);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } catch (_) {}
+        titleEl.addEventListener('blur', () => {
+          // #547 — if nothing was written (title left empty or still the default
+          // "New card" placeholder), don't persist an empty card.
+          const t = (titleEl.textContent || '').trim();
+          if (!t || t === 'New card') {
+            state.cards = state.cards.filter(c => c.id !== card.id);
+            if (state.nextNum === n + 1) state.nextNum = n;   // reclaim the number
+            closeModal();
+            scheduleSave();
+            render();
+            return;
+          }
           closeModal();
-          scheduleSave();
-          render();
-          return;
-        }
-        closeModal();
-      }, { once: true });
-    });
-  };
-  el.appendChild(addBtn);
-
-  // #119 correction — keep the dragged column invisible through re-renders.
-  // _colDragSrcId is set during a column drag; cleared on dragend.
-  // opacity:0 (not visibility:hidden) so drop events still fire on the slot.
-  if (_colDragSrcId === col.id) el.style.opacity = '0';
+        }, { once: true });
+      });
+    };
+    el.appendChild(addBtn);
+  }
 
   return el;
 }
