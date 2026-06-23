@@ -570,7 +570,7 @@
   .column-header {
     display: flex; align-items: center; gap: 8px;
     padding: 4px 6px 8px;
-    font-size: 14px; font-weight: 600; color: var(--col-header);
+    font-size: 16px; font-weight: 600; color: var(--col-header);   /* #17 — larger header */
   }
   .column-header .name { flex: 1; outline: none; cursor: text; padding: 2px 4px; border-radius: 3px; }
   .column-header .name:focus { background: #fff; }
@@ -691,7 +691,7 @@
   .card[data-col="ideas"] .badge { background: var(--purple); }
 
   .card-title {
-    font-size: 13px; font-weight: 500; line-height: 1.35;
+    font-size: 14px; font-weight: 500; line-height: 1.4;   /* #17 — larger, easier to read */
     word-wrap: break-word; overflow-wrap: anywhere; color: var(--ink);
   }
   /* #632 — clamp very long titles (e.g. a writeup pasted into the title like
@@ -2407,9 +2407,10 @@ document.addEventListener('contextmenu', e => { if (e.ctrlKey) e.preventDefault(
 // only the board content zooms.
 const _ZOOM_KEY = 'workboard.zoom';
 const _ZOOM_MIN = 0.4, _ZOOM_MAX = 2.5;
-// Default 92% on a fresh board (no saved zoom yet) so all columns fit a laptop
-// screen out of the box; once the user adjusts, their choice is persisted.
-const _ZOOM_DEFAULT = 0.92;
+// #17 — default 100% (was a shrunk-to-fit 92%, which made text hard to read).
+// The fixed 4 lanes flex to fill the width, so there's no need to shrink to fit;
+// once the user adjusts the zoom, their choice is persisted.
+const _ZOOM_DEFAULT = 1.0;
 let _zoom = parseFloat(localStorage.getItem(_ZOOM_KEY)) || _ZOOM_DEFAULT;
 function applyZoom() {
   const b = document.getElementById('board');
@@ -7220,7 +7221,7 @@ async function init() {
     const k = e.key.toLowerCase();
     if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
-    else if (k === '0') { e.preventDefault(); setZoom(_ZOOM_DEFAULT, true); }   // #523 — reset zoom to the fit-to-screen default (92%)
+    else if (k === '0') { e.preventDefault(); setZoom(_ZOOM_DEFAULT, true); }   // #523 — reset zoom to the default (100%)
   });
   $('#modal-overlay').addEventListener('click', e => {
     if (e.target === e.currentTarget) closeModal();
