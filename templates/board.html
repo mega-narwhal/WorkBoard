@@ -403,88 +403,9 @@
      the card is "leaving" and the user's attention is drawn to the cursor. */
   .column.card-src-col { opacity: 0.55; transition: opacity 240ms ease; }
 
-  /* Column drag-to-reorder + drag-to-trash (iPhone-rearrange feel).
-     `col-dragging` = the column being dragged (ghosted out of place).
-     `col-dragging-active` on body = a column is mid-drag (other columns
-     wobble subtly to signal "you can drop me here"). */
-  .column { transition: transform 320ms cubic-bezier(0.34, 1.4, 0.64, 1), opacity 200ms; }
-  .column.col-dragging { opacity: 0.4; }
-  body.col-dragging-active .column { cursor: grabbing; }
-  body.col-dragging-active .column:not(.col-dragging) {
-    animation: col-wiggle 0.6s ease-in-out infinite;
-    /* Keep the iPhone tilt CRISP — no blur. Animating rotate() re-rasterizes the
-       column's text every frame at a new sub-pixel angle (the "blur" you see).
-       Promoting each wiggling column to its own GPU layer makes the browser
-       rasterize it ONCE and composite the rotation as a stable texture. Scoped
-       to the drag, so the layers are released the moment the drag ends. */
-    will-change: transform;
-    backface-visibility: hidden;
-  }
-  @keyframes col-wiggle {
-    0%, 100% { transform: rotate(0deg); }
-    25%      { transform: rotate(-0.45deg); }
-    75%      { transform: rotate(0.45deg); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .column { transition: none; }
-    body.col-dragging-active .column:not(.col-dragging) { animation: none; }
-  }
-  .column-header .grip {
-    cursor: grab; color: var(--muted); font-size: 14px; line-height: 1;
-    user-select: none; padding: 2px 4px; opacity: 0.5;
-    transition: opacity .15s, color .15s;
-  }
-  .column-header:hover .grip { opacity: 1; color: var(--ink); }
-  .column-header .grip:active { cursor: grabbing; }
+  /* #18 — column drag-to-reorder / grip / wiggle CSS removed (fixed lane set). */
 
-  /* Trash drop-zone (appears only while dragging a column). Boho-themed:
-     soft warm cream background, coral icon, gentle shadow, breathing glow. */
-  #col-trash {
-    position: fixed; bottom: 28px; right: 28px; z-index: 250;
-    width: 72px; height: 72px; border-radius: 50%;
-    background: linear-gradient(145deg, #FDFAF5 0%, #F9F2E8 100%);
-    color: var(--accent);
-    display: none; align-items: center; justify-content: center;
-    font-size: 30px; line-height: 1;
-    box-shadow: 0 8px 24px rgba(217,119,87,0.18),
-                0 2px 6px rgba(0,0,0,0.04),
-                inset 0 1px 0 rgba(255,255,255,0.7);
-    border: 1px solid rgba(217,119,87,0.18);
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-    transform: scale(0.6) translateY(20px); opacity: 0;
-    transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1),
-                opacity 220ms, background 200ms, box-shadow 200ms,
-                color 150ms, border-color 200ms;
-    pointer-events: none; cursor: pointer;
-  }
-  body.col-dragging-active #col-trash,
-  body.card-dragging-active #col-trash {
-    display: flex;
-    transform: scale(1) translateY(0); opacity: 1; pointer-events: auto;
-    animation: trash-breathe 2.4s ease-in-out infinite;
-  }
-  @keyframes trash-breathe {
-    0%, 100% { box-shadow: 0 8px 24px rgba(217,119,87,0.18),
-                           0 2px 6px rgba(0,0,0,0.04),
-                           inset 0 1px 0 rgba(255,255,255,0.7); }
-    50%      { box-shadow: 0 10px 32px rgba(217,119,87,0.32),
-                           0 2px 6px rgba(0,0,0,0.04),
-                           inset 0 1px 0 rgba(255,255,255,0.7); }
-  }
-  #col-trash.over {
-    background: linear-gradient(145deg, #E08866 0%, #C96A4E 100%);
-    color: #fff;
-    transform: scale(1.18) translateY(-2px) rotate(-6deg);
-    border-color: rgba(255,255,255,0.4);
-    box-shadow: 0 14px 36px rgba(217,119,87,0.45),
-                0 4px 10px rgba(0,0,0,0.08),
-                inset 0 1px 0 rgba(255,255,255,0.35);
-    animation: none;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    body.col-dragging-active #col-trash { animation: none; }
-    #col-trash { transition: opacity 150ms; }
-  }
+  /* #18 — 🗑 trash drop-zone CSS removed with column editing. */
 
   /* Mini-confirm dialog — boho card, blurred overlay. */
   #mini-confirm-overlay,
@@ -1493,10 +1414,6 @@
   }
   .icon-btn:hover { background: rgba(9,30,66,.10); color: var(--ink); }
   .del-btn:hover { color: var(--red); }
-  /* #551 — Empty Discarded: subtle by default (not shouty for a destructive,
-     low-frequency action), red-tinted on hover to signal danger. */
-  .icon-btn.empty-btn { opacity: .5; font-size: 13px; }
-  .icon-btn.empty-btn:hover { opacity: 1; background: rgba(214,69,65,.12); }
 
   /* Textareas */
   textarea.notes-modal, textarea.writeup-modal {
@@ -1604,14 +1521,7 @@
   .setup .small { font-size: 12px; color: var(--muted); }
   .setup code { background: var(--neutral); color: var(--ink); padding: 1px 6px; border-radius: 3px; }
 
-  .col-add-btn {
-    background: var(--card-bg); color: var(--ink);
-    border: 1px dashed var(--card-border);
-    padding: 8px 12px; border-radius: 8px; cursor: pointer;
-    height: 36px; flex-shrink: 0; align-self: flex-start; font-size: 13px;
-    white-space: nowrap;
-  }
-  .col-add-btn:hover { background: rgba(217,119,87,.06); border-style: solid; border-color: var(--accent); color: var(--accent); }
+  /* #18 — "+ Add column" button CSS removed (fixed lane set). */
 
   /* ===== #318 BOARD-LOAD HUD — History Replay inline/haiku extraction progress.
      Terminal-cyberpunk readout, consistent with the #119 drag HUD (green-on-black,
@@ -1702,7 +1612,6 @@
 
 <div class="toast" id="toast"></div>
 <div class="undo-toast" id="undo-toast"></div>
-<div id="col-trash" title="Drop a card here to discard · drop a column to delete it">🗑</div>
 <div id="mini-confirm-overlay">
   <div class="mini-confirm-card">
     <div class="mc-msg">Confirm?</div>
@@ -1739,6 +1648,9 @@
 // (same origin). No File System Access API, no IndexedDB. Works in any browser.
 const BOARD_URL = '/board.json';
 const REV_URL = '/rev';   // #552 — cheap rev probe so the 3s poll doesn't re-fetch the whole board
+// #14/#18 — the board is a FIXED 4-lane kanban (Backlog → To Do → In Progress →
+// Done). The lane set lives in scripts/serve.py:_DEFAULT_COLS; there is no
+// in-UI column editing (add / drag-reorder / drag-trash / rename all removed).
 let state = null;
 let lastRev = 0;
 let saveTimer = null;
@@ -1791,7 +1703,6 @@ function _toggleDayCollapsed(day) {
     });
   }
 }
-let _colDragRects = null;      // id → DOMRect at dragstart (for FLIP)
 // #119 — live iPhone-style card reflow during drag.
 // dragstart records source; column-body dragover computes insertion slot
 // (top half of a card = insert before, bottom half = insert after) and
@@ -1801,16 +1712,7 @@ let _cardDrag = null;          // { cardId, srcCol, srcEl, hoverCol, hoverBefore
 let _cardDragRects = null;     // cardId → DOMRect at last reflow (for FLIP)
 let _localMoveLog = new Map(); // #518 — cardId→ts of moves logged directly, so the SSE echo doesn't double-log
 let _localEditLog = new Map(); // #548-redux — cardId→ts of local priority-chip clicks so an in-flight SSE echo can't clobber the local priority change during the 400ms scheduleSave window. Mirrors _localMoveLog for the edit path. Scoped to priority for now; title/tag edits would need their own stamps to opt in.
-// #119 — column live-reflow during drag (iPhone home-screen feel).
-// Snapshot of state.columns taken at dragstart so cancel (dragend w/o drop)
-// can revert all the live-preview reorders. _colDragSrcId carries the source
-// id because dragover events can't read dataTransfer.getData (security).
-let _colDragSrcId = null;
-let _colDragCommitted = false;
-// #545 — the ONE pending drop target, computed purely from the pointer on each
-// dragover (no reshuffle). { mode:'reorder', beforeRootId } | { mode:'stack', parentId }.
-// Drives both the indicator and the commit, so highlight always == drop.
-let _colDrop = null;
+// #18 — column-drag state removed (fixed lane set).
 
 // #119 — visible drag HUD. Prints every drag/mouse event as a green-on-black
 // overlay so events are visible regardless of console filters. Header bar
@@ -2312,9 +2214,9 @@ document.addEventListener('dragend', _asStop, true);
 // flight wins over a repaint.
 let _pendingResync = false;
 function isDragInProgress() {
-  // Key on the drag STATE vars (cleared deterministically in commit/cancel/end),
+  // Key on the drag STATE var (cleared deterministically in commit/cancel/end),
   // not body classes whose removal can be missed if a dragend never fires.
-  return _cardDrag != null || _colDragSrcId != null;
+  return _cardDrag != null;
 }
 function flushPendingResync() {
   if (isDragInProgress() || !_pendingResync) return;
@@ -2329,15 +2231,12 @@ document.addEventListener('dragend', () => requestAnimationFrame(flushPendingRes
 
 // #499 — safety net for a missed dragend. A drag's cleanup lives in its dragend
 // handler, which can be skipped when a mid-drag render() detaches the dragged
-// node (column-reorder reverts rebuild the columns). The residue then blocks
-// future card drops (the col-dragging-active guard) and freezes repaints. A new
+// node. The residue then blocks future card drops and freezes repaints. A new
 // dragstart proves any prior drag is over, so wipe stale residue HERE (capture
 // phase) before the real dragstart handlers set fresh state for THIS drag.
 document.addEventListener('dragstart', () => {
   _cardDrag = null;
-  _colDragSrcId = null;
   document.body.classList.remove('card-dragging-active');
-  document.body.classList.remove('col-dragging-active');
 }, true);
 
 // ===== Cmd+drag to pan the board (#514) =================================
@@ -2364,8 +2263,8 @@ document.addEventListener('mousedown', e => {
   if (e.button !== 0 && !(e.ctrlKey && e.button === 2)) return;
   const board = document.getElementById('board');
   if (!board) return;
-  // Don't hijack presses on the floating HUDs, modals, or the trash zone.
-  if (e.target.closest('#logs-hud, #drag-hud, #mini-prompt-overlay, #mini-confirm-overlay, .modal-overlay, #col-trash')) return;
+  // Don't hijack presses on the floating HUDs or modals.
+  if (e.target.closest('#logs-hud, #drag-hud, #mini-prompt-overlay, #mini-confirm-overlay, .modal-overlay')) return;
   _boardPan = { x: e.clientX, y: e.clientY, sl: board.scrollLeft, st: board.scrollTop, moved: false };
   document.body.classList.add('cmd-panning');
   // #521 — stopPropagation so the #127 background drag-to-pan (which fires on
@@ -2523,95 +2422,8 @@ function rootIdOf(colId) {
   while (c && c.stackUnder && guard++ < 32) c = byId.get(c.stackUnder);
   return c ? c.id : colId;
 }
-// #545 — capture each stack-root wrapper's ORIGINAL viewport geometry at
-// dragstart. The reorder DECISION and the shift VISUAL both read THIS (never the
-// live, mid-shift positions), so the shift can't feed back into the decision and
-// therefore cannot oscillate/flicker.
-let _colRow = [];       // [{id, left, width}] in visual order
-let _colGap = 8;
-function _captureColRow() {
-  _colRow = [];
-  // #545 — store CONTENT-relative lefts (add scrollLeft, subtract board origin) so
-  // the snapshot survives horizontal auto-scroll during the drag. Otherwise, once
-  // the board scrolls right, viewport-captured positions go stale and the extreme-
-  // right slot becomes untargetable.
-  const board = $('#board');
-  const bRect = board.getBoundingClientRect();
-  const sx = board.scrollLeft;
-  document.querySelectorAll('#board .column-stack').forEach(w => {
-    const r = w.getBoundingClientRect();
-    _colRow.push({ id: w.dataset.stackRoot, left: r.left - bRect.left + sx, width: r.width });
-  });
-  _colGap = _colRow.length > 1 ? Math.max(0, _colRow[1].left - (_colRow[0].left + _colRow[0].width)) : 8;
-}
-// #545 — "shift away": glide the columns apart (transform only, no reflow) to
-// open a gap exactly where the dragged column will land, guiding the eye. The
-// positions are the WOULD-BE layout (source removed, re-inserted before
-// _colDrop.beforeRootId), computed from the captured _colRow.
-function _applyColShift() {
-  if (!_colDrop || _colDrop.mode !== 'reorder' || !_colRow.length || !_colDragSrcId) { _clearColShift(); return; }
-  const widthOf = id => { const r = _colRow.find(x => x.id === id); return r ? r.width : (_colRow[0] || {}).width || 300; };
-  const srcRoot = rootIdOf(_colDragSrcId);
-  const draggingRoot = (_colDragSrcId === srcRoot);   // dragging a ROOT vs a stacked child
-  const gapW = (draggingRoot ? widthOf(srcRoot) : (_colRow[0] || {}).width) || 300;
-  // Roots in the row, minus the dragged root (a child leaves the root row intact),
-  // with a phantom GAP inserted where the column will land.
-  const order = _colRow.map(r => r.id).filter(id => !(draggingRoot && id === srcRoot));
-  let insertAt = order.length;
-  if (_colDrop.beforeRootId) {
-    const ti = order.indexOf(_colDrop.beforeRootId);
-    if (ti >= 0) insertAt = ti;
-  }
-  order.splice(insertAt, 0, '__gap__');
-  let x = _colRow[0].left;
-  const wouldLeft = {};
-  for (const id of order) {
-    if (id === '__gap__') { x += gapW + _colGap; continue; }
-    wouldLeft[id] = x;
-    x += widthOf(id) + _colGap;
-  }
-  document.querySelectorAll('#board .column-stack').forEach(w => {
-    const orig = _colRow.find(r => r.id === w.dataset.stackRoot);
-    const target = wouldLeft[w.dataset.stackRoot];
-    if (!orig || target == null) { w.style.transform = ''; return; }   // dragged root stays put (invisible)
-    const dx = Math.round(target - orig.left);
-    w.style.transform = dx ? `translateX(${dx}px)` : '';
-  });
-}
-function _clearColShift() {
-  document.querySelectorAll('#board .column-stack').forEach(w => { w.style.transform = ''; });
-}
-// #545 — commit the pending _colDrop on drop/dragend. ONE render + FLIP. Returns
-// true if anything changed. No-op (returns false) when the order is unchanged.
-function applyColDrop() {
-  if (!state || !_colDrop || !_colDragSrcId) return false;
-  const srcId = _colDragSrcId;
-  if (_colDrop.mode === 'stack') {
-    if (_colDrop.parentId && _colDrop.parentId !== srcId) { stackColumnUnder(srcId, _colDrop.parentId); return true; }
-    return false;
-  }
-  // reorder: dragged column becomes a ROOT, spliced before the target root.
-  const cols = state.columns.map(c => ({ ...c }));
-  const si = cols.findIndex(c => c.id === srcId);
-  if (si < 0) return false;
-  const before = JSON.stringify(state.columns.map(c => [c.id, c.stackUnder]));
-  cols[si].stackUnder = null;
-  const [moved] = cols.splice(si, 1);
-  let insertAt = cols.length;
-  if (_colDrop.beforeRootId) {
-    const ti = cols.findIndex(c => c.id === _colDrop.beforeRootId);
-    if (ti >= 0) insertAt = ti;
-  }
-  cols.splice(insertAt, 0, moved);
-  if (JSON.stringify(cols.map(c => [c.id, c.stackUnder])) === before) return false;  // no change
-  pushUndo();
-  const old = captureColumnRects();
-  state.columns = cols;
-  scheduleSave();
-  render();
-  requestAnimationFrame(() => flipPlayColumns(old));
-  return true;
-}
+// #18 — column reorder/shift/stack-drop machinery removed (fixed lane set).
+
 // Normalise stackUnder fields on incoming state: every column gets the field
 // (default null); dangling refs reset to null. Idempotent.
 function migrateStackUnder(s) {
@@ -2704,48 +2516,7 @@ function flipResort() {
 }
 window.flipResort = flipResort;       // also callable from console for a quick demo
 
-function reorderColumn(srcId, targetId) {
-  if (!state) return;
-  const cols = state.columns;
-  const si = cols.findIndex(c => c.id === srcId);
-  const ti = cols.findIndex(c => c.id === targetId);
-  if (si < 0 || ti < 0 || si === ti) return;
-  pushUndo();
-  const old = _colDragRects;       // captured at dragstart
-  const src = cols[si];
-  // Reordering implies "back to top-level row" — if src was stacked, free it.
-  if (src.stackUnder) src.stackUnder = null;
-  const [moved] = cols.splice(si, 1);
-  cols.splice(ti, 0, moved);
-  scheduleSave();
-  render();
-  requestAnimationFrame(() => flipPlayColumns(old));
-}
-
-// #119 — live preview reorder during column drag. Mutates state.columns +
-// renders + FLIPs without pushing undo (the whole drag is one undo unit,
-// committed on drop or rolled back via the snapshot on dragend-w/o-drop).
-// Clears src.stackUnder so dragging a stacked column across the row pops
-// it out of its stack.
-// #117 — stack `srcId` directly under `parentId`. Refuses to create a cycle
-// (parent must not be a descendant of src) and refuses self-parent.
-function stackColumnUnder(srcId, parentId) {
-  if (!state || srcId === parentId) return;
-  const cols = state.columns;
-  const src = cols.find(c => c.id === srcId);
-  const parent = cols.find(c => c.id === parentId);
-  if (!src || !parent) return;
-  // Cycle guard: walk parent's descendants; if src appears, refuse.
-  const descendantOfSrc = walkStack(srcId).some(c => c.id === parentId);
-  if (descendantOfSrc) { toast('Cycle blocked'); return; }
-  if (src.stackUnder === parentId) return;  // no-op
-  pushUndo();
-  const old = _colDragRects;
-  src.stackUnder = parentId;
-  scheduleSave();
-  render();
-  requestAnimationFrame(() => flipPlayColumns(old));
-}
+// #18 — reorderColumn / stackColumnUnder removed (fixed lane set, no column drag).
 
 // #119 — preview the dragged card's would-be slot in the hover column by
 // physically moving the element + animating displaced siblings via FLIP.
@@ -2948,29 +2719,6 @@ function cancelCardDrag() {
   _cardDrag = null;
   _cardDragRects = null;
   render();   // canonical state wins → undoes any DOM-only preview moves
-}
-
-function deleteColumn(id) {
-  if (!state) return;
-  const col = state.columns.find(c => c.id === id);
-  if (!col) return;
-  pushUndo();
-  // Reassign cards in this column → 'backlog' (don't orphan them in state).
-  let moved = 0;
-  state.cards.forEach(c => {
-    if (c.column === id) { c.column = 'backlog'; c.updatedAt = now(); moved++; }
-  });
-  // #538 — re-link any columns STACKED UNDER this one to its parent (or promote
-  // to root if it was a root). Without this their stackUnder dangles to the
-  // deleted id, so getStackRoots/walkStack drop them and the stacked-below
-  // column visually DISAPPEARS.
-  const parentOfDeleted = col.stackUnder || null;
-  state.columns.forEach(c => { if (c.stackUnder === id) c.stackUnder = parentOfDeleted; });
-  state.columns = state.columns.filter(c => c.id !== id);
-  scheduleSave(); render();
-  toast(moved > 0
-    ? `Column "${col.name}" deleted · ${moved} card(s) → Backlog`
-    : `Column "${col.name}" deleted`);
 }
 
 const $ = s => document.querySelector(s);
@@ -3299,7 +3047,6 @@ function _absorbState(incoming) {
     state.nextNum = (state.cards || []).reduce((m, c) => Math.max(m, c.num || 0), 0) + 1;
   }
   migrateStackUnder(state);
-  ensureDiscardColumnIfNeeded();   // #650 — guarantee the Discarded col exists on every state load (hard refresh + SSE replace)
   lastRev = state.rev || 0;
   pendingDirty = false;
   if (document.getElementById('board-title')) applyBoardTitle();
@@ -4312,8 +4059,8 @@ function renderModal(card) {
 
   const del = document.createElement('button');
   del.className = 'modal-delete';
-  del.textContent = isDiscarded(card) ? 'Delete permanently' : 'Discard';
-  del.onclick = () => { discardCard(card.id); };   // #358 — soft-delete → Discarded col
+  del.textContent = 'Delete';
+  del.onclick = () => { removeCard(card.id); };   // #19 — hard delete (no Discarded pile)
   foot.appendChild(del);
   modal.appendChild(foot);
 
@@ -4446,101 +4193,6 @@ function enterApp() {
   wireBoardTitle();
   refreshTagLegend();
   setView(_view);
-}
-
-// #125 — Reset columns to default order: Task(+Notes) → Backlog(+Ideas) →
-// 🚨 Super-Urgent(+Discarded) → In Progress → Done (matched by id OR
-// case-insensitive name so it works across boards with migrated column ids),
-// then remaining columns by latest card activity desc (empty columns last).
-// Stacks are re-created from the SPEC; one undo entry.
-// #105 — conform a legacy 'mandatory' column to the canonical 'super-urgent' (post
-// #104 unify): rename it in place (and move its cards), or if a super-urgent column
-// already exists, merge the mandatory cards into it and drop the legacy column. Cards
-// are moved, never deleted. Idempotent (no-op once a board is already canonical).
-function _conformLegacyColumns() {
-  if (!state || !Array.isArray(state.columns)) return;
-  const isMandatory = c => c.id === 'mandatory' || /mandatory$/i.test(c.name || '');
-  const legacy = state.columns.filter(c => c.id !== 'super-urgent' && isMandatory(c));
-  if (!legacy.length) return;
-  let su = state.columns.find(c => c.id === 'super-urgent');
-  const drop = new Set();
-  for (const c of legacy) {
-    const oldId = c.id;
-    (state.cards || []).forEach(card => { if (card.column === oldId) card.column = 'super-urgent'; });
-    if (!su) {                       // rename this one in place → become super-urgent
-      c.id = 'super-urgent';
-      c.name = '🚨 SUPER URGENT';
-      su = c;
-    } else {                         // a super-urgent already exists → drop the legacy col
-      drop.add(oldId);
-    }
-  }
-  if (drop.size) state.columns = state.columns.filter(c => !drop.has(c.id));
-  // any column stacked under the dropped legacy id now points at super-urgent
-  state.columns.forEach(c => { if (c.stackUnder && drop.has(c.stackUnder)) c.stackUnder = 'super-urgent'; });
-}
-
-async function resetColumnsToDefault() {
-  if (!state) return;
-  if (!(await miniConfirm('Reset column order?', {
-    sub: 'Reorders to: Task+Notes · Backlog+Ideas · 🚨 Super-Urgent+Discarded · In Progress · Done, and snaps the zoom to 92%. No cards deleted — ' + undoHint() + ' to undo.',
-    okText: 'Reset',
-    okClass: 'primary',
-  }))) return;
-  pushUndo();
-  _conformLegacyColumns();   // #105 — upgrade a legacy 'mandatory' column → 'super-urgent' first
-  // #103 — restore the canonical bootstrap layout (matches templates/board.json):
-  // Task(+Notes) · Backlog(+Ideas) · Super-Urgent(+Discarded) · In Progress · Done.
-  // Stacks are RE-CREATED (Notes under Task, Ideas under Backlog, Discarded under
-  // Super-Urgent), not flattened. Extra/custom columns follow, ordered by latest activity.
-  const SPEC = [
-    { key:'task',       stack:null,        match:c => c.id==='task'       || /^task$/i.test(c.name||'') },
-    { key:'notes',      stack:'task',      match:c => c.id==='notes'      || /notes$/i.test(c.name||'') },
-    { key:'backlog',    stack:null,        match:c => c.id==='backlog'    || /^backlog$/i.test(c.name||'') },
-    { key:'ideas',      stack:'backlog',   match:c => c.id==='ideas'      || /ideas$/i.test(c.name||'') },
-    { key:'super-urgent', stack:null,           match:c => c.id==='super-urgent' || /super.?urgent$/i.test(c.name||'') || c.id==='mandatory' || /mandatory$/i.test(c.name||'') },
-    { key:'discarded',    stack:'super-urgent', match:c => c.id==='discarded'    || /^discarded$/i.test(c.name||'') },
-    { key:'inprogress', stack:null,        match:c => c.id==='inprogress' || /^in\s*progress$/i.test(c.name||'') },
-    { key:'done',       stack:null,        match:c => c.id==='done'       || /^done$/i.test(c.name||'') },
-  ];
-  const cols = state.columns.map(c => ({ ...c, stackUnder: null }));
-  const remaining = cols.slice();
-  const matched = {};
-  const pinned = [];
-  for (const spec of SPEC) {
-    const i = remaining.findIndex(spec.match);
-    if (i >= 0) { const col = remaining.splice(i, 1)[0]; matched[spec.key] = col; pinned.push(col); }
-  }
-  for (const spec of SPEC) {            // re-create the stacks (parent must be present)
-    if (spec.stack && matched[spec.key] && matched[spec.stack]) {
-      matched[spec.key].stackUnder = matched[spec.stack].id;
-    }
-  }
-  const recency = new Map();
-  for (const c of remaining) {
-    const ts = (state.cards || [])
-      .filter(card => card.column === c.id)
-      .map(card => card.updatedAt || card.createdAt || '')
-      .reduce((a, b) => (a > b ? a : b), '');
-    recency.set(c.id, ts);
-  }
-  remaining.sort((a, b) => {
-    const ra = recency.get(a.id) || '';
-    const rb = recency.get(b.id) || '';
-    if (ra === rb) return 0;
-    if (!ra) return 1;
-    if (!rb) return -1;
-    return rb.localeCompare(ra);
-  });
-  const old = captureColumnRects();
-  state.columns = pinned.concat(remaining);
-  scheduleSave();
-  render();
-  requestAnimationFrame(() => flipPlayColumns(old));
-  setZoom(_ZOOM_DEFAULT, true);   // snap the board back to the 92% fit-to-screen view
-  resetHudsToDefault();   // #488 — also snap the floating HUDs back to default
-  logEvent('col', '↺ reset columns to default');   // #522 — log structural ops
-  toast('Columns + HUDs reset — ' + undoHint() + ' to undo', 3200);
 }
 
 // #477 — Sort Time button: the on-demand, repeatable version of the time-sort
@@ -4705,7 +4357,6 @@ function _restoreScroll(m) {
 }
 function render() {
   if (!state) return;
-  ensureDiscardColumnIfNeeded();   // #650 — materialize Discarded col so discarded cards render on load
   closeCardMenu();   // #333 — a rebuild invalidates any open card menu
   const _scroll = _captureScroll();   // #345 — preserve scroll across the rebuild
   if (_view === 'board') {
@@ -4730,22 +4381,7 @@ function render() {
       }
       return renderColumn(col, cards);
     });
-    const addCol = document.createElement('button');
-    addCol.className = 'col-add-btn';
-    addCol.textContent = '+ Add column';
-    addCol.onclick = async () => {
-      const name = await miniPrompt({
-        title: 'Add column',
-        label: 'Column name',
-        placeholder: 'e.g. In Review',
-        okText: 'Add',
-      });
-      if (!name) return;
-      pushUndo();
-      state.columns.push({ id: uid('col'), name, kind: 'custom' });
-      scheduleSave(); render();
-    };
-    board.appendChild(addCol);
+    // #18 — fixed lane set: no "+ Add column" affordance.
   } else if (_view === 'calendar') {
     renderCalendar();
   }
@@ -5745,8 +5381,6 @@ function renderColumn(col, cards) {
   // card midlines, then live-previews via reflowCardDragPreview (DOM-move
   // + FLIP for displaced siblings). drop commits to state.
   el.addEventListener('dragover', e => {
-    // Skip if a column is being dragged (column-reorder owns the handler below)
-    if (document.body.classList.contains('col-dragging-active')) return;
     e.preventDefault();
     if (!_cardDrag) { dbg('dragover ' + col.id + ' (no _cardDrag!)'); return; }
     // Find which sibling card the cursor is hovering above. Skip the dragged
@@ -5780,7 +5414,6 @@ function renderColumn(col, cards) {
   });
   el.addEventListener('dragleave', () => el.classList.remove('dragover'));
   el.addEventListener('drop', e => {
-    if (document.body.classList.contains('col-dragging-active')) return;
     e.preventDefault();
     el.classList.remove('dragover');
     // #119 path: commit the previewed position. Falls back to the legacy
@@ -5809,32 +5442,10 @@ function renderColumn(col, cards) {
   const hdr = document.createElement('div');
   hdr.className = 'column-header';
 
-  // Grip handle — the drag affordance. Whole-column draggable would
-  // conflict with card drag inside; gating draggability to the grip
-  // (mousedown enables draggable, mouseup/dragend disables) keeps cards
-  // independently draggable.
-  const grip = document.createElement('span');
-  grip.className = 'grip';
-  grip.textContent = '⋮⋮';
-  grip.title = 'Drag to reorder · drop on 🗑 to delete';
-  grip.addEventListener('mousedown', () => { el.draggable = true; });
-  grip.addEventListener('mouseup',   () => { el.draggable = false; });
-  hdr.appendChild(grip);
-
+  // #18 — fixed lanes: no grip drag-handle, no inline rename. Plain label.
   const nameEl = document.createElement('span');
   nameEl.className = 'name';
-  nameEl.contentEditable = 'true';
   nameEl.textContent = col.name;
-  armUndoOnFocus(nameEl);
-  nameEl.addEventListener('blur', () => {
-    const v = nameEl.textContent.trim();
-    if (v && v !== col.name) {
-      logEvent('col', `renamed column "${col.name}" → "${v}"`);   // #522
-      col.name = v; scheduleSave();
-    }
-    else nameEl.textContent = col.name;
-  });
-  nameEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); } });
   hdr.appendChild(nameEl);
 
   const count = document.createElement('span');
@@ -5865,142 +5476,8 @@ function renderColumn(col, cards) {
     }
   }
 
-  // #551 — Empty Discarded affordance: a subtle 🧹 in the Discarded column header,
-  // shown ONLY when it holds cards (nothing to sweep otherwise). Discoverable but
-  // not shouty (low opacity → red-tinted on hover); the confirm dialog gates it.
-  if ((col.id === 'discarded' || /^discarded$/i.test(col.name || '')) && cards.length) {
-    const empty = document.createElement('button');
-    empty.className = 'icon-btn empty-btn';
-    empty.textContent = '🧹';
-    empty.setAttribute('aria-label', `Empty Discarded (${cards.length})`);
-    empty.title = `Empty Discarded — permanently delete ${cards.length} card(s)`;
-    empty.onclick = (e) => { e.stopPropagation(); emptyDiscarded(); };
-    hdr.appendChild(empty);
-  }
-
-  // Always-on × for CUSTOM columns (was: empty-only). Confirm if it has
-  // cards — they'd otherwise be orphaned in state but invisible on board.
-  // #559 — but NOT the Discarded column: it's kind:'custom' (lazily created for
-  // soft-deletes) yet system-managed, not a user column — a one-click delete-× on
-  // it would orphan every discarded card. Clear it via the 🧹 (Empty Discarded).
-  const _isDiscardedCol = col.id === 'discarded' || /^discarded$/i.test(col.name || '');
-  if (col.kind === 'custom' && !_isDiscardedCol) {
-    const del = document.createElement('button');
-    del.className = 'icon-btn del-btn';
-    del.textContent = '×';
-    del.title = 'Delete column';
-    del.onclick = async () => {
-      const sub = cards.length
-        ? `Delete "${col.name}" — ${cards.length} card(s) → Backlog`
-        : `Delete column "${col.name}"`;
-      if (!(await miniConfirm('Confirm?', { sub }))) return;
-      deleteColumn(col.id);
-    };
-    hdr.appendChild(del);
-  }
-
-  // Column-reorder drag (FLIP technique — record start rects, mutate state,
-  // re-render, then animate from old→new positions for an iPhone-rearrange
-  // smoothness instead of a teleport.)
-  el.addEventListener('dragstart', e => {
-    // dragstart bubbles — if a descendant (a card) started the drag, leave
-    // the event alone or we'd preventDefault() and kill the card drag.
-    if (e.target !== el) return;
-    if (!el.draggable) { e.preventDefault(); return; } // only when grip-armed
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/col-id', col.id);
-    el.classList.add('col-dragging');
-    document.body.classList.add('col-dragging-active');
-    _colDragRects = captureColumnRects();
-    // #545 — record source only. NO snapshot: the insertion-line model never
-    // reshuffles state.columns during the drag, so there's nothing to snapshot
-    // or revert — the move is computed into _colDrop and committed once on drop.
-    _colDragSrcId = col.id;
-    _captureColRow();   // #545 — snapshot original wrapper positions for the shift
-    _colDragCommitted = false;
-    _colDrop = null;
-    // #119 correction — hide the source column's footprint so it doesn't sit
-    // "in the background" while being dragged. setTimeout(0) so the browser
-    // captures the drag image synchronously before opacity flips. Opacity (not
-    // visibility:hidden) so the slot still receives drop events.
-    setTimeout(() => {
-      const cur = document.querySelector('.column[data-col="' + cssEsc(col.id) + '"]');
-      if (cur) cur.style.opacity = '0';
-    }, 0);
-    dbg('col dragstart ' + col.id);
-  });
-  el.addEventListener('dragend', () => {
-    el.draggable = false;
-    el.classList.remove('col-dragging');
-    document.body.classList.remove('col-dragging-active');
-    document.querySelectorAll('.column').forEach(c => {
-      c.classList.remove('col-drop-target');
-      c.classList.remove('col-drop-stack-target');
-    });
-    _clearColShift();
-    // #545 — if drop didn't fire (fast release over a gap) but we have a pending
-    // target, commit it now. applyColDrop needs _colDragSrcId/_colDrop, so commit
-    // BEFORE clearing them. A pure cancel (no target) changed nothing — just
-    // restore the source opacity (no reshuffle happened, so no revert needed).
-    if (!_colDragCommitted && _colDrop) applyColDrop();
-    _colDragRects = null;
-    _colDragSrcId = null;
-    _colDragCommitted = false;
-    _colDrop = null;
-    el.style.opacity = '';
-    document.querySelectorAll('.column').forEach(c => { c.style.opacity = ''; });
-  });
-  // Reorder on drop onto another column's edge. #117: if drop lands in the
-  // BOTTOM 40% of the target column, stack the source UNDER the target
-  // instead of doing a flat reorder. TOP 60% (or any side overlap) keeps
-  // the existing flat-row behavior.
-  function _inStackZone(e) {
-    const r = el.getBoundingClientRect();
-    return r.height > 0 && (e.clientY - r.top) > r.height * 0.6;
-  }
-  el.addEventListener('dragover', e => {
-    const draggingColId = (e.dataTransfer.types || []).includes('text/col-id');
-    if (!draggingColId || !_colDragSrcId) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    // #545 — compute ONE drop target from the pointer; NEVER reorder state. Clear
-    // any stale orange first so at most one indicator ever shows (no "two reds").
-    document.querySelectorAll('.col-drop-stack-target').forEach(c => c.classList.remove('col-drop-stack-target'));
-    if (_inStackZone(e) && col.id !== _colDragSrcId) {
-      // Nest zone (bottom 40%): highlight THIS column — it WILL nest here on drop.
-      // Rects are stable (no reshuffle), so highlight zone == drop zone.
-      el.classList.add('col-drop-stack-target');
-      _clearColShift();   // nest doesn't open a reorder gap
-      _colDrop = { mode: 'stack', parentId: col.id };
-      return;
-    }
-    // Reorder: decide the insertion gap from the pointer vs each root's ORIGINAL
-    // midline (_colRow, captured at dragstart) — NOT live positions — so the shift
-    // can't move the decision and can't flicker. Use CONTENT-space X (add scrollLeft)
-    // so the decision stays correct after horizontal auto-scroll — incl. the extreme
-    // right. Skip the dragged column's slot.
-    const _b = $('#board'), _bx = _b.getBoundingClientRect().left;
-    const px = e.clientX - _bx + _b.scrollLeft;
-    const srcRoot = rootIdOf(_colDragSrcId);
-    let beforeRootId = null;
-    for (const r of _colRow) {
-      if (r.id === srcRoot) continue;
-      if (px < r.left + r.width / 2) { beforeRootId = r.id; break; }
-    }
-    _colDrop = { mode: 'reorder', beforeRootId };
-    _applyColShift();   // glide the columns apart to open the gap (the "shift away")
-  });
-  el.addEventListener('drop', e => {
-    if (!_colDragSrcId && !(e.dataTransfer.types || []).includes('text/col-id')) return;
-    e.preventDefault();
-    // #545 — commit EXACTLY the target the last dragover computed (so the drop
-    // matches the indicator the user saw). dragend does the final cleanup.
-    applyColDrop();
-    _colDragCommitted = true;
-    document.querySelectorAll('.col-drop-stack-target').forEach(c => c.classList.remove('col-drop-stack-target'));
-    _clearColShift();
-    dbg('col drop on ' + col.id);
-  });
+  // #18 — column editing removed: no custom-column delete-×, no column-reorder
+  // drag handlers. Cards still drag between lanes (their own handlers below).
 
   el.appendChild(hdr);
 
@@ -6789,11 +6266,8 @@ function openCardMenu(card, x, y) {
   closeCardMenu();
   const menu = document.createElement('div');
   menu.className = 'card-menu';
-  // "Move to" — every column except the one the card is already in AND except
-  // Discarded (#539 — "Discard" below already sends it there; listing Discarded
-  // in Move-to too gave the user TWO ways to discard = "2 Discard").
-  const _isDiscCol = c => c.id === 'discarded' || /^discarded$/i.test(c.name || '');
-  const others = state.columns.filter(c => c.id !== card.column && !_isDiscCol(c));
+  // "Move to" — every column except the one the card is already in.
+  const others = state.columns.filter(c => c.id !== card.column);
   if (others.length) {
     const hdr = document.createElement('div');
     hdr.className = 'card-menu-hdr';
@@ -6812,19 +6286,9 @@ function openCardMenu(card, x, y) {
   }
   const del = document.createElement('button');
   del.className = 'card-menu-item card-menu-del';
-  del.textContent = isDiscarded(card) ? 'Delete permanently' : 'Discard';  // #358
-  del.onclick = () => { closeCardMenu(); discardCard(card.id); };
+  del.textContent = 'Delete';   // #19 — hard delete, no Discarded pile
+  del.onclick = () => { closeCardMenu(); removeCard(card.id); };
   menu.appendChild(del);
-  // #539 — from a card already in Discarded, offer "Empty Discarded (N)" to clear
-  // the whole pile at once instead of deleting one at a time.
-  if (isDiscarded(card)) {
-    const n = state.cards.filter(c => _isDiscCol(state.columns.find(x => x.id === c.column) || {})).length;
-    const empty = document.createElement('button');
-    empty.className = 'card-menu-item card-menu-del';
-    empty.textContent = `Empty Discarded (${n})`;
-    empty.onclick = () => { closeCardMenu(); emptyDiscarded(); };
-    menu.appendChild(empty);
-  }
   document.body.appendChild(menu);
   // Position, clamped to the viewport (kebab sits at the far-right edge, so
   // the menu would otherwise overflow — pull it back on-screen).
@@ -6862,19 +6326,6 @@ function _noiseBuf(ctx, dur) {
   const d = buf.getChannelData(0);
   for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
   return buf;
-}
-function playDiscardSound() {
-  if (!_soundOn) return; const ctx = _ac(); if (!ctx) return;
-  const t = ctx.currentTime;
-  const src = ctx.createBufferSource(); src.buffer = _noiseBuf(ctx, 0.24);
-  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
-  lp.frequency.setValueAtTime(1900, t); lp.frequency.exponentialRampToValueAtTime(180, t + 0.2);
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-  src.connect(lp); lp.connect(g); g.connect(ctx.destination);
-  src.start(t); src.stop(t + 0.25);
 }
 function playDeleteSound() {
   if (!_soundOn) return; const ctx = _ac(); if (!ctx) return;
@@ -6922,87 +6373,17 @@ function deleteCard(id) {
   scheduleSave();
 }
 
-// #358 — Resolve (lazily create) the Discarded column. Matched by id
-// 'discarded' OR a case-insensitive "Discarded" name so it works on any board
-// (live boards may carry a generated id); created if absent so soft-delete
-// always has a home.
-function discardColumn() {
-  if (!state) return null;
-  let col = (state.columns || []).find(
-    c => c.id === 'discarded' || /^discarded$/i.test(c.name || ''));
-  if (!col) {
-    col = { id: 'discarded', name: 'Discarded', kind: 'custom', stackUnder: null };
-    state.columns.push(col);
-    if (typeof handleColumnAdded === 'function') { /* state already mutated */ }
-  }
-  return col;
-}
-
-// #650 — the Discarded column is NOT persisted in board.json (it's lazily created
-// on the first soft-delete, in discardColumn()). But the BOOTSTRAP declutter adds
-// cards with column:'discarded' server-side, WITHOUT going through that path — so
-// on a fresh load (_absorbState → render) there was no Discarded column for those
-// cards to render into, and every discarded card (incl. the 🧹 First-run sweep
-// header) silently vanished until a manual soft-delete recreated the column. Called
-// at the top of render() so the column always exists whenever discarded cards do.
-// Idempotent (no-op if the column already exists or there are no discarded cards);
-// stacks under super-urgent to match the canonical layout (SPEC). Client-side only —
-// next scheduleSave persists it, and a fresh load re-materializes it regardless.
-function ensureDiscardColumnIfNeeded() {
-  if (!state || !Array.isArray(state.cards)) return;
-  if (!state.cards.some(c => c.column === 'discarded')) return;
-  const cols = state.columns || (state.columns = []);
-  if (cols.some(c => c.id === 'discarded' || /^discarded$/i.test(c.name || ''))) return;
-  const parent = cols.find(
-    c => c.id === 'super-urgent' || /super.?urgent$/i.test(c.name || '') ||
-         c.id === 'mandatory' || /mandatory$/i.test(c.name || ''));
-  cols.push({ id: 'discarded', name: 'Discarded', kind: 'custom',
-              stackUnder: parent ? parent.id : null });
-}
-
-// #358 — Soft-delete. "Delete" no longer destroys a card: it flies it to the
-// Discarded column (reversible, history-recorded, undoable) via the normal move
-// path. A card ALREADY in Discarded is purged for real (confirmed, since that
-// IS irreversible) — so the column can still be emptied.
-async function discardCard(id) {
+// #19 — Remove a card. The board is a fixed 4-lane kanban with no Discarded pile,
+// so "Delete" hard-deletes directly (confirmed; undoable via Cmd-Z since deleteCard
+// pushes an undo checkpoint). Replaces the old soft-delete-to-Discarded path.
+async function removeCard(id) {
   if (!state) return;
   const card = state.cards.find(c => c.id === id);
   if (!card) return;
-  const disc = discardColumn();
-  if (!disc) return;
-  if (card.column === disc.id) {
-    if (await miniConfirm('Delete permanently?',
-        { sub: `"${card.title}" — this can't be undone` })) deleteCard(id);
-    return;
-  }
+  if (!(await miniConfirm('Delete card?',
+      { sub: `"${card.title}" — ${undoHint()} to undo` }))) return;
   if (_openCardId === id) closeModal();
-  playDiscardSound();   // #550 — discard / drop-in-trash = whoosh
-  moveCardToColumn(card, disc.id);
-}
-
-// #539 — purge the entire Discarded pile at once (undoable via Cmd-Z, same as a
-// single Delete permanently) so the user doesn't have to delete one at a time.
-async function emptyDiscarded() {
-  if (!state) return;
-  const disc = discardColumn();
-  if (!disc) return;
-  const n = state.cards.filter(c => c.column === disc.id).length;
-  if (!n) { toast('Discarded is already empty'); return; }
-  if (!(await miniConfirm('Empty Discarded?', { sub: `Permanently delete ${n} discarded card(s)` }))) return;
-  playDeleteSound();   // #550 — bulk permanent delete = crumple
-  pushUndo();
-  state.cards = state.cards.filter(c => c.column !== disc.id);
-  scheduleSave();
-  render();
-  toast(`Emptied Discarded · ${n} deleted`);
-}
-
-// True when a card is sitting in the Discarded column (so UI can label its
-// remove action "Delete permanently" instead of "Discard").
-function isDiscarded(card) {
-  const d = (state && state.columns || []).find(
-    c => c.id === 'discarded' || /^discarded$/i.test(c.name || ''));
-  return !!d && card && card.column === d.id;
+  deleteCard(id);   // plays the delete sound, pushes undo, logs, animates out
 }
 
 function handleColumnAdded({ column, index }) {
@@ -7260,10 +6641,9 @@ async function init() {
     document.addEventListener('mouseup', stop);
     document.addEventListener('mouseleave', stop);
     // Hint on hover over empty board area — only when not currently dragging
-    // a card/column (those own the cursor style).
+    // a card (it owns the cursor style).
     board.addEventListener('mouseenter', () => {
-      if (!document.body.classList.contains('col-dragging-active') &&
-          !document.body.classList.contains('card-dragging-active')) {
+      if (!document.body.classList.contains('card-dragging-active')) {
         board.style.cursor = 'grab';
       }
     });
@@ -7302,57 +6682,8 @@ async function init() {
     b.onclick = () => setView(b.dataset.view);
   });
 
-  // Trash drop-zone — visible while either a column or a card is being
-  // dragged. Accepts both drops; type is disambiguated by which MIME the
-  // dataTransfer carries (text/col-id vs text/plain "card:<id>").
-  const trash = $('#col-trash');
-  trash.addEventListener('dragover', e => {
-    const types = e.dataTransfer.types || [];
-    const isCol  = types.includes('text/col-id');
-    const isCard = types.includes('text/card-id') || types.includes('text/plain') || !!_cardDrag;
-    if (!isCol && !isCard) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    trash.classList.add('over');
-  });
-  trash.addEventListener('dragleave', () => trash.classList.remove('over'));
-  trash.addEventListener('drop', async e => {
-    trash.classList.remove('over');
-    e.preventDefault();
-
-    // ── Card drop ────────────────────────────────────────────────────
-    let cardId = e.dataTransfer.getData('text/card-id');
-    if (!cardId) {
-      const plain = e.dataTransfer.getData('text/plain') || '';
-      if (plain.startsWith('card:')) cardId = plain.slice(5);
-    }
-    if (!cardId && _cardDrag) cardId = _cardDrag.cardId;
-    if (cardId) {
-      // Cancel any in-flight drag preview so the source element returns
-      // to its column before the deletion animation runs.
-      if (_cardDrag) cancelCardDrag();
-      const card = state.cards.find(c => c.id === cardId);
-      if (!card) return;
-      discardCard(cardId);   // #358 — drop-to-trash now soft-deletes → Discarded col
-      return;
-    }
-
-    // ── Column drop (existing behaviour) ────────────────────────────
-    const colId = e.dataTransfer.getData('text/col-id');
-    if (!colId) return;
-    const col = state.columns.find(c => c.id === colId);
-    if (!col) return;
-    if (col.kind !== 'custom') {
-      toast(`"${col.name}" is a default column — can't delete`);
-      return;
-    }
-    const cardCount = state.cards.filter(c => c.column === colId).length;
-    const sub = cardCount
-      ? `Delete "${col.name}" — ${cardCount} card(s) → Backlog`
-      : `Delete column "${col.name}"`;
-    if (!(await miniConfirm('Confirm?', { sub }))) return;
-    deleteColumn(colId);
-  });
+  // #18 — column editing removed: the 🗑 trash drop-zone (column-delete +
+  // now-inert card-discard) is gone with it.
 
   setInterval(tickTimes, 15000);
 
