@@ -197,13 +197,12 @@ Output: a JSON ARRAY of card objects. Each card:
   "reviewed": "OPTIONAL {\"skill\": \"<review-skill>\"} — set ONLY when a REVIEW line (e.g. 'REVIEW: /code-review') appears among THIS card's turns, meaning an explicit review skill ran on this card's work. skill is the name on that line (code-review | security-review | simplify | review | ultrareview). The review belongs to the card whose work was reviewed — if a bucket has several cards, attach it to the one those turns built. OMIT entirely otherwise. NEVER invent a review the digest doesn't show; ambient code-reading is NOT a review."
 }
 
-Column routing rules:
+Column routing rules (the board has exactly four lanes — Backlog, To Do, In Progress, Done — #14):
 - "done"       → a git commit landed in this hour OR a clean ship phrase appeared (shipped X / deployed / merged)
-- "super-urgent" → user said urgent / must / impt / critical / asap / blocker / 'this is impt'
 - "inprogress" → files were edited but no ship hit
-- "task"       → mentioned, named, planned but no edits yet
-- "backlog"    → deferred / open / undone: user said "later" / "next session" / "tomorrow" / "defer" / "pending" / "we'll revisit" / "nvm save it", OR the work was started but explicitly NOT finished
-- "notes"      → a GENUINE, durable observation / idea / decision worth keeping (e.g. "decided stop-loss stays bar-close only"). NOT a dumping ground: an actionable user need (bug report / feature request / complaint) is a "task" (or "bug"), NOT a note; a raw conversational fragment or an assistant message is NOT a note at all — skip it. If unsure whether something is a real note, OMIT it.
+- "task"       → mentioned, named, planned but no edits yet ("To Do")
+- "backlog"    → deferred / open / undone: user said "later" / "next session" / "tomorrow" / "defer" / "pending" / "we'll revisit" / "nvm save it", OR the work was started but explicitly NOT finished. Urgency is NOT a column — a critical/asap item is still "task"/"inprogress" with priority "critical".
+A pure durable observation with no actionable work has no lane — OMIT it (don't invent a card for it).
 
 Route to the unit's FINAL observed state across the WHOLE log below, not the moment it was first mentioned: if a commit sha or ship phrase for this unit appears ANYWHERE in the activity (even if the unit was merely *named* or *planned* earlier), it is "done" — don't leave it in "task"/"inprogress" just because the mention came before the ship. (Getting the final column right here is what keeps the later reconcile pass from having to move it.)
 

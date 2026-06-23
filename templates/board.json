@@ -7,40 +7,16 @@
   "schemaVersion": 1,
   "columns": [
     {
-      "id": "task",
-      "name": "Task",
-      "kind": "todo",
-      "stackUnder": null
-    },
-    {
-      "id": "notes",
-      "name": "📝 Notes",
-      "kind": "intake",
-      "stackUnder": "task"
-    },
-    {
       "id": "backlog",
       "name": "Backlog",
       "kind": "todo",
       "stackUnder": null
     },
     {
-      "id": "ideas",
-      "name": "💡 Ideas",
-      "kind": "intake",
-      "stackUnder": "backlog"
-    },
-    {
-      "id": "super-urgent",
-      "name": "🚨 SUPER URGENT",
+      "id": "task",
+      "name": "To Do",
       "kind": "todo",
       "stackUnder": null
-    },
-    {
-      "id": "discarded",
-      "name": "Discarded",
-      "kind": "custom",
-      "stackUnder": "super-urgent"
     },
     {
       "id": "inprogress",

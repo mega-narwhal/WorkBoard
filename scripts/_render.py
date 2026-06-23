@@ -15,9 +15,8 @@ from __future__ import annotations
 import datetime
 import html as _html
 
-# Canonical left-to-right column order for grouping (mirrors card.py).
-_ORDER = ["super-urgent", "ideas", "task",
-          "backlog", "inprogress", "blocked", "done"]
+# Canonical left-to-right column order for grouping (mirrors card.py · #14).
+_ORDER = ["backlog", "task", "inprogress", "done"]
 
 
 def _now_iso() -> str:

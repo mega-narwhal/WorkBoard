@@ -784,16 +784,15 @@ class BoardHandler(BaseHTTPRequestHandler):
         }).encode())
 
 
-# Canonical default columns. Used to add missing cols on load so existing
-# boards from older templates gain the new defaults without manual edits.
+# Canonical default columns (#14 — simplified to the classic kanban flow:
+# Backlog → To Do → In Progress → Done). Used to add missing cols on load so a
+# board never renders without the core lanes. Urgency is a card PRIORITY and
+# "discarded"/"blocked" are card states — none are columns anymore.
 _DEFAULT_COLS = [
-    {"id": "task",       "name": "📥 Task",      "kind": "todo",   "stackUnder": None},
     {"id": "backlog",    "name": "Backlog",      "kind": "todo",   "stackUnder": None},
+    {"id": "task",       "name": "To Do",        "kind": "todo",   "stackUnder": None},
     {"id": "inprogress", "name": "In Progress",  "kind": "active", "stackUnder": None},
     {"id": "done",       "name": "Done",         "kind": "done",   "stackUnder": None},
-    {"id": "notes",      "name": "📝 Notes",     "kind": "intake", "stackUnder": "task"},
-    {"id": "ideas",      "name": "💡 Ideas",     "kind": "intake", "stackUnder": "backlog"},
-    {"id": "super-urgent", "name": "🚨 SUPER URGENT", "kind": "todo", "stackUnder": None},
 ]
 
 

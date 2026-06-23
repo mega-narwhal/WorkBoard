@@ -98,8 +98,8 @@ def compute(d: dict, since_days: int = 7) -> dict:
     blockers.sort(key=lambda b: b["stuckDays"], reverse=True)
 
     # ---- priority drift: high-priority work that isn't moving ----
-    open_cols = {"super-urgent", "ideas", "task", "backlog", "inprogress", "blocked"}
-    not_started = {"super-urgent", "ideas", "task", "backlog"}
+    open_cols = {"task", "backlog", "inprogress"}
+    not_started = {"task", "backlog"}
     open_cards = [c for c in cards if c.get("column") in open_cols]
     open_critical = sum(1 for c in open_cards if (c.get("priority") or "low") == "critical")
     open_mid = sum(1 for c in open_cards if (c.get("priority") or "low") == "mid")

@@ -76,32 +76,26 @@ def cmd_add(args, d, board):
     if getattr(args, "created_at", None) and "discovered" not in tags:
         tags = tags + ["discovered"]
 
-    # Auto-urgent (#85): detect urgency keywords in title+origin and route to
-    # the SUPER URGENT column with critical priority. --urgent forces; --no-auto-urgent skips.
+    # Auto-urgent (#85, revised #14): detect urgency keywords in title+origin.
+    # Urgency is now a PRIORITY, not a column — the canonical 4-column board has
+    # no SUPER URGENT lane, so we bump priority to critical and leave the card in
+    # its normal queue (critical sorts to the top). --urgent forces; --no-auto-urgent skips.
     auto_urgent_kw = None
-    auto_urgent_col_created = False
+    auto_urgent_col_created = False  # retained for the print() below; always False now
     if getattr(args, "urgent", False):
         auto_urgent_kw = "--urgent"
     elif not getattr(args, "no_auto_urgent", False):
         auto_urgent_kw = _detect_urgency(args.title, origin)
     target_col = args.column
     target_prio = args.priority
-    if auto_urgent_kw:
-        auto_urgent_col_created = _ensure_super_urgent_col(d)
-        target_col = "super-urgent"
-        if target_prio not in ("critical",):
-            target_prio = "critical"
+    if auto_urgent_kw and target_prio not in ("critical",):
+        target_prio = "critical"
 
-    # Auto-card (#100): --auto signals intent-detected creation. Defaults the
-    # column to 'ideas' when caller didn't override, ensures the col exists,
-    # and stamps meta.autoCreated so board.html can pop an undo toast.
+    # Auto-card (#100, revised #14): --auto signals intent-detected creation. It
+    # lands in the default queue (Backlog) — the 4-column board has no separate
+    # Ideas lane. meta.autoCreated still stamps so board.html can pop an undo toast.
     auto_card = bool(getattr(args, "auto", False))
     auto_card_col_created = False
-    if auto_card and not auto_urgent_kw:
-        if args.column == "backlog":  # caller didn't override the default
-            target_col = "ideas"
-        if target_col == "ideas":
-            auto_card_col_created = _ensure_ideas_col(d)
 
     card = {
         "num": d["nextNum"],
@@ -515,8 +509,6 @@ def cmd_fly(args, d, board):
 
     # The hop + done-semantics: cycle-history (#188) and bug-tag auto-strip.
     c["column"] = args.column
-    if args.column == "super-urgent":   # #104 — ensure the urgent column exists (fly/reconcile target)
-        _ensure_super_urgent_col(d)
     if args.column == "done":
         c["doneAt"] = c.get("doneAt") or ts
         if "bug" in (c.get("tags") or []):
@@ -1416,8 +1408,7 @@ def cmd_list(args, d, board):
 # `list` stays the human-readable text view; `query` is its JSON sibling so an
 # agent pulls exactly the columns it needs without paying for notes/writeups.
 
-_DIGEST_ORDER = ["super-urgent", "ideas", "task",
-                 "backlog", "inprogress", "blocked", "done"]
+_DIGEST_ORDER = ["backlog", "task", "inprogress", "done"]
 
 
 def _ago(iso: str | None) -> str:

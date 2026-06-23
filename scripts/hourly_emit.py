@@ -128,8 +128,7 @@ def _card_add(card_py: Path, board: Path, card: dict) -> int | None:
     if code and title.lower().startswith(code.lower()):
         title = title[len(code):].lstrip(" :—-").strip() or title
     column = card.get("column") or "task"
-    if column not in ("task", "backlog", "inprogress", "done",
-                      "super-urgent", "notes"):
+    if column not in ("task", "backlog", "inprogress", "done"):  # #14 — 4 fixed lanes
         column = "task"
     priority = card.get("priority") or "mid"
     if priority not in ("low", "mid", "critical"):
