@@ -622,15 +622,6 @@ def reconcile_sweep(card_py: Path, board: Path, events: list[dict],
 
 
 
-# Work-type tags that mark a 'discovered' card as REAL engineering work to keep.
-# Anything bootstrap-minted WITHOUT one of these is low-signal chatter.
-_KEEP_TAGS = frozenset({"bug", "feature", "refactor", "enhancement"})
-
-# Per-card glide pace for the first-run declutter sweep (ms). Deliberately fast:
-# the sweep can move 100+ cards, so a slow pace makes the board crawl. This is a
-# feature-specific pace, NOT the simulation glide knob the no-override rule guards.
-_DECLUTTER_PACE_MS = 45
-
 # Per-card glide pace for LLM reconcile moves (ms). Matches the bootstrap
 # 'speedup' tier (base 300ms ÷ 5) so a recon pass blasts through stale cards
 # instead of crawling; the task→IP→done hop stays visible via the 0.35s IP dwell
@@ -639,114 +630,10 @@ _DECLUTTER_PACE_MS = 45
 _RECONCILE_PACE_MS = 60
 
 
-def declutter_sweep(card_py: Path, board: Path, today: str | None = None) -> int:
-    """#630 — DETERMINISTIC first-run declutter (NO LLM, NO subprocess-per-card).
-
-    A fresh bootstrap can mint 100+ cards, most of them low-value 'discovered'
-    chatter (assessments, explorations, notes-to-self) that overwhelm a brand-new
-    user. Move that noise to Discarded under a dated, reversible header so the
-    board lands calm.
-
-    RULE (deterministic) — a card is swept iff ALL hold:
-      • 'discovered' in tags  — only bootstrap mints this; a user's hand-made
-        card (via `card.py add`) is never tagged 'discovered', so it's immune.
-      • none of {bug,feature,refactor,enhancement} in tags — no real work-type.
-      • column not in {done, discarded} — never touch shipped/already-discarded.
-    Sweeps EVERY other non-Done column (task/backlog/inprogress/notes/…). Inserts
-    one '🧹 First-run sweep · <date>' header card at the top of Discarded.
-    (#50 — the '· N items' count was dropped: it confused users who suspected
-    the divider was counting itself, and the count adds no value on a divider
-    whose swept cards sit immediately below it.) Returns the number of cards
-    swept (0 if none / on any error).
-
-    GATE: the ONLY caller is the bootstrap end-of-replay block (hourly_extractor),
-    which invokes this exactly ONCE while the replay gate is still closed — NOT on
-    the recurring SessionStart recon. Combined with the 'discovered' key above,
-    that's belt-and-braces: a user's later untagged card is never swept.
-
-    Flies the cards in ONE AT A TIME via card.py (paced glide through the server
-    SSE), not a single batch write — a batch made all N cards teleport into
-    Discarded at once and looked messy; a paced fly matches the rest of the board.
-    """
-    try:
-        d = card_state.load(board)
-    except Exception:
-        return 0
-
-    cards = d.get("cards", [])
-    victims = [
-        c for c in cards
-        if c.get("column") not in (None, "done", "discarded")
-        and "discovered" in (c.get("tags") or [])
-        and not (_KEEP_TAGS & set(c.get("tags") or []))
-        and "banner" not in (c.get("tags") or [])
-        and "section-header" not in (c.get("tags") or [])
-    ]
-    if not victims:
-        return 0
-
-    date_str = today or card_state.now_iso()[:10]  # YYYY-MM-DD
-    py = sys.executable
-
-    # #156 — drive the (still-open) reconcile HUD so it shows declutter activity
-    # instead of lingering on the reconcile line. done<total keeps it in-progress;
-    # the bootstrap caller emits the single combined final once this returns.
-    _emit_progress(card_py, board, 0, 1,
-                   f"tidying {len(victims)} low-signal card(s)…", "reconcile")
-
-    # 1) Dated, reversible header FIRST, so the swept cards glide in beneath it.
-    #    board.html renders a 'section-header' card as a divider. --force: the tag
-    #    isn't in the board's taxonomy; --no-auto-urgent: title carries no urgency.
-    try:
-        subprocess.run(
-            [py, str(card_py), "--board", str(board), "add",
-             "--title", f"🧹 First-run sweep · {date_str}",
-             "--column", "discarded", "--tag", "section-header",
-             "--force", "--no-auto-urgent",
-             "--origin", "Auto: first-run declutter (#630) — low-signal "
-                         "'discovered' cards with no work-type tag. Drag any "
-                         "card back out to restore it."],
-            capture_output=True, text=True, timeout=10)
-    except subprocess.SubprocessError:
-        pass  # header is cosmetic — proceed with the sweep regardless
-
-    # 2) Glide each victim into Discarded one at a time at a DELIBERATE fast pace.
-    #    Declutter can move 100+ cards, so the default 400ms glide + a 250ms dwell
-    #    made the sweep crawl (~0.65s/card). The user set declutter to _DECLUTTER_
-    #    PACE_MS (45ms) — a deliberate per-feature pace (not a per-session override
-    #    of the simulation knob): pass it as --pause-ms so the single fly call owns
-    #    the cadence, and drop the separate loop sleep so the total really is 45ms.
-    swept = 0
-    for c in victims:
-        num = c.get("num")
-        if not isinstance(num, int):
-            continue
-        try:
-            out = subprocess.run(
-                [py, str(card_py), "--board", str(board), "fly", str(num),
-                 "discarded", "--via", "declutter",
-                 "--pause-ms", str(_DECLUTTER_PACE_MS)],
-                capture_output=True, text=True, timeout=10)
-        except subprocess.SubprocessError as e:
-            print(f"  declutter: SKIP #{num} — fly errored ({e})", file=sys.stderr)
-            continue
-        if out.returncode == 0:
-            swept += 1
-        else:
-            err = (out.stderr or out.stdout or "").strip().replace("\n", " ")[:80]
-            print(f"  declutter: SKIP #{num} → discarded (rc={out.returncode}: {err})",
-                  file=sys.stderr)
-
-    print(f"  declutter: swept {swept} low-signal card(s) → Discarded "
-          f"under '{date_str}' header", file=sys.stderr)
-    return swept
-
-
 __all__ = [
     "_RECON_PROMPT", "_build_recon_card_block", "_build_activity_digest",
     "_build_done_block", "_resolve_commit_files", "_find_repo_root",
     "_safe_basenames",
     "_llm_reconcile", "_emit_recon_pending",
     "_emit_extraction_pending", "reconcile_sweep",
-    "declutter_sweep",
 ]

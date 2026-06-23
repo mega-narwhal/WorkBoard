@@ -1080,27 +1080,19 @@ def run(project: Path, board: Path, port: int, days: int,
                 events = _flatten_events(project, off + days, sources=sources)
                 events = _filter_events(events, project, date_filter, off) or []
                 if events:
-                    # #156 — final_hud=False: reconcile must NOT complete the HUD,
-                    # because declutter still runs after it. The single combined
-                    # final is emitted below, once declutter is done.
+                    # final_hud=False: the one final HUD update is emitted below
+                    # (single place keeps the count consistent across the block).
                     n_moved = reconcile_sweep(card_py, board, events,
                                               final_hud=False)
                     print(f"✓ end-of-replay reconcile: moved {n_moved} card(s)",
                           file=sys.stderr)
-            # #630 — deterministic first-run declutter, AFTER reconcile (which may
-            # have promoted some discovered cards to done/backlog) and while the
-            # replay gate is STILL CLOSED — so a SessionStart recon firing in this
-            # window stands down rather than racing our batch write. Runs exactly
-            # once per bootstrap (this block is gated to fire once); NEVER on the
-            # recurring SessionStart path. Independent of `reconcile`.
-            n_swept = declutter_sweep(card_py, board)
-            if n_swept:
-                print(f"✓ first-run declutter: swept {n_swept} low-signal card(s)",
-                      file=sys.stderr)
-            # #156 — finalize the HUD ONCE, AFTER declutter, with the COMBINED tally
-            # (reconcile moved + declutter swept) so it never vanishes mid-sweep and
-            # the count reflects both phases. Skip when a partial failure will render
-            # its own degraded final below (avoid a double-complete).
+            # #19 — first-run declutter removed: the board is a fixed 4-lane kanban
+            # with no Discarded column, so there is no graveyard to sweep noise into.
+            # Bootstrap cards now stay in their lanes.
+            n_swept = 0
+            # #156 — finalize the HUD ONCE with the reconcile tally so it never
+            # vanishes mid-sweep. Skip when a partial failure will render its own
+            # degraded final below (avoid a double-complete).
             if not failed_buckets and (reconcile or n_swept):
                 total = n_moved + n_swept
                 _emit_progress(card_py, board, 1, 1,
