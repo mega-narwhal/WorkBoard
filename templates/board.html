@@ -4950,16 +4950,19 @@ function renderCalendar() {
 
   const dowRow = document.createElement('div');
   dowRow.className = 'cal-dow';
-  ['SUN','MON','TUE','WED','THU','FRI','SAT'].forEach((d, i) => {
+  // Monday-first week (matches the Week view). Weekend = Sat (5) + Sun (6).
+  ['MON','TUE','WED','THU','FRI','SAT','SUN'].forEach((d, i) => {
     const c = document.createElement('div');
-    c.className = 'dow' + (i === 0 || i === 6 ? ' weekend' : '');
+    c.className = 'dow' + (i === 5 || i === 6 ? ' weekend' : '');
     c.textContent = d;
     dowRow.appendChild(c);
   });
   grid.appendChild(dowRow);
 
+  // Leading blank cells before the 1st = days from the preceding Monday.
+  const monLead = (monthStart.getDay() + 6) % 7;   // 0=Mon … 6=Sun
   const gridStart = new Date(monthStart);
-  gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+  gridStart.setDate(gridStart.getDate() - monLead);
 
   const weeksEl = document.createElement('div');
   weeksEl.className = 'cal-weeks';
@@ -4967,7 +4970,7 @@ function renderCalendar() {
   // Adaptive: only show as many weeks as needed (5 instead of always 6
   // when the month fits cleanly — kills one row of "muted" overflow).
   const lastOfMonth = new Date(monthYear, monthMonth + 1, 0);
-  const totalCells  = lastOfMonth.getDate() + monthStart.getDay();
+  const totalCells  = lastOfMonth.getDate() + monLead;
   const weekCount   = Math.ceil(totalCells / 7);
 
   for (let w = 0; w < weekCount; w++) {
