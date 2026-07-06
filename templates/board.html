@@ -3852,6 +3852,30 @@ function renderModal(card) {
   origin.addEventListener('input', () => { card.origin = origin.value; scheduleSave(); });
   modal.appendChild(origin);
 
+  // Write-up (how it was done) — sits second, right after Origin (the why),
+  // so the why → how pair reads together at the top of the card.
+  const wuLabel = document.createElement('div');
+  wuLabel.className = 'modal-section-label';
+  wuLabel.textContent = card.column === 'done' ? '✓ Write-up (how it was done)' : 'Write-up (filled when done)';
+  modal.appendChild(wuLabel);
+
+  const wu = document.createElement('textarea');
+  wu.className = 'writeup-modal';
+  wu.value = card.writeup || '';
+  wu.placeholder = card.column === 'done'
+    ? 'Claude writes this when moving the card to Done…'
+    : '(Claude will fill this when this card is marked done)';
+  wu.addEventListener('input', () => { card.writeup = wu.value; scheduleSave(); });
+  armUndoOnFocus(wu);
+  modal.appendChild(wu);
+
+  if (card.column === 'done' && !(card.writeup || '').trim()) {
+    const flag = document.createElement('div');
+    flag.className = 'writeup-missing-flag';
+    flag.textContent = '⚠ Done card missing write-up';
+    modal.appendChild(flag);
+  }
+
   // Tags editor
   const tagsLabel = document.createElement('div');
   tagsLabel.className = 'modal-section-label';
@@ -4030,29 +4054,6 @@ function renderModal(card) {
   notes.addEventListener('input', () => { card.notes = notes.value; scheduleSave(); });
   armUndoOnFocus(notes);
   modal.appendChild(notes);
-
-  // Write-up
-  const wuLabel = document.createElement('div');
-  wuLabel.className = 'modal-section-label';
-  wuLabel.textContent = card.column === 'done' ? '✓ Write-up (how it was done)' : 'Write-up (filled when done)';
-  modal.appendChild(wuLabel);
-
-  const wu = document.createElement('textarea');
-  wu.className = 'writeup-modal';
-  wu.value = card.writeup || '';
-  wu.placeholder = card.column === 'done'
-    ? 'Claude writes this when moving the card to Done…'
-    : '(Claude will fill this when this card is marked done)';
-  wu.addEventListener('input', () => { card.writeup = wu.value; scheduleSave(); });
-  armUndoOnFocus(wu);
-  modal.appendChild(wu);
-
-  if (card.column === 'done' && !(card.writeup || '').trim()) {
-    const flag = document.createElement('div');
-    flag.className = 'writeup-missing-flag';
-    flag.textContent = '⚠ Done card missing write-up';
-    modal.appendChild(flag);
-  }
 
   // Foot
   const foot = document.createElement('div');
