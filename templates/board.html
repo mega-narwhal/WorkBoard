@@ -1352,6 +1352,37 @@
     font-size: 12px; color: var(--muted); font-style: italic; padding: 4px 0;
   }
 
+  /* ===== Week view — a per-week log of what shipped ===== */
+  #week {
+    display: none;
+    height: calc(100% - 48px);
+    padding: 20px 28px 24px;
+    background: var(--bg);
+    color: var(--ink);
+    flex-direction: column;
+    overflow: hidden;
+    gap: 14px;
+  }
+  /* Center both header and list in one readable column so the week log
+     reads like a document, not an edge-to-edge board. The 8px side padding
+     gives the cards' hover nudge (translateX) room so their right edge/border
+     isn't clipped by the scroll container's overflow. */
+  .week-topbar { max-width: 820px; width: 100%; margin: 0 auto; padding: 0 8px; }
+  .week-body {
+    overflow-y: auto; flex: 1;
+    scroll-behavior: smooth;
+    max-width: 820px; width: 100%; margin: 0 auto; padding: 0 8px;
+  }
+  .week-empty {
+    color: var(--muted); font-style: italic; font-size: 14px;
+    text-align: center; padding: 64px 0;
+  }
+  /* Week cards: title only, a touch larger and calmer than the modal rows. */
+  .week-card { padding: 15px 18px; }
+  .week-card .wk-title {
+    font-size: 16px; font-weight: 600; color: var(--ink); line-height: 1.4;
+  }
+
   textarea.origin-modal {
     width: 100%; resize: vertical; min-height: 64px;
     border: 1px solid var(--card-border);
@@ -1582,6 +1613,7 @@
   <button id="tags-btn" class="header-pill" style="display:none" title="Show all tags used on this board">🏷 Tags <span id="tags-count">0</span></button>
   <span class="view-toggle" id="view-toggle" style="display:none">
     <button data-view="board" class="active">Board</button>
+    <button data-view="week">Week</button>
     <button data-view="calendar">Calendar</button>
   </span>
 </header>
@@ -1598,6 +1630,7 @@
 
 <div id="board" style="display:none"></div>
 <div id="calendar"></div>
+<div id="week"></div>
 
 <div class="modal-overlay" id="modal-overlay"></div>
 
@@ -4260,17 +4293,19 @@ function wireBoardTitle() {
   });
 }
 
-// ===== View switcher (Board / Calendar) =====
+// ===== View switcher (Board / Week / Calendar) =====
 let _view = 'board';
-let _calCursor = null; // first day of currently displayed month
+let _calCursor = null;  // first day of currently displayed month
+let _weekCursor = null; // Monday 00:00 of currently displayed week
 function setView(v) {
   _view = v;
   $('#board').style.display    = (v === 'board')    ? 'flex' : 'none';
+  $('#week').style.display     = (v === 'week')     ? 'flex' : 'none';
   $('#calendar').style.display = (v === 'calendar') ? 'flex' : 'none';
   document.querySelectorAll('#view-toggle button').forEach(b => {
     b.classList.toggle('active', b.dataset.view === v);
   });
-  // #236 — column controls only meaningful in Board view. Don't tease them on Calendar.
+  // #236 — column controls only meaningful in Board view. Don't tease them elsewhere.
   const colsPill = $('#cols-pill');
   if (colsPill) colsPill.style.display = (v === 'board' && state) ? '' : 'none';
   render();
@@ -4328,6 +4363,8 @@ function render() {
       return renderColumn(col, cards);
     });
     // #18 — fixed lane set: no "+ Add column" affordance.
+  } else if (_view === 'week') {
+    renderWeek();
   } else if (_view === 'calendar') {
     renderCalendar();
   }
@@ -4759,7 +4796,10 @@ function _calEnsureArchive(keys) {
       .then(r => (r.ok ? r.json() : { cards: [] }))
       .then(o => { _calArchive[key] = (o.cards || []).map(c => ({ ...c, _archived: true })); })
       .catch(() => { _calArchive[key] = []; })
-      .finally(() => { _calArchiveFetching.delete(key); renderCalendar(); });
+      // Re-render via the view dispatcher, not renderCalendar() directly, so the
+      // Week view (which shares this archive cache) also repaints when its
+      // month(s) land — not only the Calendar.
+      .finally(() => { _calArchiveFetching.delete(key); render(); });
   });
 }
 function _calCards() {
@@ -5028,6 +5068,159 @@ function renderCalendar() {
   cal.appendChild(grid);
   // #242 — restore scroll after the new .cal-weeks is in the DOM.
   _restoreCalScroll();
+}
+
+// ===== Week view — "what did I ship this week" =====
+// A per-week log: header with ‹ prev / This week / next › selectors, and below,
+// every Done card whose doneAt lands in that week, grouped by day (most-recent
+// day first). Shares the calendar's active+archive merged card list, so older
+// weeks stay populated after Done cards are archived out of board.json.
+let _weekScrollY = 0;
+function _captureWeekScroll() {
+  const w = document.querySelector('#week .week-body');
+  if (w) _weekScrollY = w.scrollTop;
+}
+function _restoreWeekScroll() {
+  const w = document.querySelector('#week .week-body');
+  if (w && _weekScrollY) w.scrollTop = _weekScrollY;
+}
+
+// Monday 00:00 (local) of the week containing d. Weeks are Mon–Sun (ISO/RU).
+function _weekStartOf(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = (x.getDay() + 6) % 7;   // 0=Mon … 6=Sun
+  x.setDate(x.getDate() - dow);
+  return x;
+}
+
+// Week-list row: title only (bigger), keeping the done/priority left-border
+// color and click-to-open. Detail/num/code intentionally omitted — the week
+// log is a scannable "what shipped", full context is one click away.
+function _makeWeekCard(card) {
+  const row = document.createElement('div');
+  row.className = 'cal-day-modal-card week-card';
+  if (card.column === 'done') row.classList.add('done');
+  else if (card.priority) row.classList.add('prio-' + card.priority);
+  if (card._archived) row.classList.add('archived');
+  const title = document.createElement('div');
+  title.className = 'wk-title';
+  title.textContent = card.title || '';
+  row.appendChild(title);
+  row.onclick = () => { card._archived ? openArchivedCard(card) : openModal(card.id); };
+  return row;
+}
+
+function renderWeek() {
+  const root = $('#week');
+  _captureWeekScroll();
+  root.innerHTML = '';
+
+  if (!_weekCursor) _weekCursor = _weekStartOf(new Date());
+  const weekStart = new Date(_weekCursor);          // Mon 00:00
+  const weekEnd   = new Date(weekStart);            // exclusive upper bound
+  weekEnd.setDate(weekStart.getDate() + 7);         // next Mon 00:00
+  const lastDay   = new Date(weekStart);
+  lastDay.setDate(weekStart.getDate() + 6);         // Sun (inclusive, label only)
+  const isThisWeek = weekStart.getTime() === _weekStartOf(new Date()).getTime();
+
+  // Fetch archive for every calendar month this week touches (≤2), so weeks
+  // whose Done cards were archived out of board.json still list them.
+  const monthKeys = new Set();
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+    monthKeys.add(_calMonthKey(d));
+  }
+  _calEnsureArchive([...monthKeys]);
+
+  // ----- Topbar: range title + ‹ This week › nav + shipped count -----
+  const topbar = document.createElement('div');
+  topbar.className = 'cal-topbar week-topbar';
+
+  const title = document.createElement('h2');
+  const optS = { month: 'short', day: 'numeric' };
+  const startTxt = weekStart.toLocaleDateString(undefined, optS);
+  const endTxt   = lastDay.toLocaleDateString(undefined, optS);
+  const yearTxt  = weekStart.getFullYear() === lastDay.getFullYear()
+    ? lastDay.getFullYear()
+    : weekStart.getFullYear() + '/' + lastDay.getFullYear();
+  title.textContent = `${startTxt} – ${endTxt}, ${yearTxt}`;
+  topbar.appendChild(title);
+
+  const nav = document.createElement('div');
+  nav.className = 'cal-nav';
+  const mkNav = (label, cls, onclick) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = onclick;
+    return b;
+  };
+  const jump = (deltaDays) => {
+    const c = new Date(weekStart); c.setDate(weekStart.getDate() + deltaDays);
+    _weekCursor = c; _weekScrollY = 0; renderWeek();
+  };
+  nav.appendChild(mkNav('‹', '', () => jump(-7)));
+  nav.appendChild(mkNav('This week', 'cal-today-btn', () => {
+    _weekCursor = _weekStartOf(new Date()); _weekScrollY = 0; renderWeek();
+  }));
+  nav.appendChild(mkNav('›', '', () => jump(7)));
+  topbar.appendChild(nav);
+
+  // ----- Collect Done cards landing in this week, earliest first -----
+  const done = _calCards().filter(c => {
+    if (c.column !== 'done' || !c.doneAt) return false;
+    const t = new Date(c.doneAt);
+    return !isNaN(t) && t >= weekStart && t < weekEnd;
+  }).sort((a, b) => new Date(a.doneAt) - new Date(b.doneAt));
+
+  const count = document.createElement('div');
+  count.className = 'cal-summary';
+  const stat = document.createElement('span');
+  stat.className = 'stat passive';
+  stat.innerHTML = `<span class="stat-num">${done.length}</span> shipped`;
+  count.appendChild(stat);
+  topbar.appendChild(count);
+  root.appendChild(topbar);
+
+  // ----- Body: cards grouped by day, chronological (Mon → Sun) -----
+  const body = document.createElement('div');
+  body.className = 'week-body';
+
+  if (!done.length) {
+    const empty = document.createElement('div');
+    empty.className = 'week-empty';
+    empty.textContent = isThisWeek
+      ? 'Nothing shipped yet this week.'
+      : 'Nothing shipped this week.';
+    body.appendChild(empty);
+  } else {
+    const byDay = new Map();
+    done.forEach(c => {
+      const ds = localYmd(c.doneAt);
+      if (!byDay.has(ds)) byDay.set(ds, []);
+      byDay.get(ds).push(c);
+    });
+    const days = [...byDay.keys()].sort();   // chronological, earliest day first
+    days.forEach(ds => {
+      const cards = byDay.get(ds);
+      const sec = document.createElement('div');
+      sec.className = 'cal-day-modal-section';
+      const head = document.createElement('div');
+      head.className = 'sec-head';
+      const label = document.createElement('span');
+      label.textContent = _humanDay(ds);
+      head.appendChild(label);
+      const n = document.createElement('span');
+      n.textContent = cards.length + ' card' + (cards.length === 1 ? '' : 's');
+      head.appendChild(n);
+      sec.appendChild(head);
+      cards.forEach(c => sec.appendChild(_makeWeekCard(c)));
+      body.appendChild(sec);
+    });
+  }
+
+  root.appendChild(body);
+  _restoreWeekScroll();
 }
 
 // One chip per card on its event-day. Done = green, otherwise priority color.
@@ -5868,11 +6061,12 @@ function handleSessionDivider({ label } = {}) {
 // via rAF so a burst (e.g. a bootstrap fill) collapses to one re-render/frame.
 let _calRenderPending = false;
 function _refreshCalendarSoon() {
-  if (_view !== 'calendar' || _calRenderPending) return;
+  // Keeps both non-board views (Calendar and Week) live on remote card events.
+  if ((_view !== 'calendar' && _view !== 'week') || _calRenderPending) return;
   _calRenderPending = true;
   requestAnimationFrame(() => {
     _calRenderPending = false;
-    if (_view === 'calendar') render();
+    if (_view === 'calendar' || _view === 'week') render();
   });
 }
 
