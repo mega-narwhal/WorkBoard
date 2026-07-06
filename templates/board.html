@@ -1453,7 +1453,9 @@
     outline: none; line-height: 1.45;
   }
   textarea.notes-modal:focus, textarea.writeup-modal:focus { border-color: var(--accent); }
-  textarea.writeup-modal { background: rgba(54,179,126,.06); }
+  /* Write-up is usually a multi-paragraph "how it was done" — give it ~2x the
+     default height of Notes so it's readable without dragging the resize grip. */
+  textarea.writeup-modal { background: rgba(54,179,126,.06); min-height: 160px; }
   .writeup-missing-flag { font-size: 11px; color: var(--red); margin-top: 4px; }
 
   .modal-foot {
