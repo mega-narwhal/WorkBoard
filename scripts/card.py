@@ -491,12 +491,46 @@ def cmd_board_new(args):
         except (OSError, TypeError, ValueError):
             return False
 
+    def _serving_port():
+        # #836 — defense in depth against opening a DUPLICATE server: if the
+        # registry lookup missed (pruned/corrupt row) but a server is in fact
+        # already serving THIS board on some port, find it by probing each known
+        # port's /health and matching its "board" field. Spawning a 2nd serve.py
+        # would bind a 2nd port → the host:port dedupe can't catch it → duplicate
+        # window. /health returns "board": str(board_dir) (serve.py:607).
+        import json as _json, urllib.request as _u
+        cands = set()
+        try:
+            import port_registry as pr
+            for v in pr.read().values():
+                if isinstance(v, dict) and v.get("port"):
+                    cands.add(int(v["port"]))
+            for p in pr.assignments().values():
+                cands.add(int(p))
+        except Exception:
+            pass
+        for p in cands:
+            if not _alive(p):
+                continue
+            try:
+                with _u.urlopen(f"http://127.0.0.1:{p}/health", timeout=0.5) as r:
+                    hb = _json.loads(r.read().decode()).get("board", "")
+                if hb and Path(hb).resolve() == board_dir:
+                    return p
+            except Exception:
+                continue
+        return None
+
     def _hint():
         print(f"   board file: {board_dir}/board.json")
         print(f"   add cards:  card.py --board {board_dir}/board.json add --title \"...\"")
 
     exists = (board_dir / "board.json").exists()
     known = _known_port()
+    # #836 — only scan for a live server when the board ALREADY exists; a
+    # brand-new board can't be served yet, so skip the needless /health probes.
+    if exists and not _alive(known):
+        known = _serving_port()   # registry miss but a server is up? find it.
     if exists and _alive(known):
         print(f"board '{name}' is already running → http://127.0.0.1:{known}")
         _hint()
