@@ -284,6 +284,45 @@ def _spawn_board(board_dir, port: int) -> bool:
     return False
 
 
+_LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
+_sibling_cache: dict = {"key": None, "ports": frozenset()}
+
+
+def _sibling_board_ports() -> frozenset:
+    """Ports of every REGISTERED board (port_registry assignments). A page served
+    by one of them may talk to this server cross-port — the #846 in-place project
+    switch. Cached on the assignments file's mtime, so a request costs one stat()."""
+    try:
+        import port_registry as _pr
+        p = _pr.assignments_path()
+        key = (str(p), p.stat().st_mtime_ns if p.exists() else None)
+        if _sibling_cache["key"] != key:
+            ports = set()
+            for v in _pr.assignments().values():
+                try:
+                    ports.add(int(v))
+                except (TypeError, ValueError):
+                    continue   # one bad row must not hide the others
+            _sibling_cache.update(key=key, ports=frozenset(ports))
+        return _sibling_cache["ports"]
+    except Exception:
+        return frozenset()
+
+
+def _is_sibling_board_origin(origin: str) -> bool:
+    """True iff `origin` is a loopback http(s) origin whose port belongs to a
+    registered board. A foreign site, or any other local port (a dev server, say),
+    is not a sibling board."""
+    try:
+        o = urllib.parse.urlsplit(origin)
+        port = o.port
+    except ValueError:
+        return False
+    return (o.scheme in ("http", "https")
+            and (o.hostname or "").lower() in _LOOPBACK_NAMES
+            and port is not None and port in _sibling_board_ports())
+
+
 class BoardHandler(BaseHTTPRequestHandler):
     board_dir: Path = None  # set by main()
     auth_token: str | None = None  # set by main() — #116 LAN-AUTH; None = open
@@ -347,6 +386,9 @@ class BoardHandler(BaseHTTPRequestHandler):
             is present its host:port must equal `Host`. The board page and a LAN
             phone are same-origin (Origin == Host); card.py and the hooks use
             urllib and send NO Origin at all, so they're unaffected.
+          - sibling board — the one cross-origin exception: a loopback Origin whose
+            port is a registered board's (#846 in-place switch writes to the active
+            board from the home board's page). Any other local port stays blocked.
           - loopback Host — when bound to loopback (the default), `Host` must name a
             loopback authority, so a rebound attacker domain (Host: evil.example
             resolved to 127.0.0.1, which would pass the same-origin test) is still
@@ -358,9 +400,12 @@ class BoardHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if origin:
             try:
-                if urllib.parse.urlsplit(origin).netloc.lower() != host.lower():
-                    return False
+                same = urllib.parse.urlsplit(origin).netloc.lower() == host.lower()
             except ValueError:
+                return False
+            # #846 — a sibling board's page (the in-place project switch) writes
+            # cross-port. Only a REGISTERED board's loopback origin passes.
+            if not same and not _is_sibling_board_origin(origin):
                 return False
         bind = (type(self).bind_host or "").strip("[]").lower()
         if bind in ("", "127.0.0.1", "localhost", "::1"):
@@ -379,14 +424,12 @@ class BoardHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _cors_origin(origin: str) -> str:
-        """#846 — reflect a LOCAL board origin (127.0.0.1/localhost:<port>) so a
-        board page on one port can read a sibling board on another for the in-place
-        switch (no page reload → no flicker). Any non-local origin → "null" (the
-        previous locked behaviour). Localhost-only, so this widens reads to other
-        local board servers and nothing else."""
-        if origin and re.match(r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$", origin):
-            return origin
-        return "null"
+        """#846 — reflect a SIBLING BOARD origin so a board page on one port can read
+        another board for the in-place switch (no reload, no flicker). Narrower than
+        upstream, which reflects any 127.0.0.1/localhost port: only a loopback origin
+        whose port is a REGISTERED board's is reflected, so an unrelated local page
+        (a dev server) still can't read the board. Anything else → "null"."""
+        return origin if origin and _is_sibling_board_origin(origin) else "null"
 
     def _send(self, status: int, body: bytes, ctype: str = "application/json", extra: dict | None = None):
         self.send_response(status)

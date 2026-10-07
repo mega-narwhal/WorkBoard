@@ -9,9 +9,24 @@ The handler is built WITHOUT __init__ (object.__new__) and given a plain-dict
 .headers (HTTPMessage.get is dict-like for our purposes). bind_host / auth_token
 are CLASS attributes on BoardHandler, so each test resets them via the fixture.
 """
+import json
+
 import pytest
 
+import port_registry
 import serve
+
+# The real registry reader, kept before the autouse fixture below replaces it, so
+# test_sibling_ports_come_from_the_registry can exercise it against a tmp file.
+_REAL_SIBLING_PORTS = serve._sibling_board_ports
+SIBLINGS = frozenset({7891, 7892})   # the "registered boards" every test sees
+
+
+@pytest.fixture(autouse=True)
+def fixed_sibling_boards(monkeypatch):
+    """Hermetic: never read the real ~/.board-steward registry. Every test sees
+    exactly two registered boards, on 7891 and 7892."""
+    monkeypatch.setattr(serve, "_sibling_board_ports", lambda: SIBLINGS)
 
 
 @pytest.fixture(autouse=True)
@@ -107,3 +122,55 @@ def test_csrf_blocks_malformed_origin():
     # An Origin that urlsplit can't parse (raises ValueError) is rejected.
     # "http://[" raises "Invalid IPv6 URL" -> the except ValueError branch -> False.
     assert csrf_ok({"Host": "127.0.0.1:7891", "Origin": "http://["}) is False
+
+
+# ---------------------------------------------------------------------------
+# #846 — sibling boards (in-place project switch) may write cross-port
+# ---------------------------------------------------------------------------
+
+def test_csrf_allows_registered_sibling_board_origin():
+    # The home board's page (7891) saving to the swapped-in board (7892).
+    assert csrf_ok({"Host": "127.0.0.1:7892",
+                    "Origin": "http://127.0.0.1:7891"}) is True
+
+
+def test_csrf_allows_sibling_board_via_localhost_name():
+    assert csrf_ok({"Host": "127.0.0.1:7892",
+                    "Origin": "http://localhost:7891"}) is True
+
+
+def test_csrf_blocks_unregistered_local_port():
+    # Some other local page (a dev server on :3000) is NOT a sibling board.
+    assert csrf_ok({"Host": "127.0.0.1:7891",
+                    "Origin": "http://127.0.0.1:3000"}) is False
+
+
+def test_csrf_blocks_foreign_host_on_a_sibling_port():
+    # Matching a registered PORT is not enough; the origin must be loopback.
+    assert csrf_ok({"Host": "127.0.0.1:7892",
+                    "Origin": "http://evil.example:7891"}) is False
+
+
+def test_csrf_sibling_origin_still_rejects_rebound_host():
+    # A sibling Origin does not bypass the DNS-rebinding Host check.
+    assert csrf_ok({"Host": "evil.example:7892",
+                    "Origin": "http://127.0.0.1:7891"}) is False
+
+
+def test_cors_reflects_only_registered_sibling_boards():
+    cors = serve.BoardHandler._cors_origin
+    assert cors("http://127.0.0.1:7891") == "http://127.0.0.1:7891"
+    assert cors("http://localhost:7892") == "http://localhost:7892"
+    assert cors("http://127.0.0.1:3000") == "null"      # unregistered local port
+    assert cors("http://127.0.0.1") == "null"           # no port
+    assert cors("https://evil.example") == "null"
+    assert cors("") == "null"
+
+
+def test_sibling_ports_come_from_the_registry(tmp_path, monkeypatch):
+    reg = tmp_path / "port-assignments.json"
+    reg.write_text(json.dumps({"/a/board": 7893, "/b/board": "7894",
+                               "/c/board": "not-a-port"}))
+    monkeypatch.setenv(port_registry.ASSIGN_ENV, str(reg))
+    monkeypatch.setattr(serve, "_sibling_cache", {"key": None, "ports": frozenset()})
+    assert _REAL_SIBLING_PORTS() == {7893, 7894}   # bad row skipped, not fatal

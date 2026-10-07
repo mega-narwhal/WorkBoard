@@ -2071,7 +2071,7 @@ function startLogsClock() {
 
 async function refreshLogsCommit() {
   try {
-    const r = await fetch('/health');
+    const r = await fetch(apiBase + '/health');   // #846 — the board on screen
     if (!r.ok) return;
     const j = await r.json();
     _logsCommitMeta = { sha: j.commit || '', msg: j.commitMsg || '' };
@@ -4371,8 +4371,13 @@ async function activateBoard(port) {
   // exactly like a first load.
   _prevSnapshot = new Map();
   _flashIds = new Set();
+  // Calendar/Week merge archived Done cards per month; those months belong to the
+  // board we're leaving, so drop them and let the new board's load on demand.
+  _calArchive = {};
+  _calArchiveFetching = new Set();
   setStatus('switching…', 'unsynced');
   await loadFromFile();        // GET apiBase + /board.json → render the new board
+  refreshLogsCommit();         // the commit badge belongs to the new board's project
   startSSE();                  // reconnect the live stream to apiBase + /events
   loadProjectTabs();           // recompute the active-tab highlight from activePort
   try {
@@ -4938,10 +4943,13 @@ function _calEnsureArchive(keys) {
   keys.forEach(key => {
     if (key in _calArchive || _calArchiveFetching.has(key)) return;
     _calArchiveFetching.add(key);
-    fetch('/archive/board-' + key + '.json', { cache: 'no-store' })
+    // #846 — archives belong to the ACTIVE board, so fetch via apiBase. A reply
+    // that lands after a project switch belongs to the board we left: drop it.
+    const base = apiBase;
+    fetch(base + '/archive/board-' + key + '.json', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : { cards: [] }))
-      .then(o => { _calArchive[key] = (o.cards || []).map(c => ({ ...c, _archived: true })); })
-      .catch(() => { _calArchive[key] = []; })
+      .then(o => { if (base === apiBase) _calArchive[key] = (o.cards || []).map(c => ({ ...c, _archived: true })); })
+      .catch(() => { if (base === apiBase) _calArchive[key] = []; })
       // Re-render via the view dispatcher, not renderCalendar() directly, so the
       // Week view (which shares this archive cache) also repaints when its
       // month(s) land — not only the Calendar.
