@@ -54,25 +54,34 @@ if [ -z "${board_path}" ]; then
   fi
 fi
 
-# ── First-run auto-bootstrap (#onboarding) ────────────────────────────────────
-# No board found by walk-up. On a FRESH plugin install (no global onboarded
-# marker yet) we bootstrap ONE board in the current project, so the very first
-# session after `claude plugin install` opens a live, self-filling board instead
-# of the silent "huh, now what?" dead-end. The /plugin path only wires hooks —
-# it never ran install.sh's bootstrap+autostart+open — so we do it here.
-# Fires AT MOST ONCE (the marker) and NEVER in $HOME / "/" (too broad — we'd
-# litter a board in a non-project dir). After that first board, additional boards
-# are explicit (serve.py --bootstrap, or just ask Claude). Opt out with
+# ── Per-project auto-bootstrap ───────────────────────────────────────────────
+# No board found by walk-up. If this session is in a real PROJECT (git top-level,
+# else CWD — but never $HOME, "/", or the bare Downloads/Desktop/Documents roots)
+# we bootstrap a board for THAT project, on its first session there. Every project
+# gets its own board: the old "first board only, then reuse the last-active one"
+# rule silently routed every board-less project to one shared board, so cards from
+# unrelated projects landed on it. Non-project dirs keep the home-screen behaviour
+# below (picker before the first board, last-active board after). Opt out with
 # BOARD_NO_AUTO_BOOTSTRAP=1 (CI/headless/demo).
 onboard_marker="${HOME}/.board-steward/.onboarded"
+proj_root=""
+is_project=0
 if [ -z "${board_path}" ]; then
   # Opted out → preserve the original silent exit (CI/headless/demo).
   if [ "${BOARD_NO_AUTO_BOOTSTRAP:-0}" = "1" ]; then
     exit 0
   fi
 
-  # Already onboarded but the CWD-walk + finder found no board (the usual
-  # "launched claude in $HOME" case). DON'T silently exit — that's the bug that
+  # Resolve the project root: git top-level if we're in a repo, else CWD.
+  proj_root="$(cd "${PWD}" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)"
+  [ -z "${proj_root}" ] && proj_root="${PWD}"
+  case "${proj_root}" in
+    "${HOME}"|"/"|"${HOME}/Downloads"|"${HOME}/Desktop"|"${HOME}/Documents") is_project=0 ;;
+    *) is_project=1 ;;
+  esac
+
+  # Already onboarded, not in a project (the usual "launched claude in $HOME"
+  # case), and the CWD-walk + finder found no board. DON'T silently exit — that's the bug that
   # let Claude freelance a generic greeting instead of opening the board. The
   # board IS the home screen: resolve the user's REGISTERED board from the sticky
   # port-assignments map and fall through to the shared block below, which probes
@@ -84,7 +93,7 @@ if [ -z "${board_path}" ]; then
   # mtime. mtime picked the wrong board when two boards were touched the same
   # session (#mb). Fall back to most-recently-updated board.json only when no
   # active pointer exists yet (e.g. first session after an upgrade).
-  if [ -f "${onboard_marker}" ]; then
+  if [ "${is_project}" != "1" ] && [ -f "${onboard_marker}" ]; then
     hook_dir="$(dirname "$0")"
     board_path="$(python3 -c "
 import sys; sys.path.insert(0, sys.argv[1])
@@ -113,10 +122,6 @@ fi
 
 if [ -z "${board_path}" ]; then
 
-  # Resolve the project root: git top-level if we're in a repo, else CWD.
-  proj_root="$(cd "${PWD}" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)"
-  [ -z "${proj_root}" ] && proj_root="${PWD}"
-
   # Launched from $HOME / "/" (the usual case — users start Claude in a terminal
   # at home, not inside a repo). We do NOT litter a board here. Instead we
   # ENUMERATE the projects the user actually worked in (from session history,
@@ -126,7 +131,7 @@ if [ -z "${board_path}" ]; then
   # check above exits before here once one does) — so it's never a one-shot miss
   # (the old .home-hint-shown gate is gone; that's what made the offer vanish on
   # the 2nd session). Opt out with BOARD_NO_AUTO_BOOTSTRAP=1.
-  if [ "${proj_root}" = "${HOME}" ] || [ "${proj_root}" = "/" ]; then
+  if [ "${is_project}" != "1" ]; then
     hook_dir="$(dirname "$0")"
     projects="$(BOARD_NO_AUTO_OPEN=1 python3 "${hook_dir}/discover2.py" \
                   --list-projects --top 5 --days 3 --format lines 2>/dev/null)"
@@ -207,10 +212,9 @@ HINT
     exit 0
   fi
 
-  # Bootstrap: spawn serve.py --bootstrap (creates board/ + mines history into a
-  # one-by-one fly-in fill), install login autostart so it survives reboots, and
-  # mark onboarded so this never re-fires. The browser auto-opens via the shared
-  # block below once /health reports the server live.
+  # Bootstrap: spawn serve.py --bootstrap (creates board/ + mines this project's
+  # history into a one-by-one fly-in fill) and mark onboarded. The browser is NOT
+  # opened — the new board is reachable from the project switcher or its URL.
   hook_dir="$(dirname "$0")"
   serve_py="${hook_dir}/serve.py"
   board_dir="${proj_root}/board"
@@ -227,9 +231,13 @@ HINT
       curl -s --max-time 0.3 "http://127.0.0.1:${want_port}/health" >/dev/null 2>&1 && break
       sleep 0.4
     done
-    # Survive reboots (the gap that killed the server today). Non-fatal.
-    python3 "${hook_dir}/install_autostart.py" --project "${proj_root}" --port "${want_port}" \
-      >/dev/null 2>&1 || true
+    # Survive reboots — for the FIRST board only. Later per-project boards are
+    # started on demand (by this hook on session start, or the switcher's
+    # /ensure-board), so they don't each get a permanent login job. Non-fatal.
+    if [ ! -f "${onboard_marker}" ]; then
+      python3 "${hook_dir}/install_autostart.py" --project "${proj_root}" --port "${want_port}" \
+        >/dev/null 2>&1 || true
+    fi
     # Hand off to the shared digest + auto-open path below.
     board_path="${board_dir}/board.json"
     # Don't ALSO run the SessionStart recon this turn: the bootstrap fill is
