@@ -283,28 +283,17 @@ if [ -z "${server_health}" ] && [ -f "${serve_py}" ]; then
 fi
 
 # Auto-open the board ONLY IF NO BROWSER IS CURRENTLY VIEWING IT (#377).
-# The signal the user asked for ("check if ANY WB is opened; if not, open; else
-# don't"): /health's sseClients = live browser connections. >0 → a tab is open,
-# DON'T pop another (kills the "new tab on every Claude" spam). 0 → nothing is
-# watching (no tab, or we just spawned the server) → open exactly one. To open an
-# additional / different project's board, the user just asks. board.html SSE
-# auto-reconnects, so a connected tab keeps sseClients>0 across server restarts.
-# Honours BOARD_NO_AUTO_OPEN=1 for headless/CI/cron.
-# #73 — open iff the board isn't already VISIBLE IN CHROME (a real tab), not the
-# stale sseClients proxy that wrongly counted a backgrounded/closed connection as
-# "open". Delegated to board_autoopen.sh (Chrome-tab check → sseClients fallback
-# → opens in Chrome; honours BOARD_NO_AUTO_OPEN).
+# No auto-open on session start: popping a board window at the start of every
+# session was disruptive, so opening the board is now always an explicit user
+# action (bookmark http://127.0.0.1:<port>). The server is still started/checked
+# above. Bootstrapping a NEW board still opens it once (bootstrap_project.sh),
+# since that is an explicit "create a board" action, not a routine session start.
 if [ -n "${server_health}" ]; then
-  # #836 — pass THIS session's id so the opened tab carries ?sid (top-pin). The
-  # id was parsed from stdin above; board_autoopen reads it from $3 (or the env
-  # var as fallback). Without this, hook-opened tabs were sid-less while agent-run
-  # board-new tabs had one → the "some have sid, some don't" inconsistency.
-  "$(dirname "$0")/board_autoopen.sh" "${server_port}" "${project_dir}" "${session_id}" >/dev/null 2>&1 || true
   # #505 — fire a one-shot 'session refresh' divider into the Logs HUD so a fresh
   # session is visually separated from the previous one's activity. Detached +
   # bounded so it never delays startup; waits (≤4s) for a connected SSE client
   # because the pulse isn't retained — a divider fired into an empty room is lost
-  # (board_autoopen may have JUST opened the tab, which connects asynchronously).
+  # (with no board tab open it just times out silently).
   # Skip during a bootstrap session: the fresh first-run board has no prior
   # activity to separate from, and the divider would just clutter the fly-in.
   if [ "${just_bootstrapped:-0}" != "1" ]; then
