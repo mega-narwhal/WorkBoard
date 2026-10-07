@@ -255,13 +255,27 @@ def _session_id():
     return port_registry.session_id()
 
 
+def _active_work_map(d: dict) -> dict:
+    """d['activeWork'] as a dict, normalizing a JSON null to {} in place (#868).
+
+    `d.setdefault("activeWork", {})` alone is not enough: setdefault only fills a
+    MISSING key, but a board.json can carry the key present with value null, and
+    the next `sid in aw` / `aw.values()` then crashed every mutating command.
+    """
+    aw = d.get("activeWork")
+    if aw is None:
+        aw = {}
+        d["activeWork"] = aw
+    return aw
+
+
 def _migrate_active_work(d, now_ms):
     """One-time lift of the legacy scalar activeWorkId into the per-session map
     under a synthetic '_legacy' key, then drop the scalar (back-compat for a
     board.json written before #608)."""
     legacy = d.pop("activeWorkId", None)
     if legacy:
-        aw = d.setdefault("activeWork", {})
+        aw = _active_work_map(d)
         if not any((e or {}).get("cardId") == legacy for e in aw.values()):
             aw["_legacy"] = {"cardId": legacy, "ts": now_ms}
 
@@ -296,7 +310,7 @@ def _set_active_work(d, card, old_col, new_col):
     sessions' pulses are untouched."""
     now_ms = _now_ms()
     _migrate_active_work(d, now_ms)
-    aw = d.setdefault("activeWork", {})
+    aw = _active_work_map(d)
     sid = _session_id()
     if new_col == "inprogress" and old_col != "inprogress":
         aw[sid] = {"cardId": card["id"], "ts": now_ms}
