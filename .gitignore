@@ -34,6 +34,7 @@ board/recon_pending.json
 # board server runtime log
 .board-server.log
 .board-recon.log
+.board-backfill.log
 
 # local plugin-reinstall backups (machine state, never ship)
 .reinstall-backups/
